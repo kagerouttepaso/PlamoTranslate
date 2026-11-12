@@ -5,11 +5,13 @@ import app.plamotranslate.llm.TranslationRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -219,6 +221,32 @@ class TranslationStreamTest {
         assertEquals(listOf("Hello", "Sounds good"), engine.requests.sorted())
         runBlocking { withTimeout(2_000) { while (stored.isEmpty()) kotlinx.coroutines.delay(10) } }
         assertEquals(mapOf("Hello" to "訳「Hello」"), stored)
+    }
+
+    @Test
+    fun 最後の確定の直後に閉じても訳を控えに残す() {
+        // 確定はエンジンが戻る前に流れるので、購読する側が最後の確定を受け取ってすぐ閉じると、閉じたあとに控えへ書く段が来る（画面翻訳）。
+        // 本物のエンジンは戻るときに取り消しを確かめ（ensureActive）、本物の控えは IO のスレッドへ移る（withContext）ので、どちらも取り消しで止まる
+        val stored = java.util.concurrent.ConcurrentHashMap<String, String>()
+        val memory = object : TranslationMemory {
+            override suspend fun lookup(texts: Collection<String>) = emptyMap<String, String>()
+            override suspend fun store(translations: Map<String, String>) = withContext(Dispatchers.IO) { stored.putAll(translations) }
+        }
+        val fake = FakeEngine(parallel = 1)
+        val engine = object : JobEngine {
+            override val parallel = 1
+            override suspend fun run(slots: Int, source: JobSource, maxTokens: Int): Int {
+                fake.run(slots, source, maxTokens)
+                // 訳し終えても、取り消されるまで戻らない（本物は戻るときに取り消しを確かめる）
+                awaitCancellation()
+            }
+        }
+        val s = TranslationStream(scope, { TranslationStream.Backend(engine, engine, memory) }, TranslationStream.Options(Language.EN, Language.JA))
+        s.submit(listOf(Segment(1, "Hello")))
+        assertEquals("訳「Hello」", finals(s.collectUntilDone(setOf(1)))[1])
+        s.close()
+        runBlocking { withTimeout(2_000) { while (stored.isEmpty()) kotlinx.coroutines.delay(10) } }
+        assertEquals(mapOf("Hello" to "訳「Hello」"), stored.toMap())
     }
 
     @Test

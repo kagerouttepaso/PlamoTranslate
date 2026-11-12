@@ -5,11 +5,13 @@ import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.TranslationRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 翻訳の契約（docs/設計/翻訳コア.md「翻訳の契約」）。テキスト・会話・画面・カメラの翻訳は、
@@ -148,7 +150,7 @@ class TranslationStream(
         tooLong.clear()
     }
 
-    /** 流れを閉じる。訳している途中の依頼も止める。 */
+    /** 流れを閉じる。訳している途中の依頼も止める。訳し終えた片は、長く残す控えに書いてから止まる。 */
     fun close() {
         clear()
         worker.cancel()
@@ -205,9 +207,12 @@ class TranslationStream(
                         throw e
                     } catch (e: Exception) {
                         fail(e.message ?: e.toString())
+                    } finally {
+                        // 確定はエンジンが戻る前に流れるので、購読する側は最後の確定を受け取ってすぐ閉じてよい。
+                        // 閉じられても（取り消されても）、訳し終えた片は長く残す控えに書き終える
+                        withContext(NonCancellable) { flushStore(b.memory) }
                     }
                 }
-                flushStore(b.memory)
             }
         }
     }
