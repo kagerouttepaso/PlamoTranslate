@@ -85,6 +85,19 @@
             android:name=".screen.ScreenTranslateService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+        <!-- 画面翻訳の訳の枠を透けずに重ねるユーザー補助（設定の画面で「訳の枠を透かさない」をオンにしたときだけ使う） -->
+        <service
+            android:name=".screen.OverlayAccessibilityService"
+            android:exported="true"
+            android:label="@string/a11y_overlay_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/overlay_accessibility" />
+        </service>
         <!-- 更新のインストールの結果（PackageInstaller） -->
         <receiver
             android:name=".update.InstallResultReceiver"

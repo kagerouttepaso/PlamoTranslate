@@ -5,4 +5,6 @@
     <string name="shortcut_screen">画面翻訳</string>
     <string name="shortcut_text">テキスト翻訳</string>
     <string name="tile_screen">画面翻訳</string>
+    <string name="a11y_overlay_label">PLaMo翻訳（画面翻訳の訳の枠）</string>
+    <string name="a11y_overlay_description">画面翻訳の訳を、下の文字が透けずに表示し、訳の上に触れた操作を下のアプリへ通すために使います。また、アプリの切り替えや戻る・ホームの操作を知り、訳している途中の処理を取り消します。画面の文字や内容は読み取らず、どこにも送りません。PLaMo翻訳の設定の画面で「訳の枠を透かさない」をオンにしたときだけ使います。</string>
 </resources>

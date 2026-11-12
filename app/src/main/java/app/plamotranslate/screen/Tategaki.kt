@@ -95,6 +95,12 @@ class VerticalTextView(context: Context) : View(context) {
             invalidate()
         }
 
+    /** 縁取りの色（枠の背景色。[OverlayStyle.applyHalo]）。 */
+    fun setHalo(background: Int) {
+        OverlayStyle.applyHalo(paint, background, resources.displayMetrics.density)
+        invalidate()
+    }
+
     var text: String = ""
         set(value) {
             field = value

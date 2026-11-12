@@ -154,9 +154,11 @@ class BenchActivity : ComponentActivity() {
         val density = spToPx(1f)
         val innerPad = dp(OverlayStyle.H_PADDING_DP)
         slots.forEachIndexed { i, slot ->
-            val box = OverlayStyle.padded(this, slot.rect)
+            val box = OverlayStyle.boxRect(this, slot)
             fill.color = slot.colors.background
             paint.color = slot.colors.text
+            // 実機の重ね表示と同じ太字と背景色の縁取り
+            OverlayStyle.applyHalo(paint, slot.colors.background, resources.displayMetrics.density)
             canvas.drawRect(box, fill)
             if (slot.vertical) {
                 // 縦書きの原文には縦書きで描く（画面の重ね表示と同じ Tategaki）

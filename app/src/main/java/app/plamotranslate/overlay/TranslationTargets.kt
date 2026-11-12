@@ -8,8 +8,11 @@ import app.plamotranslate.ocr.OcrBlock
 import app.plamotranslate.ocr.Script
 import app.plamotranslate.ocr.TextQuality
 
-/** 訳の枠1つ：撮影画像の座標での位置、縦書きか、元の画面から読み取った背景色と文字色。 */
-data class OverlaySlot(val rect: Rect, val vertical: Boolean, val colors: BoxColors = BoxColors.DEFAULT)
+/**
+ * 訳の枠1つ：撮影画像の座標での位置、縦書きか、元の画面から読み取った背景色と文字色。
+ * [bubble] が true なら、[rect] は吹き出しの内側まで広げた範囲（[BubbleFit]）で、さらには広げない。
+ */
+data class OverlaySlot(val rect: Rect, val vertical: Boolean, val colors: BoxColors = BoxColors.DEFAULT, val bubble: Boolean = false)
 
 /** 訳す1件：認識したまとまり、訳の枠（位置・縦書き・色）、翻訳に渡す原文。 */
 internal class TranslationTarget(val block: OcrBlock, val slot: OverlaySlot) {
@@ -29,9 +32,23 @@ internal fun selectTargets(
     bitmap: Bitmap,
     statusBarHeight: Int,
     target: Language,
-): List<TranslationTarget> = blocks
-    .filter { it.bounds.top >= statusBarHeight && it.needsTranslation(target) }
-    .map { TranslationTarget(it, OverlaySlot(it.bounds, it.vertical, ColorSampler.sample(bitmap, it.bounds))) }
+    /** 訳の枠を吹き出しの内側まで広げるか（画面翻訳の長押しのメニュー。[BubbleFit]）。 */
+    fitBubbles: Boolean = false,
+): List<TranslationTarget> {
+    val kept = blocks.filter { it.bounds.top >= statusBarHeight && it.needsTranslation(target) }
+    // 訳さないまとまり（日本語など）も含めた、画面の文字の範囲。広げた枠がほかの文字にかかるなら広げない
+    val texts = blocks.map { it.bounds }
+    return kept.map { block ->
+        val colors = ColorSampler.sample(bitmap, block.bounds)
+        val bubble = if (fitBubbles) {
+            BubbleFit.expand(bitmap, block.bounds, colors.background)
+                ?.takeIf { grown -> texts.none { it !== block.bounds && Rect.intersects(it, grown) } }
+        } else {
+            null
+        }
+        TranslationTarget(block, OverlaySlot(bubble ?: block.bounds, block.vertical, colors, bubble = bubble != null))
+    }
+}
 
 /**
  * 訳す必要がある文字か。訳先が日本語なら、仮名を含む（日本語の）ブロックと、

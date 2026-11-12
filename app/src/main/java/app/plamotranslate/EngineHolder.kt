@@ -145,9 +145,11 @@ object EngineHolder {
     }
 
     /** 読み込みが終わるまで待ってエンジンを返す。失敗・未配置なら null。 */
-    suspend fun awaitEngine(context: Context): TranslationEngine? {
+    suspend fun awaitEngine(context: Context): TranslationEngine? = awaitReady(context)?.engine
+
+    /** 読み込みが終わるまで待って、エンジンとどのモデルかを返す。失敗・未配置なら null。 */
+    suspend fun awaitReady(context: Context): ModelState.Ready? {
         ensureLoaded(context)
-        val settled = state.first { it !is ModelState.Loading }
-        return (settled as? ModelState.Ready)?.engine
+        return state.first { it !is ModelState.Loading } as? ModelState.Ready
     }
 }

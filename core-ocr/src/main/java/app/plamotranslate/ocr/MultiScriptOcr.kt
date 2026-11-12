@@ -41,8 +41,29 @@ class MultiScriptOcr(mangaDir: File? = null, private val groupLines: Boolean = t
     private val chinese = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
     private val latin = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
-    override suspend fun recognize(bitmap: Bitmap, language: OcrLanguage): List<OcrBlock> = coroutineScope {
+    override suspend fun recognize(bitmap: Bitmap, language: OcrLanguage): List<OcrBlock> = read(bitmap, Recognizers.of(language))
+
+    /**
+     * 白縁取り・白抜きの文字にも強く読む（画面翻訳の動く画面のモード。[OutlinedText]）。元の画像と、RGBの最小値を取った画像を
+     * 並べて読み、行ごとに崩れの少ない方を採る。文字認識が1回分多くかかる。最小値の画像には漫画モデルを使わない（縦書きの漫画用で遅い）。
+     */
+    suspend fun recognizeOutlined(bitmap: Bitmap, language: OcrLanguage): List<OcrBlock> = coroutineScope {
         val use = Recognizers.of(language)
+        // 束ねた後のまとまりで比べると、言語の違う行が一緒に束ねられて比べられなかった（2026-11-12）ので、
+        // 1行ずつ読んで行ごとに選び、選んだ行を束ねる
+        val primary = async { read(bitmap, use, group = false) }
+        val variant = async(Dispatchers.Default) {
+            val white = OutlinedText.whiteness(bitmap)
+            try {
+                read(white, use.copy(manga = false), group = false)
+            } finally {
+                white.recycle()
+            }
+        }
+        BlockMerger.group(OutlinedText.pick(primary.await(), variant.await()), groupLines)
+    }
+
+    private suspend fun read(bitmap: Bitmap, use: Recognizers, group: Boolean = groupLines): List<OcrBlock> = coroutineScope {
         val image = InputImage.fromBitmap(bitmap, 0)
         val ja = if (use.japanese) async { japanese.read(image) } else null
         val ko = if (use.korean) async { korean.read(image) } else null
@@ -57,7 +78,7 @@ class MultiScriptOcr(mangaDir: File? = null, private val groupLines: Boolean = t
             zhGlyphs = zhText?.toGlyphs().orEmpty(),
             manga = mangaLines?.await(),
             latin = en?.await()?.toCandidates().orEmpty(),
-            groupLines = groupLines,
+            groupLines = group,
         )
     }
 

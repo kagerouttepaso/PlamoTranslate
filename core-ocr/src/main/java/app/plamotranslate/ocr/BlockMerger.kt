@@ -123,6 +123,18 @@ internal object BlockMerger {
             .sortedWith(readingOrder { it.bounds })
     }
 
+    /**
+     * 1行ずつの読み取り（[merge] の groupLines = false の結果）を、まとまりに束ねる。
+     * 白縁の文字の読み比べ（[OutlinedText]）で、2つの画像の行を1行ずつ選んでから束ねるのに使う。
+     */
+    fun group(lines: List<OcrBlock>, groupLines: Boolean = true): List<OcrBlock> {
+        val candidates = lines.map { Candidate(it.text, Rect(it.bounds)) }
+        return (if (groupLines) LineClusterer.cluster(candidates) else candidates.map { listOf(it) })
+            .map(::toBlock)
+            .filter { it.text.isNotBlank() }
+            .sortedWith(readingOrder { it.bounds })
+    }
+
     /** どちらかの面積の3割以上が重なるか。 */
     private fun overlaps(a: Rect, b: Rect): Boolean = Geometry.overlaps(a, b, 0.3f)
 

@@ -3,8 +3,10 @@ package app.plamotranslate.screen
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.Typeface
 import android.os.SystemClock
 import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
@@ -15,6 +17,7 @@ import android.view.ViewConfiguration
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import app.plamotranslate.overlay.OverlaySlot
 import app.plamotranslate.overlay.dp
@@ -43,8 +46,79 @@ internal object OverlayStyle {
     /** 横書きの訳の枠の、左右の内側の余白（dp）。 */
     const val H_PADDING_DP = 2
 
-    /** 認識した枠は文字にぴったりなので、少し広げて原文の端が見えないようにする。 */
+    /** 認識した枠は文字にぴったりなので、少し広げて原文の端が見えないようにする。吹き出しまで広げた枠（[OverlaySlot.bubble]）はそのまま。 */
     fun padded(context: Context, rect: Rect): Rect = Rect(rect).apply { inset(-context.dp(4), -context.dp(2)) }
+
+    /** 訳の枠を置く範囲。 */
+    fun boxRect(context: Context, slot: OverlaySlot): Rect = if (slot.bubble) Rect(slot.rect) else padded(context, slot.rect)
+
+    /**
+     * 訳の文字は太字にし、背景色でぼかした縁取りを付ける（2026-11-12、作者の指摘「漫画の小さな文字の訳が読みにくい」）。
+     * 枠から透ける元の文字の線と、訳の線が重なって見分けにくかったので、訳の線の周りを背景色で縁取って分ける。
+     */
+    val TYPEFACE: Typeface = Typeface.DEFAULT_BOLD
+
+    /** 縁取りのぼかしの半径（dp）。 */
+    const val HALO_DP = 2.5f
+
+    fun applyHalo(paint: Paint, background: Int, density: Float) {
+        paint.typeface = TYPEFACE
+        paint.setShadowLayer(HALO_DP * density, 0f, 0f, background)
+    }
+}
+
+/**
+ * 自分の窓（浮遊ボタン・メニュー・上部の小さな表示）に触れた時刻。[TouchWatcher] は自分の窓に触れたときも「外側の操作」として
+ * 知らせるので、ほかのアプリへの操作と区別するのに使う。
+ */
+internal object OwnTouch {
+    @Volatile
+    var lastAt = 0L
+        private set
+
+    fun mark() {
+        lastAt = SystemClock.uptimeMillis()
+    }
+
+    /** 直近 [withinMillis] 以内に自分の窓に触れたか。 */
+    fun recent(withinMillis: Long = 300): Boolean = SystemClock.uptimeMillis() - lastAt <= withinMillis
+}
+
+/**
+ * 画面のどこかに触れたことを知るための、見えない1画素の窓（2026-11-12、作者の要望「自動翻訳で訳している途中に画面を操作したら、
+ * 全処理を取り消す」）。`FLAG_WATCH_OUTSIDE_TOUCH` で、窓の外（ほかのアプリ）に触れるたびに知らせを受ける。
+ * 撮影の間も隠さずに置いておくので、撮っている最中の操作にも気づける（上部の小さな表示は撮影の間は消えている）。
+ * 自分の窓に触れたときも知らせが来るので、少し待ってから [OwnTouch] で除く。
+ */
+@SuppressLint("ClickableViewAccessibility")
+internal class TouchWatcher(context: Context, private val windowManager: WindowManager, onTouch: () -> Unit) {
+    private val view = View(context).apply {
+        setOnTouchListener { v, e ->
+            if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) {
+                // 自分のボタン・メニューへの操作は、その窓の処理が先に OwnTouch に記録するのを待ってから除く
+                v.postDelayed({ if (!OwnTouch.recent()) onTouch() }, OWN_TOUCH_SETTLE_MS)
+            }
+            false
+        }
+    }
+
+    fun show() = windowManager.addView(view, WindowManager.LayoutParams(
+        1, 1,
+        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        PixelFormat.TRANSLUCENT,
+    ).apply {
+        gravity = Gravity.TOP or Gravity.START
+        x = 0
+        y = 0
+    })
+
+    fun remove() = runCatching { windowManager.removeView(view) }
+
+    private companion object {
+        const val OWN_TOUCH_SETTLE_MS = 80L
+    }
 }
 
 private fun overlayParams(width: Int, height: Int, gravity: Int) = WindowManager.LayoutParams(
@@ -91,6 +165,7 @@ class FloatingButton(
         var longPressed = false
         val longPress = Runnable { longPressed = true; onLongPress() }
         view.setOnTouchListener { _, e ->
+            OwnTouch.mark()
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = e.rawX; downY = e.rawY; startX = params.x; startY = params.y
@@ -142,6 +217,14 @@ class FloatingButton(
         runCatching { windowManager.updateViewLayout(view, params) }
     }
 
+    /** 自動で訳すのを止めているときは薄くする。 */
+    fun setActive(active: Boolean) {
+        view.alpha = if (active) 1f else 0.4f
+    }
+
+    /** ボタンが画面に占める範囲（画面が変わったかを見るとき、ここは比べない）。 */
+    val bounds: Rect get() = Rect(params.x, params.y, params.x + size, params.y + size)
+
     /** メニューを出す位置の目安（ボタンの左上）。 */
     val position: Pair<Int, Int> get() = params.x to params.y
 
@@ -153,9 +236,9 @@ class FloatingButton(
 }
 
 /** 撮影した画面の座標そのままに置くための窓の設定。状態バーや切り欠きの分ずらされないようにする。 */
-private fun absoluteParams(rect: Rect, flags: Int) = WindowManager.LayoutParams(
+private fun absoluteParams(rect: Rect, flags: Int, type: Int = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY) = WindowManager.LayoutParams(
     rect.width(), rect.height(),
-    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+    type,
     flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
         WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
     PixelFormat.TRANSLUCENT,
@@ -170,52 +253,100 @@ private fun absoluteParams(rect: Rect, flags: Int) = WindowManager.LayoutParams(
 /**
  * 訳を元の文字の位置に重ねる（docs/05_画面翻訳.md「訳文の重ね表示」）。
  * 訳1つにつき小さな窓を1つ置く。全画面の窓にすると下のアプリを操作できなくなるため。
- * 訳をタップすると原文（下の画面）が見えるよう半透明に切り替える。
- * 訳以外の場所に触れたら（スクロールなどで画面が変わるので）重ね表示を消す。
+ *
+ * 訳の枠は触れても反応せず、触れた操作は奥のアプリへそのまま届く（2026-11-12、作者の指摘「訳をタップすると1つだけ消える機能より、
+ * 字幕の上をスワイプして奥のDiscordの投稿をスクロールできる方が嬉しい。消すのは浮遊ボタンで一括でよい」）。
+ * Android 12以降は、ほかのアプリの重ね表示を通り抜ける操作は、窓の不透明度がシステムの上限（既定0.8）以下でないと捨てられる。
+ * そのため枠の窓の不透明度を上限に合わせ、原文がわずかに透ける。
+ *
+ * 画面のどこかに触れたときの扱い（消す・取り消す・枠の下をのぞく）は、サービスが [TouchWatcher] で受けて決める。
  */
 class TranslationOverlay(private val context: Context, private val windowManager: WindowManager) {
     // 横書きは TextView、縦書きは VerticalTextView。訳の追記・置き換えだけ共通に扱う
     private val boxes = mutableListOf<View>()
+    private val boxRects = mutableListOf<Rect>()
+
+    // 枠ごとに置いた先（ユーザー補助のサービスの WindowManager か、自分の WindowManager）。消すときに同じ先から外す
+    private val boxHosts = mutableListOf<WindowManager>()
     private var statusView: TextView? = null
 
-    // 訳の枠に触れた時刻。自分の枠に触れたときも「外側の操作」として通知されるため、それと区別する
-    private var lastBoxTouch = 0L
+    /**
+     * 訳の枠を透かさないか（設定の画面の「訳の枠を透かさない」。[OverlayAccessibilityService]）。
+     * true でもユーザー補助のサービスがつながっていなければ、今までどおり不透明度0.8で置く。
+     */
+    var opaqueWithAccessibility: () -> Boolean = { false }
+
+    /** 上部の小さな表示をタップしたとき（訳している途中なら取り消してから消すため、サービスが受ける）。無ければ消すだけ。 */
+    var onStatusTap: (() -> Unit)? = null
+
+    /** 訳の枠の範囲（画面の座標）。 */
+    val boxBounds: List<Rect> get() = boxRects.toList()
+
+    /** 訳の枠を一時的に隠す・戻す（枠の下の画面をのぞくとき）。 */
+    fun setBoxesVisible(visible: Boolean) {
+        boxes.forEach { it.visibility = if (visible) View.VISIBLE else View.INVISIBLE }
+    }
+
+    /** 通り抜ける操作が捨てられない、窓の不透明度の上限。 */
+    private val passThroughAlpha = runCatching {
+        context.getSystemService(android.hardware.input.InputManager::class.java).maximumObscuringOpacityForTouch
+    }.getOrDefault(0.8f)
+
+    /** 訳の枠か上部の小さな表示を出しているか。 */
+    val isShowing: Boolean get() = boxes.isNotEmpty() || statusView != null
 
     /** [slots] の位置に空の訳の枠を並べる。[status] は画面上部の小さな表示。 */
     fun show(slots: List<OverlaySlot>, status: String) {
         clear()
+        // ユーザー補助の重ね表示なら不透明のまま操作を通せる。窓はそのサービスの WindowManager から置く
+        val a11y = if (opaqueWithAccessibility()) OverlayAccessibilityService.instance else null
+        val host = a11y?.getSystemService(WindowManager::class.java) ?: windowManager
+        val viewContext: Context = a11y ?: context
+        val type = if (a11y != null) WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY else WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         for (slot in slots) {
-            val box = if (slot.vertical) VerticalTextView(context) else horizontalBox()
-            // 元の画面の背景色と文字色にそろえる（2026-11-05、作者の要望）。透けると読みにくいので不透明
+            val box = if (slot.vertical) VerticalTextView(viewContext) else horizontalBox(viewContext, slot.bubble)
+            // 元の画面の背景色と文字色にそろえる（2026-11-05、作者の要望）。太字と背景色の縁取りで読みやすくする（OverlayStyle）
             box.setBackgroundColor(slot.colors.background)
             when (box) {
-                is VerticalTextView -> box.textColor = slot.colors.text
-                is TextView -> box.setTextColor(slot.colors.text)
+                is VerticalTextView -> {
+                    box.textColor = slot.colors.text
+                    box.setHalo(slot.colors.background)
+                }
+                is TextView -> {
+                    box.setTextColor(slot.colors.text)
+                    box.typeface = OverlayStyle.TYPEFACE
+                    box.setShadowLayer(OverlayStyle.HALO_DP * context.resources.displayMetrics.density, 0f, 0f, slot.colors.background)
+                }
             }
-            watchTap(box)
-            windowManager.addView(box, absoluteParams(OverlayStyle.padded(context, slot.rect), 0))
-            boxes += box
+            val rect = OverlayStyle.boxRect(context, slot)
+            val params = absoluteParams(rect, WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE, type).apply {
+                alpha = if (a11y != null) 1f else passThroughAlpha
+            }
+            runCatching { host.addView(box, params) }.onFailure { return@onFailure }.onSuccess {
+                boxes += box
+                boxRects += rect
+                boxHosts += host
+            }
         }
         showStatus(status)
     }
 
-    private fun horizontalBox() = TextView(context).apply {
+    /** 自分が画面に出している範囲（訳の枠と上部の小さな表示）。画面が変わったかを見るとき、ここは比べない。 */
+    fun occupiedRects(): List<Rect> = buildList {
+        addAll(boxRects)
+        statusView?.takeIf { it.isAttachedToWindow }?.let { v ->
+            val xy = IntArray(2).also(v::getLocationOnScreen)
+            add(Rect(xy[0], xy[1], xy[0] + v.width, xy[1] + v.height))
+        }
+    }
+
+    private fun horizontalBox(viewContext: Context, bubble: Boolean) = TextView(viewContext).apply {
         setPadding(context.dp(OverlayStyle.H_PADDING_DP), 0, context.dp(OverlayStyle.H_PADDING_DP), 0)
-        gravity = Gravity.CENTER_VERTICAL
+        // 吹き出しまで広げた枠は、真ん中に寄せる
+        gravity = if (bubble) Gravity.CENTER else Gravity.CENTER_VERTICAL
         includeFontPadding = false
         // 枠に収まる大きさまで文字を自動で縮める
         setAutoSizeTextTypeUniformWithConfiguration(OverlayStyle.MIN_SP, OverlayStyle.MAX_SP, 1, TypedValue.COMPLEX_UNIT_SP)
-    }
-
-    /** 訳の枠をタップしたら原文と切り替える。触れた時刻は、外側の操作と区別するために控える。 */
-    @SuppressLint("ClickableViewAccessibility")
-    private fun watchTap(box: View) {
-        box.setOnTouchListener { _, e ->
-            if (e.actionMasked == MotionEvent.ACTION_DOWN) lastBoxTouch = SystemClock.uptimeMillis()
-            false
-        }
-        // 半透明にして下の原文を透かす
-        box.setOnClickListener { box.alpha = if (box.alpha > 0.5f) 0.08f else 1f }
     }
 
     fun appendTranslation(index: Int, delta: String) {
@@ -243,19 +374,16 @@ class TranslationOverlay(private val context: Context, private val windowManager
                 setColor(Color.argb(200, 98, 0, 238))
                 cornerRadius = context.dp(12).toFloat()
             }
+            // ほかの場所に触れたときの扱いは、サービスが TouchWatcher で受けて決める
             setOnTouchListener { _, e ->
-                if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) {
-                    // 訳の枠へのタップ（原文との切り替え）なら消さない
-                    postDelayed({ if (SystemClock.uptimeMillis() - lastBoxTouch > 300) clear() }, 80)
-                }
-                if (e.actionMasked == MotionEvent.ACTION_UP) clear()
+                OwnTouch.mark()
+                if (e.actionMasked == MotionEvent.ACTION_UP) onStatusTap?.invoke() ?: clear()
                 true
             }
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT,
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -268,22 +396,31 @@ class TranslationOverlay(private val context: Context, private val windowManager
     }
 
     fun clear() {
-        boxes.forEach { runCatching { windowManager.removeView(it) } }
+        boxes.forEachIndexed { i, box -> runCatching { boxHosts[i].removeView(box) } }
         boxes.clear()
+        boxRects.clear()
+        boxHosts.clear()
         statusView?.let { runCatching { windowManager.removeView(it) } }
         statusView = null
     }
 }
 
+/** 浮遊ボタンのメニューの1行。[Header] は見出し（押せない）、[Item] は選べる行。 */
+internal sealed interface MenuEntry {
+    class Header(val label: String) : MenuEntry
+    class Item(val label: String, val checked: Boolean = false, val enabled: Boolean = true, val action: () -> Unit) : MenuEntry
+}
+
 /**
  * 浮遊ボタンの長押しで出すメニュー（2026-11-05、作者の要望）。原文の言語（自動・中国語・韓国語・英語）と終了を選ぶ。
- * メニューの外に触れたら閉じる。
+ * 2026-11-12に、認識モードと翻訳モデルの見出しと行を足した（作者の要望）。
+ * メニューの外に触れたら閉じる。行が多く画面に収まらないときはスクロールする。
  */
-class LanguageMenu(private val context: Context, private val windowManager: WindowManager) {
+internal class ScreenMenu(private val context: Context, private val windowManager: WindowManager) {
     private var root: View? = null
 
     @SuppressLint("ClickableViewAccessibility")
-    fun show(anchorX: Int, anchorY: Int, items: List<Pair<String, () -> Unit>>, selected: Int) {
+    fun show(anchorX: Int, anchorY: Int, entries: List<MenuEntry>) {
         dismiss()
         val list = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -292,41 +429,62 @@ class LanguageMenu(private val context: Context, private val windowManager: Wind
                 setColor(Color.argb(240, 32, 32, 40))
                 cornerRadius = context.dp(12).toFloat()
             }
-            setOnTouchListener { _, e ->
-                if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) dismiss()
-                false
-            }
         }
-        items.forEachIndexed { i, (label, action) ->
-            list.addView(TextView(context).apply {
-                text = if (i == selected) "● $label" else "　 $label"
-                setTextColor(Color.WHITE)
+        for (entry in entries) when (entry) {
+            is MenuEntry.Header -> list.addView(TextView(context).apply {
+                text = entry.label
+                setTextColor(Color.argb(170, 255, 255, 255))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                setPadding(context.dp(14), context.dp(8), context.dp(20), context.dp(2))
+            })
+            is MenuEntry.Item -> list.addView(TextView(context).apply {
+                text = if (entry.checked) "● ${entry.label}" else "　 ${entry.label}"
+                setTextColor(if (entry.enabled) Color.WHITE else Color.argb(110, 255, 255, 255))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-                setPadding(context.dp(14), context.dp(10), context.dp(20), context.dp(10))
-                setOnClickListener {
+                setPadding(context.dp(14), context.dp(9), context.dp(20), context.dp(9))
+                if (entry.enabled) setOnClickListener {
+                    OwnTouch.mark()
                     dismiss()
-                    action()
+                    entry.action()
                 }
             })
         }
+        // 項目が増えて横画面などで収まらないときのために、画面の高さに合わせてスクロールさせる
+        val screen = windowManager.maximumWindowMetrics.bounds
+        val view = ScrollView(context).apply {
+            addView(list)
+            setOnTouchListener { _, e ->
+                if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) dismiss() else OwnTouch.mark()
+                false
+            }
+        }
+        list.measure(
+            View.MeasureSpec.makeMeasureSpec(screen.width(), View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        val maxHeight = screen.height() - context.dp(32)
+        val height = minOf(list.measuredHeight, maxHeight)
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT, height,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            // ボタンの左に出す（画面の右端に寄せたボタンでも見切れないように）
-            x = (anchorX - context.dp(170)).coerceAtLeast(context.dp(8))
-            y = anchorY
+            // ボタンの左に出す（画面の右端に寄せたボタンでも見切れないように）。下にはみ出すなら上へずらす
+            x = (anchorX - list.measuredWidth - context.dp(8)).coerceAtLeast(context.dp(8))
+            y = anchorY.coerceAtMost(screen.height() - height - context.dp(16)).coerceAtLeast(context.dp(16))
         }
-        windowManager.addView(list, params)
-        root = list
+        windowManager.addView(view, params)
+        root = view
     }
 
     fun dismiss() {
         root?.let { runCatching { windowManager.removeView(it) } }
         root = null
     }
+
+    /** メニューを出しているか（自動で訳すとき、選んでいる途中にメニューを閉じないよう、その間は訳さない）。 */
+    val isShowing: Boolean get() = root != null
 }

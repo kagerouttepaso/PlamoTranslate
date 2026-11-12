@@ -20,12 +20,17 @@ data class BoxColors(val background: Int, val text: Int) {
  *
  * - 背景色：枠を少し広げた外周の画素を、各色32段階にまとめて最も多い色にする。文字が外周にかかっても多数決で背景が残る。
  * - 文字色：枠の中で背景色から十分に離れた画素の中央値にする。
- * - 文字色が背景色に近すぎて読みにくいときは、背景の明るさに応じて黒か白にする。
+ * - 文字色は、読みやすさのために灰色なら黒か白に、色付きならコントラスト比7まで濃くする（[readable]）。
  */
 object ColorSampler {
     private const val RING = 3
     private const val TEXT_DISTANCE = 90.0
-    private const val MIN_CONTRAST = 3.0
+
+    /** 訳の文字に求めるコントラスト比（WCAG 2.xのAAA、本文7:1）。以前は3未満だけ直していた。 */
+    private const val MIN_CONTRAST = 7.0
+
+    /** これ未満の彩度の文字色は、灰色とみなして黒か白にする。 */
+    private const val GRAY_SATURATION = 0.25
 
     fun sample(bitmap: Bitmap, rect: Rect): BoxColors {
         val outer = Rect(rect).apply { inset(-RING * 2, -RING * 2) }
@@ -72,28 +77,66 @@ object ColorSampler {
         } else {
             fallbackText(background)
         }
-        if (contrast(text, background) < MIN_CONTRAST) text = fallbackText(background)
-        return BoxColors(background, text)
+        return BoxColors(background, readable(text, background))
     }
 
-    private fun fallbackText(background: Int) = if (luminance(background) > 0.4) Color.BLACK else Color.WHITE
+    /**
+     * 訳の文字色を読みやすくする（2026-11-12、作者の指摘「漫画の白背景に黒い小さな文字で、訳が読みにくい。特に文字色が灰色っぽいとき」）。
+     * 小さい文字は縁のぼけた画素が多く、中央値が灰色になる。灰色の訳文は、枠から透ける元の文字と同じくらいの濃さになって読みにくかった。
+     * - 灰色っぽい文字（彩度が [GRAY_SATURATION] 未満）は、背景に合わせて黒か白にする。
+     * - 色の付いた文字は色味を残し、コントラスト比が [MIN_CONTRAST]（WCAGのAAA）に届くまで黒か白へ寄せる。
+     */
+    fun readable(text: Int, background: Int): Int {
+        if (saturation(text) < GRAY_SATURATION) return fallbackText(background)
+        if (contrast(text, background) >= MIN_CONTRAST) return text
+        val target = fallbackText(background)
+        for (step in 1..10) {
+            val c = blend(text, target, step / 10.0)
+            if (contrast(c, background) >= MIN_CONTRAST) return c
+        }
+        return target
+    }
 
-    private fun distance(a: Int, b: Int): Double {
-        val dr = (Color.red(a) - Color.red(b)).toDouble()
-        val dg = (Color.green(a) - Color.green(b)).toDouble()
-        val db = (Color.blue(a) - Color.blue(b)).toDouble()
+    /** 背景に対して黒と白のどちらがはっきり見えるか（コントラスト比が等しくなる相対輝度0.179で分ける）。 */
+    private fun fallbackText(background: Int) = if (luminance(background) > 0.179) BLACK else WHITE
+
+    private fun r(c: Int) = (c shr 16) and 0xFF
+    private fun g(c: Int) = (c shr 8) and 0xFF
+    private fun b(c: Int) = c and 0xFF
+    private fun rgb(r: Int, g: Int, b: Int) = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+
+    private fun blend(x: Int, y: Int, t: Double): Int = rgb(
+        (r(x) + (r(y) - r(x)) * t).toInt(),
+        (g(x) + (g(y) - g(x)) * t).toInt(),
+        (b(x) + (b(y) - b(x)) * t).toInt(),
+    )
+
+    /** HSVの彩度（0〜1）。 */
+    private fun saturation(c: Int): Double {
+        val hi = maxOf(r(c), g(c), b(c))
+        val lo = minOf(r(c), g(c), b(c))
+        return if (hi == 0) 0.0 else (hi - lo).toDouble() / hi
+    }
+
+    private fun distance(x: Int, y: Int): Double {
+        val dr = (r(x) - r(y)).toDouble()
+        val dg = (g(x) - g(y)).toDouble()
+        val db = (b(x) - b(y)).toDouble()
         return sqrt(dr * dr + dg * dg + db * db)
     }
 
     /** WCAGの相対輝度。 */
     private fun luminance(c: Int): Double {
         fun ch(v: Int): Double { val x = v / 255.0; return if (x <= 0.03928) x / 12.92 else Math.pow((x + 0.055) / 1.055, 2.4) }
-        return 0.2126 * ch(Color.red(c)) + 0.7152 * ch(Color.green(c)) + 0.0722 * ch(Color.blue(c))
+        return 0.2126 * ch(r(c)) + 0.7152 * ch(g(c)) + 0.0722 * ch(b(c))
     }
 
-    /** WCAGのコントラスト比（1〜21）。3未満は読みにくい。 */
-    private fun contrast(a: Int, b: Int): Double {
-        val la = luminance(a); val lb = luminance(b)
+    /** WCAGのコントラスト比（1〜21）。 */
+    fun contrast(x: Int, y: Int): Double {
+        val la = luminance(x); val lb = luminance(y)
         return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
     }
+
+    private val BLACK = rgb(0, 0, 0)
+    private val WHITE = rgb(255, 255, 255)
 }

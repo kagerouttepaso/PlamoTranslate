@@ -4,8 +4,37 @@ import android.content.Context
 import app.plamotranslate.ocr.OcrLanguage
 
 /**
- * 画面翻訳の設定（原文の言語）。端末に残し、次に始めたときも引き継ぐ。
+ * 画面翻訳の認識モード（2026-11-12、作者の要望。ゲームの画面で、文字の奥のキャラクターが動いて読み取りが崩れる）。
+ * [MOTION] は数枚を続けて撮り、画素ごとの中央値で動く背景を消してから読む（[FrameStack]、docs/05_画面翻訳.md「動く画面のモード」）。
+ */
+internal enum class ScreenRecognition(val menuName: String) {
+    NORMAL("通常（1枚で読む）"),
+    MOTION("動く画面（ゲーム向け）"),
+    ;
+
+    companion object {
+        fun parse(name: String?): ScreenRecognition = entries.firstOrNull { it.name == name } ?: NORMAL
+    }
+}
+
+/**
+ * 画面翻訳の始め方（2026-11-12、作者の要望「漫画のページ送りや、Discordでスクロールが止まったら、タップ不要で訳す」）。
+ * [AUTO] は画面が変わったら訳を消し、画面が止まったら訳す（[ScreenChange]、docs/05_画面翻訳.md「自動で訳す」）。
+ */
+internal enum class ScreenTrigger(val menuName: String) {
+    TAP("タップで訳す"),
+    AUTO("自動（画面が止まったら訳す）"),
+    ;
+
+    companion object {
+        fun parse(name: String?): ScreenTrigger = entries.firstOrNull { it.name == name } ?: TAP
+    }
+}
+
+/**
+ * 画面翻訳の設定（原文の言語、認識モード、始め方）。端末に残し、次に始めたときも引き継ぐ。
  * カメラ翻訳は言語そのものを選ぶので別に持つ（camera/CameraPreferences.kt）。
+ * 翻訳モデルはアプリ全体で1つなので、ここではなく TranslationPreferences が持つ。
  */
 internal class ScreenPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("screen_translate", Context.MODE_PRIVATE)
@@ -15,7 +44,34 @@ internal class ScreenPreferences(context: Context) {
         get() = OcrLanguage.parse(prefs.getString(KEY_LANGUAGE, null))
         set(language) = prefs.edit().putString(KEY_LANGUAGE, language.name).apply()
 
+    /** 浮遊ボタンの長押しで選んだ認識モード。読めなければ通常。 */
+    var recognition: ScreenRecognition
+        get() = ScreenRecognition.parse(prefs.getString(KEY_RECOGNITION, null))
+        set(value) = prefs.edit().putString(KEY_RECOGNITION, value.name).apply()
+
+    /** 浮遊ボタンの長押しで選んだ始め方。読めなければタップで訳す。 */
+    var trigger: ScreenTrigger
+        get() = ScreenTrigger.parse(prefs.getString(KEY_TRIGGER, null))
+        set(value) = prefs.edit().putString(KEY_TRIGGER, value.name).apply()
+
+    /** 訳の枠を吹き出しの内側まで広げるか（浮遊ボタンの長押しで切り替える。overlay/BubbleFit.kt）。 */
+    var fitBubbles: Boolean
+        get() = prefs.getBoolean(KEY_FIT_BUBBLES, false)
+        set(value) = prefs.edit().putBoolean(KEY_FIT_BUBBLES, value).apply()
+
+    /**
+     * 訳の枠を透かさないか（設定の画面で切り替える。ユーザー補助のサービス OverlayAccessibilityService を使う）。
+     * オンでもユーザー補助が有効でなければ、今までどおり不透明度0.8で置く。
+     */
+    var opaqueOverlay: Boolean
+        get() = prefs.getBoolean(KEY_OPAQUE_OVERLAY, false)
+        set(value) = prefs.edit().putBoolean(KEY_OPAQUE_OVERLAY, value).apply()
+
     private companion object {
         const val KEY_LANGUAGE = "language"
+        const val KEY_RECOGNITION = "recognition"
+        const val KEY_TRIGGER = "trigger"
+        const val KEY_FIT_BUBBLES = "fit_bubbles"
+        const val KEY_OPAQUE_OVERLAY = "opaque_overlay"
     }
 }

@@ -78,6 +78,55 @@ class ScreenCapturer(context: Context, projection: MediaProjection) {
     }
 
     /**
+     * [since] より後の画面を1枚撮り、続けて [intervalMillis] ごとに新しく届いた画面を撮って、最大 [count] 枚を返す
+     * （動く画面のモード。[FrameStack]）。間隔の間に新しい画面が届かなければ、画面が止まっているので、そこで打ち切る
+     * （止まった画面を何枚撮っても同じで、待つだけ遅くなる）。撮れなければ空。
+     */
+    suspend fun captureFrames(since: Long, count: Int, intervalMillis: Long): List<Bitmap> {
+        val first = capture(since) ?: return emptyList()
+        val frames = mutableListOf(first)
+        var takenAt = onHandler { latestAt }
+        while (frames.size < count) {
+            delay(intervalMillis)
+            val next = onHandler {
+                val image = latest
+                if (image == null || latestAt <= takenAt) return@onHandler null
+                takenAt = latestAt
+                image.toBitmap()
+            } ?: break
+            // 撮っている間に画面を回したら、大きさの違うコマは重ねられないので、そこまでにする
+            if (next.width != first.width || next.height != first.height) {
+                next.recycle()
+                break
+            }
+            frames += next
+        }
+        return frames
+    }
+
+    /**
+     * [after]（uptimeMillis）より後に新しい画面が届いていれば、それを格子に縮めて（[ScreenChange]）届いた時刻と返す。
+     * 届いていなければ null（画面は変わっていない）。画像には変えずに受け取った画面から直接読むので軽い（自動で訳すときの見張り）。
+     */
+    internal suspend fun latestThumb(after: Long): Pair<Thumb, Long>? = onHandler {
+        val image = latest ?: return@onHandler null
+        if (latestAt <= after) return@onHandler null
+        val plane = image.planes[0]
+        val buffer = plane.buffer
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        // RGBA_8888 の並び（赤・緑・青・アルファ）
+        val thumb = ScreenChange.thumb(image.width, image.height) { x, y ->
+            val i = y * rowStride + x * pixelStride
+            val r = buffer.get(i).toInt() and 0xFF
+            val g = buffer.get(i + 1).toInt() and 0xFF
+            val b = buffer.get(i + 2).toInt() and 0xFF
+            (r * 3 + g * 6 + b) / 10
+        }
+        thumb to latestAt
+    }
+
+    /**
      * 仮想ディスプレイの大きさが今の画面（回した後の向き）と違えば合わせ、その時刻を返す。同じなら null。
      * 仮想ディスプレイは作り直せないので、大きさだけ変え、受け取り口（ImageReader）を新しい大きさのものに差し替える。
      * 前の大きさの画像は座標が合わないので捨てる。
