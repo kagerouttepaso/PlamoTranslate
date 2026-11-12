@@ -58,6 +58,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
 
@@ -168,6 +169,7 @@ class ScreenTranslateService : Service() {
         }
         // ユーザー補助がつながっていれば、ほかのアプリ・画面への切り替わりを合図にする（docs/12_機能テスト.md「問い1」）
         OverlayAccessibilityService.onWindowChanged = ::onWindowChanged
+        OverlayAccessibilityService.onScrolled = ::onScrolled
         touchWatcher = TouchWatcher(this, wm, ::onScreenTouch).also { it.show() }
         menu = ScreenMenu(this, wm).also { it.onDismiss = { dispatch(SessionEvent.MenuClosed) } }
         button = FloatingButton(this, wm, onTap = ::onButtonTap, onLongPress = ::showMenu).also {
@@ -180,6 +182,7 @@ class ScreenTranslateService : Service() {
         state = ScreenSession.initial(preferences.trigger.toTrigger())
         if (state.phase == Phase.Watching) startJudge.reset(SystemClock.uptimeMillis())
         scope.launch { watch() }
+        scope.launch { watchAccessibility() }
         registerDebugReceiver()
         _running.value = true
         return START_NOT_STICKY
@@ -452,6 +455,33 @@ class ScreenTranslateService : Service() {
         dispatch(SessionEvent.Invalidated("ほかの画面に切り替わった"))
     }
 
+    /** ほかのアプリの中身がスクロールした（ユーザー補助の知らせ）。原文が動いたので、訳している途中の処理と出している訳を取り消す。 */
+    private fun onScrolled() {
+        if (state.session == null) return
+        Log.i(TAG, "画面翻訳: スクロールしたので取り消した")
+        dispatch(SessionEvent.Invalidated("スクロールした"))
+    }
+
+    /**
+     * ユーザー補助が「有効なのにつながっていない」（端末に止められて切り離された）ことを見つけて知らせる（docs/13_画面翻訳の構成.md
+     * 「使える能力と組み立て」）。切り離されると、訳の枠は透ける重ね表示に、合図は画面の見張りだけになる。
+     * 始めた直後はつながるまで少しかかるので、待ってから見る。その後は、つながりが切れたときに見る。
+     */
+    private suspend fun watchAccessibility() {
+        delay(A11Y_CHECK_DELAY_MS)
+        notifyIfDetached()
+        // 今の値はすぐ上で見たので、変わったときだけ見る
+        OverlayAccessibilityService.connected.drop(1).collect { connected -> if (!connected) notifyIfDetached() }
+    }
+
+    private fun notifyIfDetached() {
+        if (!preferences.opaqueOverlay || !OverlayAccessibilityService.isDetached(this)) return
+        Log.w(TAG, "画面翻訳: ユーザー補助が有効なのにつながっていない")
+        val text = "ユーザー補助が切れています。ユーザー補助の設定で「PLaMo翻訳」を一度オフにしてからオンにしてください"
+        overlay?.showStatus(text)
+        Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+    }
+
     /** 場面の設定（認識モード）を今の設定に合わせ、判定器を作り直す。 */
     private fun applyProfile() {
         profile = when (preferences.recognition) {
@@ -553,7 +583,8 @@ class ScreenTranslateService : Service() {
 
     override fun onDestroy() {
         debugReceiver?.let { unregisterReceiver(it) }
-        if (OverlayAccessibilityService.onWindowChanged != null) OverlayAccessibilityService.onWindowChanged = null
+        OverlayAccessibilityService.onWindowChanged = null
+        OverlayAccessibilityService.onScrolled = null
         work?.let { cancel(it.session) }
         scope.cancel()
         button?.remove()
@@ -605,6 +636,9 @@ class ScreenTranslateService : Service() {
 
         /** 動く画面のモードで、のぞくときに撮る3枚の間隔。 */
         private const val MOTION_PEEK_INTERVAL_MS = 80L
+
+        /** 始めてから、ユーザー補助が切り離されていないかを見るまでの待ち（始めた直後はつながるまで少しかかる）。 */
+        private const val A11Y_CHECK_DELAY_MS = 3000L
 
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_DATA = "data"
