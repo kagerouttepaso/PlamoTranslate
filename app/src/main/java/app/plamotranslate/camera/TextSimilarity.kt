@@ -19,7 +19,7 @@ internal object TextSimilarity {
     }
 
     /**
-     * ほぼ同じ文か（キーどうしで比べる）。Dice係数が8割以上で、長さの差が3割未満。
+     * ほぼ同じ文か（キーどうしで比べる）。Dice係数が8割以上で、短い方の長さが長い方の7割以上。
      * 1〜2文字の文は完全一致だけ（短い語は1文字違えば別の語なので）。
      */
     fun similar(a: String, b: String): Boolean {

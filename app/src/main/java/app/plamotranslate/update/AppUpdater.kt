@@ -54,7 +54,7 @@ sealed interface UpdateState {
 }
 
 /**
- * GitHubの最新リリースから新しい版のAPKを取って入れる（2026-11-09、作者の要望。docs/手順/開発環境.md「アプリの更新」）。
+ * GitHubの最新リリースから新しい版のAPKを取って入れる（docs/設計/アーキテクチャ.md「アプリの更新」）。
  *
  * - 通信するのは、設定の画面で「更新を確認」「ダウンロードして更新」を押したときだけ（起動時に勝手に確かめない）。
  * - 確認：公開リポジトリのAPI `releases/latest` を読み、タグとアプリの版を比べる（[AppVersion]）。認証は要らない。
@@ -64,7 +64,7 @@ sealed interface UpdateState {
  * - インストール：PackageInstallerのセッションで入れる。Androidが確認画面を出し、作者が「更新」を押すと入れ替わる。
  *   同じ鍵の上書きなので、設定もモデルも消えない。
  *
- * Google Playで配る版では、Playの規約でアプリ自身の更新が禁じられているので、この機能を外す（docs/11）。
+ * Google Playで配る版では、Playの規約でアプリ自身の更新が禁じられているので、この機能を外す。
  */
 object AppUpdater {
     private const val TAG = "PlamoTranslate"

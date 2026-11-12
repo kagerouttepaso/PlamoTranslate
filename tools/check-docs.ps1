@@ -26,13 +26,14 @@ $warnings = [System.Collections.Generic.List[string]]::new()
 
 function Rel([string]$path) { [IO.Path]::GetRelativePath($root, $path).Replace('\', '/') }
 
-# 見出しの文字列（# を除く）。ファイルごとに1回だけ読む
+# 節の名前：見出しの文字列（# を除く）と、箇条の先頭の太字の名前（CLAUDE.md の規則の名前など）。ファイルごとに1回だけ読む
 $headingCache = @{}
 function Get-Headings([string]$file) {
     if (-not $headingCache.ContainsKey($file)) {
-        $headingCache[$file] = @(Get-Content -LiteralPath $file -Encoding utf8 |
-            Where-Object { $_ -match '^#{1,6} ' } |
-            ForEach-Object { ($_ -replace '^#{1,6} ', '').Trim() })
+        $headingCache[$file] = @(Get-Content -LiteralPath $file -Encoding utf8 | ForEach-Object {
+                if ($_ -match '^#{1,6} ') { ($_ -replace '^#{1,6} ', '').Trim() }
+                elseif ($_ -match '^\s*(?:-|\d+\.) \*\*(?<name>[^*]+)\*\*') { $Matches['name'].Trim() }
+            })
     }
     $headingCache[$file]
 }
@@ -76,7 +77,7 @@ foreach ($g in $grep) {
 }
 
 # 参照の形：`docs/…/x.md` か、docs/ の中の相対パス。続く「節」は0個以上
-$pathPattern = '(?<path>(?:docs/)?(?:[^\s`''"「」（）()、。,\[\]<>:*|]+/)*[^\s`''"「」（）()、。,\[\]<>:*|/]+\.md)`?(?<secs>(?:「[^」\r\n]+」)*)'
+$pathPattern = '(?<path>(?:docs/)?(?:[^\s`''"「」（）()、。,：\[\]<>:*|]+/)*[^\s`''"「」（）()、。,：\[\]<>:*|/]+\.md)`?(?<secs>(?:「[^」\r\n]+」)*)'
 $linkPattern = '\]\((?<path>[^)#\s]+\.md)(?:#[^)]*)?\)'
 
 foreach ($t in $texts) {
@@ -105,10 +106,14 @@ foreach ($t in $texts) {
             $target = Resolve-Doc $f.Path $src.FullName
             $where = "$(Rel $src.FullName):$($i + 1)"
             if (-not (Test-Path -LiteralPath $target)) {
-                # docs/ の外の Markdown（リポジトリ直下の README.md など）は、そこにあれば良い
-                if (-not $f.Path.StartsWith('docs/') -and (Test-Path -LiteralPath (Join-Path $root $f.Path))) { continue }
-                $errors.Add("$where 参照先の文書が無い：$($f.Path)")
-                continue
+                # docs/ の外の Markdown（リポジトリ直下の CLAUDE.md・README.md など）は、そこにあればその節も確かめる
+                $outside = Join-Path $root $f.Path
+                if (-not $f.Path.StartsWith('docs/') -and (Test-Path -LiteralPath $outside)) {
+                    $target = $outside
+                } else {
+                    $errors.Add("$where 参照先の文書が無い：$($f.Path)")
+                    continue
+                }
             }
             if ($f.Secs) {
                 $heads = Get-Headings $target
@@ -143,7 +148,7 @@ if (Test-Path -LiteralPath $decisions) {
         }
         if ($text -match '(?m)^- 状態：(?<s>.*)$') {
             $state = $Matches['s'].Trim()
-            if ($state -ne '有効' -and -not $state.StartsWith('置き換え')) { $errors.Add("$where 状態は「有効」か「置き換え（→ …）」：$state") }
+            if ($state -ne '有効' -and -not $state.StartsWith('置き換え') -and -not $state.StartsWith('一部置き換え')) { $errors.Add("$where 状態は「有効」「置き換え（→ …）」「一部置き換え（→ …）」のどれか：$state") }
         }
     }
 }
