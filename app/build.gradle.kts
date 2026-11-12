@@ -8,7 +8,7 @@ plugins {
 
 /**
  * 配布用（リリース版）の署名鍵。鍵とパスワードはGitに入れず、リポジトリの外の安全な場所に置く
- * （docs/06_開発環境.md「配布用のAPK」）。各PCの `local.properties` の `plamo.keystore` に
+ * （docs/手順/開発環境.md「配布用のAPK」）。各PCの `local.properties` の `plamo.keystore` に
  * `keystore.properties` の場所を書く。`storeFile` は相対パスなら `keystore.properties` のフォルダーから探す。
  * 無ければリリース版は署名しない。
  */
@@ -27,8 +27,8 @@ android {
         applicationId = "app.plamotranslate"
         minSdk = 33  // 性能ヒント（APerformanceHint）がAPI 33から
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.6.1"
+        versionCode = 14
+        versionName = "0.7.0"
         ndk {
             abiFilters += "arm64-v8a"
         }
