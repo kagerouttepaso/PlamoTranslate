@@ -48,6 +48,9 @@ class TranslationCache private constructor(context: Context) {
     inner class Scope(private val model: String, private val rank: Int, source: Language?, target: Language, context: String?) : TranslationMemory {
         private val key = listOf(source?.code ?: "auto", target.code, context.orEmpty()).joinToString("|")
 
+        /** 作ったときの [generation]。控えを消した後は、消す前に始めた翻訳の訳を書かない。 */
+        private val born = this@TranslationCache.generation
+
         /** 控えを消した回数（[TranslationCache.generation]）。 */
         val generation: Int get() = this@TranslationCache.generation
 
@@ -70,7 +73,7 @@ class TranslationCache private constructor(context: Context) {
 
         /**
          * 訳をまとめて控える（1回の翻訳のまとまりごとに1つのトランザクション）。空の訳は控えない（次も訳し直すため）。
-         * 自分より確かなモデルの訳がある原文は書き換えない。
+         * 自分より確かなモデルの訳がある原文は書き換えない。作った後に控えを消していたら書かない（消した直後に古い訳を書き戻さない）。
          */
         override suspend fun store(translations: Map<String, String>) = withContext(Dispatchers.IO) {
             val entries = translations.filterValues { it.isNotBlank() }
@@ -79,6 +82,8 @@ class TranslationCache private constructor(context: Context) {
             val now = System.currentTimeMillis()
             db.beginTransaction()
             try {
+                // トランザクションの中で確かめる。[clear] は回数を増やしてから消すので、確かめた後に消されても、書いた分ごと消える
+                if (born != this@TranslationCache.generation) return@withContext
                 for ((text, translation) in entries) {
                     db.execSQL(
                         "INSERT INTO $TABLE (scope, text, translation, model, quality, used_at) VALUES (?, ?, ?, ?, ?, ?) " +
@@ -113,8 +118,9 @@ class TranslationCache private constructor(context: Context) {
     /** 控えをすべて消す（設定の画面の「消す」）。 */
     suspend fun clear() = withContext(Dispatchers.IO) {
         val db = helper.writableDatabase
-        db.delete(TABLE, null, null)
+        // 先に回数を増やす（書いている途中の翻訳が、消した後に書き戻さないように。[Scope.store]）
         generation++
+        db.delete(TABLE, null, null)
         // 消した分の領域を返す（数万件で数MBになるため）
         db.execSQL("VACUUM")
         countNow(db)
