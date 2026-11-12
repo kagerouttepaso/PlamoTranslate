@@ -12,6 +12,8 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
 import android.view.WindowManager
+import app.plamotranslate.pipeline.screen.ScreenChange
+import app.plamotranslate.pipeline.screen.Thumb
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -176,3 +178,9 @@ class ScreenCapturer(context: Context, projection: MediaProjection) {
         return if (rowWidth == width) padded else Bitmap.createBitmap(padded, 0, 0, width, height).also { padded.recycle() }
     }
 }
+
+/** 撮った画像を、画面の変化の計算に使う格子（中核の [Thumb]）に縮める。 */
+internal fun Bitmap.toThumb(): Thumb = ScreenChange.thumb(width, height) { x, y -> ScreenChange.luminanceOf(getPixel(x, y)) }
+
+/** 端末の長方形を、中核の長方形にする。 */
+internal fun android.graphics.Rect.toBox() = app.plamotranslate.pipeline.screen.Box(left, top, right, bottom)

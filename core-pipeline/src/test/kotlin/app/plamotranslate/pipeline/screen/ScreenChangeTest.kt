@@ -1,4 +1,4 @@
-package app.plamotranslate.screen
+package app.plamotranslate.pipeline.screen
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

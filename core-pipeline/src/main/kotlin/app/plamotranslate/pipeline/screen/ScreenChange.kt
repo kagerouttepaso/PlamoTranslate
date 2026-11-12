@@ -1,20 +1,20 @@
-package app.plamotranslate.screen
+package app.plamotranslate.pipeline.screen
 
-import android.graphics.Bitmap
-import android.graphics.Rect
+/** 画面の上の長方形（画素、右と下は含まない）。端末の型（android.graphics.Rect）に依存しないための中核の型。 */
+data class Box(val left: Int, val top: Int, val right: Int, val bottom: Int)
 
 /**
  * 画面を縮めた明るさの格子（自動で訳すとき、画面が変わったか・止まったかを見るのに使う）。
  * 横を [ScreenChange.COLS] 個のます目に分け、ます目ごとに数点の明るさ（0〜255）の平均を持つ。
  */
-internal class Thumb(val width: Int, val height: Int, val cols: Int, val rows: Int, val values: IntArray)
+class Thumb(val width: Int, val height: Int, val cols: Int, val rows: Int, val values: IntArray)
 
 /**
- * 画面の変化の見張り（自動翻訳。2026-11-12、作者の要望「漫画のページ送りや、Discordでスクロールが止まったら、タップ不要で訳す」。
- * docs/05_画面翻訳.md「自動で訳す」）。撮った画面を [Thumb] に縮め、ます目の明るさを比べる。
- * 文字認識より桁違いに軽いので、数百ミリ秒ごとに見張れる。
+ * 画面の変化の計算（自動翻訳。2026-11-12、作者の要望「漫画のページ送りや、Discordでスクロールが止まったら、タップ不要で訳す」）。
+ * 撮った画面を [Thumb] に縮め、ます目の明るさを比べる。文字認識より桁違いに軽いので、数百ミリ秒ごとに見張れる。
+ * 判定（開始の判定A・有効性の判定B）はこの計算を組み合わせる（docs/13_画面翻訳の構成.md「判定器」）。
  */
-internal object ScreenChange {
+object ScreenChange {
     /** 横のます目の数。1080pxの画面で1つ約22px（本文の1行くらい）。 */
     const val COLS = 48
 
@@ -38,18 +38,15 @@ internal object ScreenChange {
         return Thumb(width, height, cols, rows, values)
     }
 
-    /** 撮った画像を格子に縮める。 */
-    fun thumb(bitmap: Bitmap): Thumb = thumb(bitmap.width, bitmap.height) { x, y -> luminanceOf(bitmap.getPixel(x, y)) }
-
     /** ARGB の色の明るさ（おおよそ。0〜255）。 */
     fun luminanceOf(argb: Int): Int = (((argb shr 16) and 0xFF) * 3 + ((argb shr 8) and 0xFF) * 6 + (argb and 0xFF)) / 10
 
-    /** [rects]（画面の座標）に少しでもかかるます目を true にする。自分の重ね表示の下は比べない。 */
-    fun mask(thumb: Thumb, rects: List<Rect>): BooleanArray {
+    /** [boxes]（画面の座標）に少しでもかかるます目を true にする。 */
+    fun mask(thumb: Thumb, boxes: List<Box>): BooleanArray {
         val mask = BooleanArray(thumb.values.size)
         val cellW = thumb.width.toFloat() / thumb.cols
         val cellH = thumb.height.toFloat() / thumb.rows
-        for (r in rects) {
+        for (r in boxes) {
             val c0 = (r.left / cellW).toInt().coerceIn(0, thumb.cols - 1)
             val c1 = ((r.right - 1) / cellW).toInt().coerceIn(0, thumb.cols - 1)
             val r0 = (r.top / cellH).toInt().coerceIn(0, thumb.rows - 1)
@@ -60,7 +57,27 @@ internal object ScreenChange {
     }
 
     /**
-     * 続けて縮めた数枚を、ます目ごとの明るさの中央値で1枚にする（動く画面のモードの見張り。[FrameStack] と同じ考え方）。
+     * [boxes] の外側で、[margin] ます以内のます目（外周）を true にする。箱そのもののます目は含まない。
+     * 訳の枠の外周は、原文のすぐ周り（吹き出しの縁・メッセージの周り・台詞の枠）で、原文と一緒に動き・消える（有効性の判定B）。
+     */
+    fun ring(thumb: Thumb, boxes: List<Box>, margin: Int): BooleanArray {
+        val inside = mask(thumb, boxes)
+        val ring = BooleanArray(inside.size)
+        for (row in 0 until thumb.rows) for (col in 0 until thumb.cols) {
+            if (!inside[row * thumb.cols + col]) continue
+            for (dr in -margin..margin) for (dc in -margin..margin) {
+                val r = row + dr
+                val c = col + dc
+                if (r < 0 || c < 0 || r >= thumb.rows || c >= thumb.cols) continue
+                val i = r * thumb.cols + c
+                if (!inside[i]) ring[i] = true
+            }
+        }
+        return ring
+    }
+
+    /**
+     * 続けて縮めた数枚を、ます目ごとの明るさの中央値で1枚にする（動く画面のモード。FrameStack と同じ考え方）。
      * 背景で動くキャラクターや演出は消え、止まっている台詞の枠やUIの変化だけが残る。大きさの違う格子が混ざれば最後の1枚を返す。
      */
     fun median(thumbs: List<Thumb>): Thumb {
@@ -77,8 +94,8 @@ internal object ScreenChange {
     }
 
     /**
-     * 続けて縮めた数枚の間で明るさが動いたます目（動く背景）を true にする。動く画面のモードでは、ここを比べる対象から外し、
-     * 止まっているます目（UI・台詞の枠）だけで、画面が変わったか・止まったかを見る。
+     * 続けて縮めた数枚の間で明るさが動いたます目（動く背景）を true にする。動く画面のモードの開始の判定Aでは、ここを比べる対象から外し、
+     * 止まっているます目（UI・台詞の枠）だけで、画面が止まったかを見る。
      */
     fun active(thumbs: List<Thumb>): BooleanArray? {
         val last = thumbs.lastOrNull() ?: return null
@@ -95,7 +112,7 @@ internal object ScreenChange {
         }
     }
 
-    /** 覆いを裏返す（[rects] の中だけを比べたいとき、[mask] の結果を裏返して渡す）。 */
+    /** 覆いを裏返す（[mask] の中だけを比べたいとき、[mask] の結果を裏返して渡す）。 */
     fun invert(mask: BooleanArray): BooleanArray = BooleanArray(mask.size) { !mask[it] }
 
     /** 2つの覆いを合わせる（どちらかで true なら true）。大きさが違えば [a] を返す。 */
@@ -116,4 +133,7 @@ internal object ScreenChange {
         }
         return if (counted == 0) 0f else changed.toFloat() / counted
     }
+
+    /** 数えるます目（[mask] が false）の数。 */
+    fun counted(mask: BooleanArray): Int = mask.count { !it }
 }

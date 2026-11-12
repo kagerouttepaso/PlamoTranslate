@@ -388,9 +388,9 @@ class TranslationOverlay(private val context: Context, private val windowManager
     }
 
     fun clear() {
+        // 外せなかった枠は画面に残るので、記録する（2026-11-12、消したはずの訳の枠が撮影に写ったことがあった）
         boxes.forEachIndexed { i, box ->
-            // 調査用（2026-11-12、消したはずの訳の枠が撮影に写った）：外せなかった枠を残す
-            runCatching { boxHosts[i].removeView(box) }.onFailure { android.util.Log.w("PlamoTranslate", "訳の枠を外せませんでした（調査）", it) }
+            runCatching { boxHosts[i].removeView(box) }.onFailure { android.util.Log.w("PlamoTranslate", "画面翻訳: 訳の枠を外せませんでした", it) }
         }
         boxes.clear()
         boxRects.clear()
@@ -414,9 +414,14 @@ internal sealed interface MenuEntry {
 internal class ScreenMenu(private val context: Context, private val windowManager: WindowManager) {
     private var root: View? = null
 
+    /** メニューを閉じたとき（外に触れた・行を選んだ）。行を選んだときは、行の処理より先に呼ぶ。 */
+    var onDismiss: (() -> Unit)? = null
+
     @SuppressLint("ClickableViewAccessibility")
     fun show(anchorX: Int, anchorY: Int, entries: List<MenuEntry>) {
-        dismiss()
+        // 前のメニューが残っていれば外す（開き直しなので、閉じたことは知らせない）
+        root?.let { runCatching { windowManager.removeView(it) } }
+        root = null
         val list = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(context.dp(6), context.dp(6), context.dp(6), context.dp(6))
@@ -476,8 +481,10 @@ internal class ScreenMenu(private val context: Context, private val windowManage
     }
 
     fun dismiss() {
-        root?.let { runCatching { windowManager.removeView(it) } }
+        val view = root ?: return
+        runCatching { windowManager.removeView(view) }
         root = null
+        onDismiss?.invoke()
     }
 
     /** メニューを出しているか（自動で訳すとき、選んでいる途中にメニューを閉じないよう、その間は訳さない）。 */

@@ -13,6 +13,7 @@ import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Handler
@@ -22,7 +23,6 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.WindowManager
 import android.widget.Toast
-import android.graphics.Bitmap
 import app.plamotranslate.EngineHolder
 import app.plamotranslate.ModelState
 import app.plamotranslate.models.ModelCatalog
@@ -30,13 +30,25 @@ import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.ocr.OcrLanguage
 import app.plamotranslate.overlay.TranslationCache
+import app.plamotranslate.overlay.TranslationTarget
 import app.plamotranslate.overlay.selectTargets
+import app.plamotranslate.pipeline.screen.SceneProfile
+import app.plamotranslate.pipeline.screen.ScreenChange
+import app.plamotranslate.pipeline.screen.ScreenSession
+import app.plamotranslate.pipeline.screen.ScreenSession.Effect
+import app.plamotranslate.pipeline.screen.ScreenSession.Phase
+import app.plamotranslate.pipeline.screen.ScreenSession.SessionEvent
+import app.plamotranslate.pipeline.screen.StartJudge
+import app.plamotranslate.pipeline.screen.Thumb
+import app.plamotranslate.pipeline.screen.Validity
+import app.plamotranslate.pipeline.screen.ValidityJudge
 import app.plamotranslate.pipeline.translation.MemoryCache
 import app.plamotranslate.pipeline.translation.Segment
 import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
 import app.plamotranslate.translation.Translations
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -50,12 +62,16 @@ import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
 
 /**
- * 画面翻訳のフォアグラウンドサービス（docs/05_画面翻訳.md）。
- * 浮遊ボタンを押すと1枚撮影し、文字を読んで日本語に訳し、元の文字の位置に重ねて出す。
- * 長押しで原文の言語の選択と終了のメニューを出す。
+ * 画面翻訳のフォアグラウンドサービス（docs/05_画面翻訳.md、構成は docs/13_画面翻訳の構成.md）。
  *
- * 1回の翻訳の流れ（[translateScreen]）：撮影 → 文字認識（[MultiScriptOcr]）→ 訳す対象と枠の色の選別（[selectTargets]）
- * → 翻訳の流れ（[TranslationStream]）→ 重ね表示（[TranslationOverlay]）。
+ * このサービスは部品をつなぐだけで、何をするかは決めない。
+ * - 制御：画面翻訳の状態遷移（中核の [ScreenSession]）が、出来事を受け取って次の状態と作業を決める（[dispatch]）。
+ * - 作業の実行：状態遷移が返した作業（[Effect]）を、端末の部品（撮影・文字認識・翻訳の流れ・訳の枠）で行い、結果をセッション番号つきの
+ *   出来事として状態遷移へ返す（[perform]）。
+ * - 見張り：届いた画面を、待ちの間は開始の判定A（[StartJudge]）へ、訳している間と表示している間は有効性の判定B（[ValidityJudge]）へ渡す（[watch]）。
+ * - 合図：浮遊ボタン・メニュー・ほかのアプリに触れた・ユーザー補助の画面の切り替わり・画面の回転を、出来事にして状態遷移へ渡す。
+ *
+ * 状態・判定器・作業の材料は、すべてメインスレッドで触る。
  */
 class ScreenTranslateService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -67,47 +83,55 @@ class ScreenTranslateService : Service() {
     private var touchWatcher: TouchWatcher? = null
     private val preferences by lazy { ScreenPreferences(this) }
     private val ocr by lazy { MultiScriptOcr(ModelCatalog.mangaDir(this)) }
-    private var job: Job? = null
+
     /** 翻訳のメモリの控え。1回の翻訳ごとに開く翻訳の流れで共有する（訳したモデルが変わったら捨てる）。 */
     private val memoryCache = MemoryCache()
     private var debugReceiver: BroadcastReceiver? = null
     private var orientation = Configuration.ORIENTATION_UNDEFINED
 
-    // 自動で訳すときの見張り（[watchScreen]）。状態はすべてメインスレッドで触る
-    private var autoJob: Job? = null
-    private var settling = true
-    private var settleStart = 0L
-    private var stableSince = 0L
-    private var previous: Thumb? = null
-    private val recentThumbs = ArrayDeque<Thumb>()
+    /** 画面翻訳の状態（中核の状態遷移が決める）。 */
+    private var state = ScreenSession.initial(ScreenSession.Trigger.TAP)
 
-    /** 動く画面のモードで、訳を出してから明るさが動いたます目（動く背景。比べない）。 */
-    private var animated: BooleanArray? = null
+    /** 場面の設定と、それに合わせた判定器。設定を変えたら作り直す（[applyProfile]）。 */
+    private var profile = SceneProfile.NORMAL
+    private var startJudge = StartJudge(profile.start)
+    private var validity = ValidityJudge(profile.validity)
 
-    /** 訳の枠の下をのぞいている間（[peekUnderBoxes]）。 */
-    private var peeking = false
-    private var peekJob: Job? = null
+    /** 1回の翻訳（セッション）の作業と材料。状態遷移は番号だけを持ち、材料はここが持つ。 */
+    private class Work(val session: Int) {
+        val job: CompletableJob = SupervisorJob()
+        var bitmap: Bitmap? = null
+        var reference: Thumb? = null
+        var frames = 1
+        var captureMillis = 0L
+        var ocrMillis = 0L
+        var ocrError: String? = null
+        var blocks = 0
+        var targets: List<TranslationTarget> = emptyList()
+        var statusBar = 0
+        var capturedSize = ""
+        var translateStart = 0L
+        var model = ""
+        var stats: TranslationStream.Stats? = null
+        var peekJob: Job? = null
+    }
 
-    /** 撮っている間（自分の表示を隠している間）。見張りはこの間の画面を比べない。 */
-    private var capturing = false
+    private var work: Work? = null
 
-    /** 最後に訳したときの画面を縮めたもの（自分の表示を隠して撮った画面）。 */
-    private var reference: Thumb? = null
+    /** 撮る・のぞくために自分の表示を隠している間。見張りはこの間の画面を判定器へ渡さない。 */
+    private var hiding = false
+    private var modelJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /**
-     * 画面を回したら、前の向きで置いた訳の枠を消す（位置が合わなくなる）。訳している途中なら取り消す。
-     * 浮遊ボタンは今の画面の同じ割合の位置へ移す。次に浮遊ボタンを押すと、撮影の大きさを今の向きに合わせてから撮る（[ScreenCapturer]）。
-     */
+    /** 画面を回したら、前の向きで置いた訳の枠は位置が合わないので消す。浮遊ボタンは今の画面の同じ割合の位置へ移す。 */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (newConfig.orientation == orientation) return
         orientation = newConfig.orientation
-        job?.cancel()
-        overlay?.clear()
         menu?.dismiss()
         button?.fitToScreen()
+        dispatch(SessionEvent.Rotated)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -139,323 +163,313 @@ class ScreenTranslateService : Service() {
 
         val wm = getSystemService(WindowManager::class.java)
         overlay = TranslationOverlay(this, wm).also {
-            it.onStatusTap = ::cancelAll
+            it.onStatusTap = { dispatch(SessionEvent.StatusTapped) }
             it.opaqueWithAccessibility = { preferences.opaqueOverlay }
         }
-        // ユーザー補助が有効なら、アプリの切り替え・戻る・ホームの知らせで、訳している途中の処理を取り消す
+        // ユーザー補助がつながっていれば、ほかのアプリ・画面への切り替わりを合図にする（docs/12_機能テスト.md「問い1」）
         OverlayAccessibilityService.onWindowChanged = ::onWindowChanged
         touchWatcher = TouchWatcher(this, wm, ::onScreenTouch).also { it.show() }
-        menu = ScreenMenu(this, wm)
+        menu = ScreenMenu(this, wm).also { it.onDismiss = { dispatch(SessionEvent.MenuClosed) } }
         button = FloatingButton(this, wm, onTap = ::onButtonTap, onLongPress = ::showMenu).also {
             it.setLabel(buttonLabel(preferences.language, preferences.trigger))
+            it.setActive(true)
             it.show()
         }
         EngineHolder.ensureLoaded(this)
-        applyTrigger(preferences.trigger)
+        applyProfile()
+        state = ScreenSession.initial(preferences.trigger.toTrigger())
+        if (state.phase == Phase.Watching) startJudge.reset(SystemClock.uptimeMillis())
+        scope.launch { watch() }
         registerDebugReceiver()
         _running.value = true
         return START_NOT_STICKY
     }
 
-    /**
-     * 浮遊ボタンのタップ。訳の表示を一括でオン・オフする（2026-11-12、作者の要望。訳の枠1つずつのタップはやめた）。
-     * - タップで訳すとき：訳を出していれば消し、出していなければ訳す。
-     * - 自動で訳すとき：自動の見張りを止める（訳も消す）か、再び始める。止めている間はボタンを薄くする。
-     */
-    private fun onButtonTap() {
-        menu?.dismiss()
-        if (preferences.trigger == ScreenTrigger.AUTO) {
-            if (autoJob?.isActive == true) {
-                stopAuto()
-                Toast.makeText(this, "自動翻訳を止めました。もう一度押すと再開します", Toast.LENGTH_SHORT).show()
-            } else {
-                startAuto()
+    // ---- 制御：出来事を状態遷移へ渡し、返った作業を行う ----
+
+    private fun dispatch(event: SessionEvent) {
+        val (next, effects) = ScreenSession.reduce(state, event)
+        state = next
+        effects.forEach(::perform)
+    }
+
+    private fun perform(effect: Effect) {
+        when (effect) {
+            is Effect.Capture -> capture(effect.session)
+            is Effect.BeginValidity -> workOf(effect.session)?.reference?.let(validity::begin)
+            is Effect.Recognize -> recognize(effect.session)
+            is Effect.NothingToTranslate -> workOf(effect.session)?.let { w ->
+                overlay?.showStatus(w.ocrError ?: "訳す文字が見つかりませんでした（文字認識 ${w.ocrMillis}ms）")
             }
-            return
-        }
-        if (overlay?.isShowing == true) {
-            job?.cancel()
-            overlay?.clear()
-        } else {
-            translateScreen()
-        }
-    }
-
-    /** 始め方を反映する。自動なら見張りを始める。 */
-    private fun applyTrigger(trigger: ScreenTrigger) {
-        if (trigger == ScreenTrigger.AUTO) startAuto() else stopAuto()
-    }
-
-    /**
-     * ほかのアプリの画面に触れたとき（[TouchWatcher]。自分のボタン・メニュー・表示への操作は除いてある）。
-     * - 撮って訳している途中なら、撮影・文字認識・翻訳をすべて取り消して訳を消す（2026-11-12、作者の要望
-     *   「自動翻訳で訳している途中に画面を操作したら全処理をキャンセル」）。自動なら待ちへ戻り、画面が止まったら訳し直す。
-     * - タップで訳すときに訳を出していれば消す（スクロールなどで画面が変わるので）。
-     * - 自動で訳を出していれば、訳の枠の下の文字が変わったかをのぞく（[peekUnderBoxes]）。
-     */
-    private fun onScreenTouch() {
-        if (job?.isActive == true) {
-            Log.i(TAG, "画面翻訳: 訳している途中に画面を操作したので取り消した")
-            cancelAll()
-            return
-        }
-        if (preferences.trigger == ScreenTrigger.TAP) {
-            overlay?.clear()
-            return
-        }
-        peekUnderBoxes()
-    }
-
-    /**
-     * ほかのアプリの画面が切り替わったとき（ユーザー補助の知らせ。アプリの切り替え・戻る・ホーム）。
-     * 訳している途中か訳を出していれば、すべて取り消して訳を消す。ジェスチャーの帯は重ね表示より手前の窓なので
-     * [TouchWatcher] には触れた知らせが来ないが、ユーザー補助ならこの知らせで確実に分かる。
-     */
-    private fun onWindowChanged() {
-        Log.d(TAG, "画面翻訳（調査）: ユーザー補助の画面の切り替わりの知らせ（訳している途中 ${job?.isActive == true}、訳を表示中 ${overlay?.isShowing == true}）")
-        if (!preferences.opaqueOverlay) return
-        if (job?.isActive == true || overlay?.isShowing == true) {
-            Log.i(TAG, "画面翻訳: ほかのアプリの画面が切り替わったので取り消した")
-            cancelAll()
+            is Effect.Translate -> translate(effect.session)
+            is Effect.Finished -> workOf(effect.session)?.let(::finished)
+            is Effect.Failed -> overlay?.showStatus(if (effect.message.startsWith("画面")) effect.message else "翻訳に失敗しました: ${effect.message}")
+            is Effect.Peek -> peek(effect.session)
+            is Effect.Cancel -> cancel(effect.session)
+            Effect.ClearOverlay -> overlay?.clear()
+            Effect.EndValidity -> validity.end()
+            Effect.ResetStart -> startJudge.reset(SystemClock.uptimeMillis())
+            is Effect.ButtonActive -> button?.setActive(effect.active)
+            is Effect.Notice -> Toast.makeText(this, effect.text, Toast.LENGTH_SHORT).show()
         }
     }
 
-    /** 撮影・文字認識・翻訳・のぞきをすべて取り消し、訳を消す。自動なら待ちへ戻る。 */
-    private fun cancelAll() {
-        job?.cancel()
-        peekJob?.cancel()
-        overlay?.clear()
-        if (autoJob?.isActive == true) {
-            reference = null
-            beginSettling(SystemClock.uptimeMillis())
-        }
+    private fun workOf(session: Int): Work? = work?.takeIf { it.session == session }
+
+    /** セッションの作業（撮影・文字認識・翻訳・のぞき）を取り消し、材料を捨てる。 */
+    private fun cancel(session: Int) {
+        val w = workOf(session) ?: return
+        w.job.cancel()
+        w.bitmap?.recycle()
+        w.bitmap = null
+        work = null
+        hiding = false
+        button?.setVisible(true)
     }
 
-    private fun startAuto() {
-        autoJob?.cancel()
-        autoJob = scope.launch { watchScreen() }
-        button?.setActive(true)
-    }
+    // ---- 作業の実行 ----
 
-    private fun stopAuto() {
-        autoJob?.cancel()
-        autoJob = null
-        job?.cancel()
-        overlay?.clear()
-        button?.setActive(preferences.trigger != ScreenTrigger.AUTO)
-    }
-
-    /**
-     * 自動で訳すときの見張り（2026-11-12、作者の要望「漫画のページ送りや、Discordでスクロールが止まったら、タップ不要で訳す」。
-     * docs/05_画面翻訳.md「自動で訳す」）。[AUTO_POLL_MS] ごとに、新しく届いた画面を格子に縮めて比べる（[ScreenChange]）。
-     *
-     * 1. 待ち（[settling]）：直前の画面からの変化が [Thresholds.stable] 未満の状態が [AUTO_SETTLE_MS] 続いたら（画面が止まったら）訳す。
-     *    新しい画面が届かないのも止まっている印。
-     * 2. 表示中：訳したときの画面（[reference]）からの変化が [Thresholds.change] 以上なら（スクロール・ページ送り）、
-     *    訳を消し（訳している途中なら取り消し）、1.へ戻る。自分の訳の枠・上部の表示・浮遊ボタンの下は比べない。
-     *
-     * 動く画面のモードでは、直近 [MOTION_THUMBS] 回の格子をます目ごとの中央値で1枚にしてから比べる（[ScreenChange.median]）。
-     * 背景が動き続けるゲームでは、1回ごとの格子を比べると画面が止まったことにならず、いつまでも訳さなかった
-     * （2026-11-12、大きな図形が動き回る試験の画面で、しきい値を12%に緩めても20秒間訳さなかった）。
-     * それでも大きな図形が画面の多くを覆って動くと中央値に残るので、さらに直近の格子で明るさが動いたます目（[ScreenChange.active]）を
-     * 比べる対象から外し、止まっているます目（UI・台詞の枠）だけで見る。訳を出している間に動き出したます目も外していく。
-     * 待ちが [MOTION_MAX_WAIT_MS] を超えたら、止まるのを待たずに訳す。
-     *
-     * 訳の枠の真下の変化（ゲームの台詞送り）はここでは見えないので、触れたときに枠の下をのぞいて見る（[peekUnderBoxes]）。
-     */
-    private suspend fun watchScreen() {
-        var lastAt = 0L
-        var lastDiagAt = 0L
-        recentThumbs.clear()
-        beginSettling(SystemClock.uptimeMillis())
-        while (true) {
-            delay(AUTO_POLL_MS)
-            val capturer = capturer ?: return
-            // 撮っている間・枠の下をのぞいている間は自分の表示を隠しているので比べない。メニューを選んでいる間は訳さない
-            if (capturing || peeking || menu?.isShowing == true) continue
-            val sample = capturer.latestThumb(lastAt)
-            val now = SystemClock.uptimeMillis()
-            if (sample != null) lastAt = sample.second
-            val motion = preferences.recognition == ScreenRecognition.MOTION
-            val thumb = sample?.first?.let { t ->
-                recentThumbs.addLast(t)
-                while (recentThumbs.size > MOTION_THUMBS) recentThumbs.removeFirst()
-                if (motion) ScreenChange.median(recentThumbs.toList()) else t
+    /** 自分の表示を隠して画面を撮る。場面の設定が数枚を重ねるなら、続けて撮って中央値の1枚にする（[FrameStack]）。 */
+    private fun capture(session: Int) {
+        val w = Work(session).also { work = it }
+        val capturer = capturer ?: return dispatch(SessionEvent.Captured(session, ok = false))
+        val profile = profile
+        scope.launch(w.job) {
+            val hiddenAt = SystemClock.uptimeMillis()
+            hiding = true
+            val captured = try {
+                button?.setVisible(false)
+                overlay?.clear()
+                delay(HIDE_SETTLE_MS)
+                // 消した後に描かれた画面（1フレーム＝約16ms後以降に届いたもの）を使う
+                captureScreen(capturer, since = hiddenAt + 16, profile)
+            } finally {
+                button?.setVisible(true)
+                hiding = false
             }
-            val active = if (motion && recentThumbs.size >= 3) ScreenChange.active(recentThumbs.toList()) else null
-            val limits = thresholds(preferences.recognition)
-            if (!settling) {
-                if (thumb == null) continue
-                val ref = reference
-                if (ref == null) {
-                    // 撮れなかったなど。訳していなければ待ちへ戻る
-                    if (job?.isActive != true) beginSettling(now)
-                    continue
-                }
-                // 戻る・ホームのジェスチャーやアプリの切り替えで画面が丸ごと変わったら、モードによらずすぐ取り消す
-                if (switched(ref, sample?.first, motion)) {
-                    Log.i(TAG, "自動翻訳: 画面が切り替わったので取り消した")
-                    cancelAll()
-                    continue
-                }
-                val masks = overlay?.occupiedRects().orEmpty() + listOfNotNull(button?.bounds)
-                val mask = ScreenChange.union(ScreenChange.mask(thumb, masks), animated)
-                val changed = ScreenChange.changedFraction(ref, thumb, mask)
-                // 調査用（2026-11-12、訳している途中に戻っても取り消されない）：訳している間の見張りの判断を残す
-                if (job?.isActive == true && now - lastDiagAt >= 500) {
-                    lastDiagAt = now
-                    val raw = sample?.first
-                    val rawChanged = raw?.let { ScreenChange.changedFraction(ref, it, ScreenChange.mask(it, masks)) }
-                    val hidden = mask.count { it } * 100 / mask.size
-                    Log.d(TAG, "自動翻訳（調査）: 訳している間の変化 ${"%.2f".format(changed)}（しきい値 ${limits.change}）、" +
-                        "1枚の変化 ${rawChanged?.let { "%.2f".format(it) }}（切り替わり ${if (motion) MOTION_SWITCH_CHANGE else SWITCH_CHANGE}）、" +
-                        "比べないます目 $hidden%、枠 ${overlay?.boxBounds?.size}個、モード ${preferences.recognition}")
-                }
-                if (changed >= limits.change) {
-                    Log.i(TAG, "自動翻訳: 画面が変わった（${"%.2f".format(changed)}）ので訳を消す")
-                    job?.cancel()
-                    overlay?.clear()
-                    beginSettling(now)
-                    previous = thumb
-                } else if (active != null) {
-                    animated = ScreenChange.union(active, animated)
-                }
-                continue
+            w.captureMillis = SystemClock.uptimeMillis() - hiddenAt
+            if (captured != null) {
+                w.bitmap = captured.first
+                w.frames = captured.second
+                w.capturedSize = "${captured.first.width}x${captured.first.height}"
+                w.reference = captured.first.toThumb()
             }
-            if (thumb != null) {
-                val prev = previous
-                previous = thumb
-                val mask = ScreenChange.union(ScreenChange.mask(thumb, listOfNotNull(button?.bounds)), active)
-                if (prev == null || ScreenChange.changedFraction(prev, thumb, mask) >= limits.stable) stableSince = now
+            dispatch(SessionEvent.Captured(session, ok = captured != null))
+        }
+    }
+
+    private suspend fun captureScreen(capturer: ScreenCapturer, since: Long, profile: SceneProfile): Pair<Bitmap, Int>? {
+        if (profile.stackFrames <= 1) return capturer.capture(since)?.let { it to 1 }
+        val frames = capturer.captureFrames(since, profile.stackFrames, profile.stackIntervalMs)
+        if (frames.isEmpty()) return null
+        if (frames.size == 1) return frames[0] to 1
+        val stacked = try {
+            FrameStack.median(frames)
+        } finally {
+            frames.forEach { it.recycle() }
+        }
+        return stacked to frames.size
+    }
+
+    /** 文字を読み、訳す対象と枠の位置・色を選ぶ。 */
+    private fun recognize(session: Int) {
+        val w = workOf(session) ?: return
+        val bitmap = w.bitmap ?: return
+        val language = preferences.language
+        val outlined = profile.outlinedText
+        scope.launch(w.job) {
+            overlay?.showStatus("文字を読んでいます…")
+            val t0 = SystemClock.uptimeMillis()
+            val blocks = try {
+                // 白縁取り・白抜きの文字にも強い読み方（OutlinedText）は、場面の設定で選ぶ
+                if (outlined) ocr.recognizeOutlined(bitmap, language) else ocr.recognize(bitmap, language)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                w.ocrError = "文字を読めませんでした: ${e.message}"
+                emptyList()
             }
-            val waitedTooLong = motion && now - settleStart >= MOTION_MAX_WAIT_MS
-            if (now - stableSince >= AUTO_SETTLE_MS || waitedTooLong) {
-                settling = false
-                previous = null
-                animated = active
-                translateScreen(fromUser = false)
+            w.ocrMillis = SystemClock.uptimeMillis() - t0
+            w.blocks = blocks.size
+            w.statusBar = statusBarHeight()
+            w.targets = if (blocks.isEmpty()) emptyList() else selectTargets(blocks, bitmap, w.statusBar, SCREEN_TARGET, fitBubbles = preferences.fitBubbles)
+            bitmap.recycle()
+            w.bitmap = null
+            dispatch(SessionEvent.Recognized(session, w.targets.size))
+        }
+    }
+
+    /** 空の訳の枠を出し、翻訳の流れを開いて訳を流し込む。 */
+    private fun translate(session: Int) {
+        val w = workOf(session) ?: return
+        overlay?.show(w.targets.map { it.slot }, "${w.targets.size}件を翻訳中…")
+        val source = preferences.language.sourceLanguage
+        scope.launch(w.job) {
+            val ready = EngineHolder.awaitReady(this@ScreenTranslateService)
+            if (ready == null) {
+                dispatch(SessionEvent.TranslationFailed(session, "翻訳モデルを読めません。アプリを開いて確認してください"))
+                return@launch
+            }
+            w.model = ready.model.label
+            w.translateStart = SystemClock.uptimeMillis()
+            // 1回の翻訳ごとに翻訳の流れを開き、終わったら閉じる（docs/13_画面翻訳の構成.md「翻訳の契約」）。
+            // 控えは端末のデータベースにも残し、次に始めたときも使う。データベースでは確かなモデル（2B）の訳を優先する（TranslationCache.Scope）
+            val store = TranslationCache.get(this@ScreenTranslateService)
+            val stream = Translations.open(this, this@ScreenTranslateService, TranslationStream.Options(source, SCREEN_TARGET), memoryCache) { r ->
+                Translations.PersistentMemory(store.scope(r.model.file.sha256.take(16), r.model.cacheRank, source, SCREEN_TARGET), store.generation)
+            }
+            try {
+                stream.submit(w.targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })
+                stream.updates.transformWhile { u ->
+                    when (u) {
+                        is SegmentUpdate.Partial -> overlay?.setTranslation(u.id.toInt(), u.text)
+                        is SegmentUpdate.Final -> {
+                            overlay?.setTranslation(u.id.toInt(), u.text)
+                            dispatch(SessionEvent.SegmentDone(session))
+                        }
+                        is SegmentUpdate.Failed -> dispatch(SessionEvent.TranslationFailed(session, u.message))
+                    }
+                    emit(u)
+                    // 全部確定した・失敗した・取り消した：状態遷移がこのセッションの翻訳を終えたら読むのをやめる
+                    state.phase.let { it is Phase.Translating && it.session == session }
+                }.collect { }
+            } finally {
+                w.stats = stream.stats
+                stream.close()
             }
         }
     }
 
-    /**
-     * 訳したときの画面 [ref] から、今届いた画面 [raw]（中央値にしていない1枚）が丸ごと切り替わったか（2026-11-12、作者の指摘
-     * 「戻る・ホームのジェスチャーで、訳している途中の処理が取り消されない」）。
-     * ジェスチャーの帯はシステムの窓で、重ね表示より手前にあるので、触れた知らせ（[TouchWatcher]）が届かない。
-     * 動く画面のモードの見張りは動いたます目を外していくので、切り替わりの動きの最初のコマを動く背景として覚え、見逃していた。
-     * そこで、中央値や動いたます目の除外を通さない1枚で、ます目の半分以上（動く画面は6割以上）が変わったかを見る。
-     * 自分の訳の枠・上部の表示・浮遊ボタンの下は比べない。
-     */
-    private fun switched(ref: Thumb, raw: Thumb?, motion: Boolean): Boolean {
-        raw ?: return false
-        val masks = overlay?.occupiedRects().orEmpty() + listOfNotNull(button?.bounds)
-        val changed = ScreenChange.changedFraction(ref, raw, ScreenChange.mask(raw, masks))
-        return changed >= if (motion) MOTION_SWITCH_CHANGE else SWITCH_CHANGE
+    /** 全部の訳が確定した：上部に件数と時間を出し、記録する。 */
+    private fun finished(w: Work) {
+        val translateMillis = SystemClock.uptimeMillis() - w.translateStart
+        // 数枚を撮って重ねるときは、撮る時間も待ち時間なので含める
+        val total = w.ocrMillis + translateMillis + if (w.frames > 1) w.captureMillis else 0
+        val frames = if (w.frames > 1) "・${w.frames}枚重ね" else ""
+        overlay?.showStatus("${w.targets.size}件・${"%.1f".format(total / 1000.0)}秒・${w.model}$frames")
+        val st = w.stats
+        Log.i(
+            TAG,
+            "画面翻訳: ${w.blocks}ブロック中${w.targets.size}件、撮影 ${w.captureMillis}ms（${w.frames}枚）、文字認識 ${w.ocrMillis}ms、" +
+                "翻訳 ${translateMillis}ms、モデル ${w.model}、重要度 ${importance()}、画面 ${w.capturedSize}、状態バー ${w.statusBar}px" +
+                (st?.let { "、控え メモリ${it.memoryHits}・データベース${it.storedHits}、訳した${it.pieces}片（訳し直し${it.retried}、打ち切り${it.stopped}）" } ?: ""),
+        )
     }
 
     /**
-     * タップで訳すとき、訳している間だけ画面の切り替わりを見張り、切り替わったら取り消す（自動のときは [watchScreen] が見る）。
+     * 自動で訳を出しているときに触れたら、触れた操作に画面が応えるのを待ってから、訳の枠を隠して枠の下を撮り、
+     * 判定Bで原文が変わったかを見る（ゲームの台詞送り：変わるのは訳の枠の真下だけで、枠の外では気づけない）。
      */
-    private suspend fun guardSwitch(ref: Thumb) {
-        var lastAt = SystemClock.uptimeMillis()
-        val motion = preferences.recognition == ScreenRecognition.MOTION
-        while (true) {
-            delay(AUTO_POLL_MS)
-            val sample = capturer?.latestThumb(lastAt) ?: continue
-            lastAt = sample.second
-            if (switched(ref, sample.first, motion)) {
-                Log.i(TAG, "画面翻訳: 画面が切り替わったので取り消した")
-                cancelAll()
-                return
-            }
-        }
-    }
-
-    /** 見張りを待ち（画面が止まるのを待つ）に戻す。 */
-    private fun beginSettling(now: Long) {
-        settling = true
-        settleStart = now
-        stableSince = now
-        previous = null
-        animated = null
-    }
-
-    /**
-     * 自動で訳しているとき、画面のどこかに触れたら（[onScreenTouch]）、訳の枠の下の文字が変わったかをのぞく
-     * （2026-11-12。ゲームで台詞を送ると、変わるのは訳の枠の真下だけで、枠の下は比べないので見張りでは気づけなかった）。
-     * 触れた操作に画面が応えるのを [PEEK_DELAY_MS] 待ってから、訳の枠を隠して撮り、訳したときの画面と枠の範囲だけで比べる。
-     * 変わっていれば訳を消して待ちへ戻し（止まったら訳し直す）、変わっていなければ枠を戻す。
-     */
-    private fun peekUnderBoxes() {
-        if (autoJob?.isActive != true || settling || capturing || peeking) return
-        peekJob?.cancel()
-        peekJob = scope.launch {
+    private fun peek(session: Int) {
+        val w = workOf(session) ?: return
+        if (w.peekJob?.isActive == true) return
+        val capturer = capturer ?: return
+        val frames = if (profile.stackFrames > 1) 3 else 1
+        w.peekJob = scope.launch(w.job) {
             delay(PEEK_DELAY_MS)
-            if (autoJob?.isActive != true || settling || capturing || menu?.isShowing == true || job?.isActive == true) return@launch
+            if (state.phase != Phase.Showing(session) || state.menuOpen) return@launch
             val overlay = overlay ?: return@launch
-            val capturer = capturer ?: return@launch
-            val ref = reference ?: return@launch
             val boxes = overlay.boxBounds.takeIf { it.isNotEmpty() } ?: return@launch
-            val motion = preferences.recognition == ScreenRecognition.MOTION
-            peeking = true
-            var changed = 0f
+            hiding = true
+            val thumbs = mutableListOf<Thumb>()
             try {
                 val hiddenAt = SystemClock.uptimeMillis()
                 overlay.setBoxesVisible(false)
                 delay(HIDE_SETTLE_MS)
-                // 枠を隠した後の画面を撮る。動く画面のモードは3枚の中央値で背景の動きを消す
-                val thumbs = mutableListOf<Thumb>()
+                // 枠を隠した後の画面を撮る。動く画面は3枚の中央値で背景の動きを消す
                 var after = hiddenAt + 16
                 val deadline = SystemClock.uptimeMillis() + PEEK_TIMEOUT_MS
-                while (thumbs.size < (if (motion) 3 else 1) && SystemClock.uptimeMillis() < deadline) {
-                    val s = capturer.latestThumb(after)
-                    if (s != null) {
-                        thumbs += s.first
-                        after = s.second + MOTION_PEEK_INTERVAL_MS
+                while (thumbs.size < frames && SystemClock.uptimeMillis() < deadline) {
+                    capturer.latestThumb(after)?.let { (t, at) ->
+                        thumbs += t
+                        after = at + MOTION_PEEK_INTERVAL_MS
                     }
                     delay(16)
                 }
-                if (thumbs.isEmpty()) return@launch
-                val now = if (thumbs.size >= 3) ScreenChange.median(thumbs) else thumbs.last()
-                // 訳の枠の範囲だけを比べる。動く背景のます目は外さない。半透明の台詞の枠は奥を図形が通ると「動く背景」になり、
-                // 外すと台詞が変わっても気づけなかった（2026-11-12）。誤って変わったとみても、控えがあるので訳し直しは速い
-                val mask = ScreenChange.invert(ScreenChange.mask(now, boxes))
-                changed = ScreenChange.changedFraction(ref, now, mask)
             } finally {
-                peeking = false
+                hiding = false
             }
-            Log.i(TAG, "自動翻訳: 触れたので訳の枠の下を見た（変化 ${"%.2f".format(changed)}）")
-            if (changed >= PEEK_CHANGE) {
-                overlay.clear()
-                beginSettling(SystemClock.uptimeMillis())
-            } else {
-                overlay.setBoxesVisible(true)
+            val verdict = if (thumbs.isEmpty()) Validity.Valid else {
+                validity.peek(if (thumbs.size >= 3) ScreenChange.median(thumbs) else thumbs.last(), boxes.map { it.toBox() })
+            }
+            Log.i(TAG, "自動翻訳: 触れたので訳の枠の下を見た（$verdict）")
+            if (verdict is Validity.Invalid) dispatch(SessionEvent.Invalidated(verdict.reason)) else overlay.setBoxesVisible(true)
+        }
+    }
+
+    // ---- 見張り：届いた画面を判定器へ ----
+
+    /**
+     * [AUTO_POLL_MS] ごとに新しく届いた画面を格子に縮め（[ScreenCapturer.latestThumb]）、待ちの間は開始の判定Aへ、
+     * 訳している間と表示している間は有効性の判定Bへ渡す。判定の結果は出来事にして状態遷移へ渡す。
+     */
+    private suspend fun watch() {
+        var lastAt = 0L
+        while (true) {
+            delay(AUTO_POLL_MS)
+            val capturer = capturer ?: return
+            // 撮る・のぞくために自分の表示を隠している間と、メニューを選んでいる間は判定しない
+            if (hiding || state.menuOpen) continue
+            val sample = capturer.latestThumb(lastAt)
+            val now = SystemClock.uptimeMillis()
+            if (sample != null) lastAt = sample.second
+            val thumb = sample?.first
+            when {
+                state.phase == Phase.Watching -> {
+                    val own = thumb?.let { t -> ScreenChange.mask(t, listOfNotNull(button?.bounds?.toBox())) }
+                    if (startJudge.feed(thumb, now, own)) dispatch(SessionEvent.Settled)
+                }
+                validity.active && thumb != null -> {
+                    val own = overlay?.occupiedRects().orEmpty().map { it.toBox() } + listOfNotNull(button?.bounds?.toBox())
+                    val boxes = overlay?.boxBounds.orEmpty().map { it.toBox() }
+                    val verdict = validity.feed(thumb, boxes, own, watchOutside = state.trigger == ScreenSession.Trigger.AUTO)
+                    if (verdict is Validity.Invalid) {
+                        Log.i(TAG, "画面翻訳: ${verdict.reason}（${"%.2f".format(verdict.amount)}）ので取り消した")
+                        dispatch(SessionEvent.Invalidated(verdict.reason))
+                    }
+                }
             }
         }
     }
 
-    /** 自動で訳すときの、変わった・止まったとみなすます目の割合。 */
-    private class Thresholds(val change: Float, val stable: Float)
+    // ---- 合図 ----
 
-    private fun thresholds(mode: ScreenRecognition) = when (mode) {
-        // 通常：画面の6%が変われば変わった（数行のスクロールで超える）、2%未満なら止まった（点滅するカーソルや小さなアイコンは許す）
-        ScreenRecognition.NORMAL -> Thresholds(change = 0.06f, stable = 0.02f)
-        // 動く画面：中央値で背景の動きを消し、動いたます目も外して比べる。それでも大きなキャラクターが新しい場所へ動くと
-        // 9〜27%が変わった（2026-11-12の試験の画面）ので、画面の変化は場面転換・ページ送りくらい（35%以上）だけを見る。
-        // 台詞送りのような枠の下の変化は、触れたときにのぞいて見る（peekUnderBoxes）
-        ScreenRecognition.MOTION -> Thresholds(change = 0.35f, stable = 0.04f)
+    /** 浮遊ボタンのタップ。タップで訳すときは訳す・消す、自動で訳すときは見張りを止める・再開する（状態遷移が決める）。 */
+    private fun onButtonTap() {
+        menu?.dismiss()
+        dispatch(SessionEvent.ButtonTapped)
+    }
+
+    /** ほかのアプリの画面に触れたとき（[TouchWatcher]。自分のボタン・メニュー・表示への操作は除いてある）。 */
+    private fun onScreenTouch() {
+        if (state.working) Log.i(TAG, "画面翻訳: 訳している途中に画面を操作したので取り消した")
+        dispatch(SessionEvent.OutsideTouched)
+    }
+
+    /** ほかのアプリ・画面への切り替わり（ユーザー補助の知らせ。アプリの切り替え・ホーム・最近使ったアプリ・別の画面）。 */
+    private fun onWindowChanged() {
+        if (state.session == null) return
+        Log.i(TAG, "画面翻訳: ほかのアプリの画面が切り替わったので取り消した")
+        dispatch(SessionEvent.Invalidated("ほかの画面に切り替わった"))
+    }
+
+    /** 場面の設定（認識モード）を今の設定に合わせ、判定器を作り直す。 */
+    private fun applyProfile() {
+        profile = when (preferences.recognition) {
+            ScreenRecognition.NORMAL -> SceneProfile.NORMAL
+            ScreenRecognition.MOTION -> SceneProfile.MOTION
+        }
+        startJudge = StartJudge(profile.start).also { it.reset(SystemClock.uptimeMillis()) }
+        validity = ValidityJudge(profile.validity)
     }
 
     /**
-     * 長押しのメニュー：原文の言語、認識モード、翻訳モデル、終了（2026-11-12に認識モードと翻訳モデルを足した。作者の要望）。
+     * 長押しのメニュー：原文の言語、始め方、認識モード、訳の枠、翻訳モデル、終了。
      * 翻訳モデルはアプリ全体で1つなので、ここで変えると会話・カメラ・テキストの画面のモデルも変わる。
+     * 開くと訳を消し、訳している途中なら取り消す（訳の枠がメニューより手前に出て触れなくなるため。状態遷移の MenuOpened）。
      */
     private fun showMenu() {
         val (x, y) = button?.position ?: return
-        // 訳の枠（特にユーザー補助の重ね表示）はメニューより手前に出て、メニューに触れなくなる（2026-11-12、作者の指摘）。
-        // 開くときは訳を消し、訳している途中なら取り消す（取り消さないと、訳し終わった枠がメニューの上に出る）。
-        // 自動で訳すときは、メニューを閉じた後に画面が止まっていれば訳し直す（訳し終えた分は控えから出る）
-        cancelAll()
+        dispatch(SessionEvent.MenuOpened)
         val entries = buildList {
             add(MenuEntry.Header("原文の言語"))
             OcrLanguage.entries.forEach { lang ->
@@ -469,23 +483,26 @@ class ScreenTranslateService : Service() {
                 add(MenuEntry.Item(t.menuName, checked = t == preferences.trigger) {
                     preferences.trigger = t
                     button?.setLabel(buttonLabel(preferences.language, t))
-                    applyTrigger(t)
+                    dispatch(SessionEvent.TriggerChanged(t.toTrigger()))
                 })
             }
             add(MenuEntry.Header("認識モード"))
             ScreenRecognition.entries.forEach { mode ->
-                add(MenuEntry.Item(mode.menuName, checked = mode == preferences.recognition) { preferences.recognition = mode })
+                add(MenuEntry.Item(mode.menuName, checked = mode == preferences.recognition) {
+                    preferences.recognition = mode
+                    applyProfile()
+                })
             }
             add(MenuEntry.Header("訳の枠"))
             add(MenuEntry.Item("元の文字に合わせる", checked = !preferences.fitBubbles) { preferences.fitBubbles = false })
             add(MenuEntry.Item("吹き出しいっぱいに広げる", checked = preferences.fitBubbles) { preferences.fitBubbles = true })
             add(MenuEntry.Header("翻訳モデル"))
-            val state = EngineHolder.state.value
-            val current = (state as? ModelState.Ready)?.model ?: EngineHolder.selected(this@ScreenTranslateService)
+            val engineState = EngineHolder.state.value
+            val current = (engineState as? ModelState.Ready)?.model ?: EngineHolder.selected(this@ScreenTranslateService)
             TranslationModel.entries.forEach { m ->
                 val present = m.isPresent(this@ScreenTranslateService)
                 val label = if (present) m.label else "${m.label}（設定の画面からダウンロード）"
-                add(MenuEntry.Item(label, checked = m == current, enabled = present && state !is ModelState.Loading) {
+                add(MenuEntry.Item(label, checked = m == current, enabled = present && engineState !is ModelState.Loading) {
                     if (m != current) switchModel(m)
                 })
             }
@@ -497,145 +514,13 @@ class ScreenTranslateService : Service() {
 
     /** 翻訳モデルを切り替え、読み込みの進み具合を上部の小さな表示に出す。訳している途中なら取り消す（古いエンジンは閉じられる）。 */
     private fun switchModel(model: TranslationModel) {
-        job?.cancel()
-        overlay?.clear()
-        // 自動で訳しているなら、新しいモデルで訳し直す（画面が止まっていれば読み込みの後すぐ訳す）
-        reference = null
-        beginSettling(SystemClock.uptimeMillis())
+        dispatch(SessionEvent.ModelChanged)
         EngineHolder.select(this, model)
-        job = scope.launch {
+        modelJob?.cancel()
+        modelJob = scope.launch {
             overlay?.showStatus("${model.label}を読み込んでいます…")
             val ready = EngineHolder.awaitReady(this@ScreenTranslateService)
             overlay?.showStatus(if (ready != null) "翻訳モデルを${ready.model.label}にしました" else "翻訳モデルを読めませんでした")
-        }
-    }
-
-    /**
-     * 画面を撮る。通常は1枚。動く画面のモードは続けて数枚撮り、画素ごとの中央値で重ねた1枚にする（[FrameStack]）。
-     * 撮れなければ null。返す画像は呼ぶ側が捨てる。
-     */
-    private suspend fun captureScreen(capturer: ScreenCapturer, since: Long, mode: ScreenRecognition): Pair<Bitmap, Int>? {
-        if (mode == ScreenRecognition.NORMAL) return capturer.capture(since)?.let { it to 1 }
-        val frames = capturer.captureFrames(since, MOTION_FRAMES, MOTION_INTERVAL_MS)
-        if (frames.isEmpty()) return null
-        if (frames.size == 1) return frames[0] to 1
-        val stacked = try {
-            FrameStack.median(frames)
-        } finally {
-            frames.forEach { it.recycle() }
-        }
-        return stacked to frames.size
-    }
-
-    /** 画面を撮って訳す。[fromUser] が false（自動の見張りから）なら、メニューは閉じない。 */
-    private fun translateScreen(fromUser: Boolean = true) {
-        if (fromUser) menu?.dismiss()
-        job?.cancel()
-        job = scope.launch {
-            val overlay = overlay ?: return@launch
-            val capturer = capturer ?: return@launch
-            val language = preferences.language
-            val mode = preferences.recognition
-
-            // 自分のボタンと前の訳が写らないよう、消してから撮る
-            val hiddenAt = SystemClock.uptimeMillis()
-            Log.d(TAG, "画面翻訳（調査）: 訳し始める（${if (fromUser) "タップ" else "自動"}、モード $mode、残っていた訳の枠 ${overlay.boxBounds.size}個）")
-            capturing = true
-            reference = null
-            val captured = try {
-                button?.setVisible(false)
-                overlay.clear()
-                delay(HIDE_SETTLE_MS)
-                // 消した後に描かれた画面（1フレーム＝約16ms後以降に届いたもの）を使う
-                captureScreen(capturer, since = hiddenAt + 16, mode)
-            } finally {
-                button?.setVisible(true)
-                capturing = false
-            }
-            val captureMillis = SystemClock.uptimeMillis() - hiddenAt
-            if (captured == null) {
-                overlay.showStatus("画面を撮影できませんでした")
-                return@launch
-            }
-            val (bitmap, frameCount) = captured
-            val capturedSize = "${bitmap.width}x${bitmap.height}"
-            // 自動で訳すとき、ここからの画面の変化を見る（訳の枠を置く前の画面）
-            val ref = ScreenChange.thumb(bitmap).also { reference = it }
-            // タップで訳すときは、訳している間だけ画面の切り替わり（戻る・ホームのジェスチャーなど）を見張る
-            if (preferences.trigger == ScreenTrigger.TAP) {
-                val guard = scope.launch { guardSwitch(ref) }
-                coroutineContext[Job]?.invokeOnCompletion { guard.cancel() }
-            }
-
-            overlay.showStatus("文字を読んでいます…")
-            val t0 = SystemClock.uptimeMillis()
-            val blocks = try {
-                // 動く画面のモード（ゲーム）は、白縁取り・白抜きの文字にも強い読み方にする（OutlinedText）
-                if (mode == ScreenRecognition.MOTION) ocr.recognizeOutlined(bitmap, language) else ocr.recognize(bitmap, language)
-            } catch (e: Exception) {
-                bitmap.recycle()
-                if (e is CancellationException) throw e
-                overlay.showStatus("文字を読めませんでした: ${e.message}")
-                return@launch
-            }
-            val ocrMillis = SystemClock.uptimeMillis() - t0
-            val statusBar = statusBarHeight()
-            val targets = selectTargets(blocks, bitmap, statusBar, SCREEN_TARGET, fitBubbles = preferences.fitBubbles)
-            bitmap.recycle()
-            if (targets.isEmpty()) {
-                overlay.showStatus("訳す文字が見つかりませんでした（文字認識 ${ocrMillis}ms）")
-                return@launch
-            }
-            overlay.show(targets.map { it.slot }, "${targets.size}件を翻訳中…")
-
-            val ready = EngineHolder.awaitReady(this@ScreenTranslateService)
-            if (ready == null) {
-                overlay.showStatus("翻訳モデルを読めません。アプリを開いて確認してください")
-                return@launch
-            }
-            val t1 = SystemClock.uptimeMillis()
-            // 1回の翻訳ごとに翻訳の流れを開き、終わったら閉じる（docs/13_画面翻訳の構成.md「翻訳の契約」）。
-            // メモリの控えはサービスが1つ持って流れどうしで共有し、訳したモデルが変わったら捨てる。
-            // 控えは端末のデータベースにも残し、次に始めたときも使う。データベースでは確かなモデル（2B）の訳を優先する（TranslationCache.Scope）
-            val source = language.sourceLanguage
-            val store = TranslationCache.get(this@ScreenTranslateService)
-            val stream = Translations.open(this, this@ScreenTranslateService, TranslationStream.Options(source, SCREEN_TARGET), memoryCache) { r ->
-                Translations.PersistentMemory(store.scope(r.model.file.sha256.take(16), r.model.cacheRank, source, SCREEN_TARGET), store.generation)
-            }
-            var failure: String? = null
-            try {
-                stream.submit(targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })
-                val done = HashSet<Long>()
-                stream.updates.transformWhile { u ->
-                    when (u) {
-                        is SegmentUpdate.Partial -> overlay.setTranslation(u.id.toInt(), u.text)
-                        is SegmentUpdate.Final -> {
-                            overlay.setTranslation(u.id.toInt(), u.text)
-                            done += u.id
-                        }
-                        is SegmentUpdate.Failed -> {
-                            failure = u.message
-                            done += u.id
-                        }
-                    }
-                    emit(u)
-                    done.size < targets.size
-                }.collect { }
-                val st = stream.stats
-                Log.i(TAG, "まとめ訳し: ${targets.size}件、控え メモリ${st.memoryHits}・データベース${st.storedHits}、訳した${st.pieces}片（訳し直し${st.retried}、打ち切り${st.stopped}）")
-            } finally {
-                stream.close()
-            }
-            failure?.let {
-                overlay.showStatus("翻訳に失敗しました: $it")
-                return@launch
-            }
-            val translateMillis = SystemClock.uptimeMillis() - t1
-            // 動く画面のモードは撮る時間（数枚を撮って重ねる）も待ち時間なので含める
-            val totalMillis = ocrMillis + translateMillis + if (frameCount > 1) captureMillis else 0
-            val frames = if (frameCount > 1) "・${frameCount}枚重ね" else ""
-            overlay.showStatus("${targets.size}件・${"%.1f".format(totalMillis / 1000.0)}秒・${ready.model.label}$frames")
-            Log.i(TAG, "画面翻訳: ${blocks.size}ブロック中${targets.size}件、撮影 ${captureMillis}ms（${frameCount}枚）、文字認識 ${ocrMillis}ms、翻訳 ${translateMillis}ms、モデル ${ready.model.label}、重要度 ${importance()}、画面 ${capturedSize}、状態バー ${statusBar}px")
         }
     }
 
@@ -649,7 +534,7 @@ class ScreenTranslateService : Service() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 when (intent.action) {
-                    DEBUG_TRANSLATE -> translateScreen()
+                    DEBUG_TRANSLATE -> dispatch(SessionEvent.ButtonTapped)
                     DEBUG_CONFIG -> scope.launch {
                         EngineHolder.awaitEngine(this@ScreenTranslateService)?.configure(
                             boost = intent.getBooleanExtra("boost", true),
@@ -669,10 +554,12 @@ class ScreenTranslateService : Service() {
     override fun onDestroy() {
         debugReceiver?.let { unregisterReceiver(it) }
         if (OverlayAccessibilityService.onWindowChanged != null) OverlayAccessibilityService.onWindowChanged = null
+        work?.let { cancel(it.session) }
         scope.cancel()
         button?.remove()
         touchWatcher?.remove()
         overlay?.clear()
+        menu?.onDismiss = null
         menu?.dismiss()
         capturer?.release()
         projection?.stop()
@@ -703,27 +590,12 @@ class ScreenTranslateService : Service() {
         private const val TAG = "PlamoTranslate"
         private const val CHANNEL_ID = "screen_translate"
         private const val NOTIFICATION_ID = 1
+
+        /** 自分の表示を隠してから、隠れた画面が描かれるのを待つ時間。 */
         private const val HIDE_SETTLE_MS = 50L
 
-        /**
-         * 動く画面のモードで重ねる枚数と間隔。約0.5秒の間に5枚撮る。中央値は半分未満のコマ（5枚中2枚まで）にしか
-         * 写らない動きを消すので、0.5秒のうち0.2秒ほどしか同じ画素に留まらない動きが消える。間隔を広げると遅い動きも消えるが、
-         * その分だけ待つ。ゲームで試して合わなければ変える（docs/05_画面翻訳.md「動く画面のモード」）。
-         */
-        private const val MOTION_FRAMES = 5
-        private const val MOTION_INTERVAL_MS = 110L
-
-        /** 自動で訳すとき、画面を見る間隔。縮めた格子を比べるだけなので軽い。 */
+        /** 画面を見る間隔。縮めた格子を比べるだけなので軽い。 */
         private const val AUTO_POLL_MS = 200L
-
-        /** 自動で訳すとき、画面がこれだけ止まっていたら訳す（スクロールの慣性が止まり、ページ送りの動きが終わるのを待つ）。 */
-        private const val AUTO_SETTLE_MS = 600L
-
-        /** 動く画面のモードの見張りで、中央値を取る格子の数（200msごとなので約1秒分）。 */
-        private const val MOTION_THUMBS = 5
-
-        /** 動く画面のモードで、画面が止まるのを待つ上限。背景が大きく動き続けても、これだけ待てば訳す。 */
-        private const val MOTION_MAX_WAIT_MS = 3000L
 
         /** 触れてから訳の枠の下をのぞくまでの待ち（台詞送りなど、触れた操作に画面が応えて描き終わるのを待つ）。 */
         private const val PEEK_DELAY_MS = 350L
@@ -734,12 +606,6 @@ class ScreenTranslateService : Service() {
         /** 動く画面のモードで、のぞくときに撮る3枚の間隔。 */
         private const val MOTION_PEEK_INTERVAL_MS = 80L
 
-        /** のぞいた訳の枠の範囲で、これだけのます目が変われば、枠の下の文字が変わったとみなす。 */
-        private const val PEEK_CHANGE = 0.15f
-
-        /** 画面が丸ごと切り替わったとみなす、変わったます目の割合（[switched]）。動く画面のモードは背景の動きの分だけ高くする。 */
-        private const val SWITCH_CHANGE = 0.5f
-        private const val MOTION_SWITCH_CHANGE = 0.6f
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_DATA = "data"
         const val ACTION_STOP = "app.plamotranslate.STOP_SCREEN_TRANSLATE"
@@ -761,6 +627,12 @@ class ScreenTranslateService : Service() {
             context.startService(Intent(context, ScreenTranslateService::class.java).setAction(ACTION_STOP))
         }
     }
+}
+
+/** 設定の始め方を、状態遷移の始め方にする。 */
+private fun ScreenTrigger.toTrigger() = when (this) {
+    ScreenTrigger.TAP -> ScreenSession.Trigger.TAP
+    ScreenTrigger.AUTO -> ScreenSession.Trigger.AUTO
 }
 
 /** 診断用：自分のプロセスの重要度（100=前面、125=フォアグラウンドサービス）。 */
