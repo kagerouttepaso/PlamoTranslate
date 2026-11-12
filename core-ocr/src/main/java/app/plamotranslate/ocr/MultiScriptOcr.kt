@@ -20,7 +20,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * 複数の文字認識器を並列に動かし、行ごとに文字種に合う結果を採る（docs/05_画面翻訳.md「文字認識」）。
+ * 複数の文字認識器を並列に動かし、行ごとに文字種に合う結果を採る（docs/設計/画面翻訳.md「文字認識」）。
  *
  * - ML Kitの中国語・日本語・韓国語・英字の認識器（横書き）。
  * - [mangaDir] に漫画モデル（[MangaOcr]）があれば、それも動かす。縦書きの中国語・日本語を読める。

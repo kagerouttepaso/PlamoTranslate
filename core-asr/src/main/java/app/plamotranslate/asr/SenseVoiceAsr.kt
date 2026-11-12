@@ -10,11 +10,11 @@ import com.k2fsa.sherpa.onnx.VadModelConfig
 import java.io.File
 
 /**
- * Silero VADで発話を切り出し、SenseVoice Smallで1発話ずつ認識する（docs/04_会話翻訳.md）。
+ * Silero VADで発話を切り出し、SenseVoice Smallで1発話ずつ認識する（docs/設計/会話翻訳.md）。
  * SenseVoiceは発話単位の一括認識で、言語タグ（日・韓・英・中・広東語）も返す。
  * 話している最中は、0.5秒ごとに話し始めからの音声を認識し直して途中結果を出す（疑似ストリーミング）。
  *
- * [modelDir] には次を置く（docs/06_開発環境.md「モデルの置き場」）。
+ * [modelDir] には次を置く（docs/手順/開発環境.md「モデルの取得と置き場」）。
  * - `sense-voice/model.int8.onnx`、`sense-voice/tokens.txt`
  * - `silero_vad.onnx`
  */
@@ -325,7 +325,7 @@ class SenseVoiceAsr private constructor(
     companion object {
         /**
          * SenseVoiceは非自己回帰で軽い。翻訳はGPUで動くので、CPUは認識に4スレッド使う
-         * （REDMAGICのCPUクロック上限は docs/00_現在地.md）。
+         * （REDMAGICのCPUクロック上限は docs/現在地.md）。
          */
         private const val THREADS = 4
 

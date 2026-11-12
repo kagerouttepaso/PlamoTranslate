@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 画面翻訳の訳の枠を透けずに重ねるためのユーザー補助（screen/OverlayAccessibilityService.kt）。画面の内容は読み取らない。
-     受け取る出来事は、画面の切り替わりとスクロール（2026-11-12に足した。docs/12_機能テスト.md「問い1」） -->
+     受け取る出来事は、画面の切り替わりとスクロール（2026-11-12に足した。docs/資料/端末の能力.md「問い1」） -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged|typeViewScrolled"
     android:accessibilityFeedbackType="feedbackGeneric"

@@ -22,7 +22,7 @@ import app.plamotranslate.update.UpdateSection
 /*
  * 配布のための表示（2026-11-08、APKを配布するため）。
  * PLaMo Community License 第4条は、本モデル等を第三者に提供するとき「Built with PLaMo」の明示（ユーザーインターフェース等）と、
- * 契約の写しの提供を求める。写しは公式の条文ページへのリンクで渡す（docs/11_配布.md「ライセンス」）。
+ * 契約の写しの提供を求める。写しは公式の条文ページへのリンクで渡す（docs/設計/アーキテクチャ.md「採用している技術」）。
  */
 
 const val BUILT_WITH_PLAMO = "Built with PLaMo"

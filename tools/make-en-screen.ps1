@@ -5,7 +5,7 @@
 .DESCRIPTION
   アプリの設定画面・課金の案内・警告文・チャット・小さな注記・通知・漫画風の大文字のセリフを並べる。
   各まとまりの位置と文字（正解）を truth.json に書く。本物のスクリーンショットではないので、
-  実機の英語画面での確認と合わせて使う（docs/05_画面翻訳.md「評価」）。
+  実機の英語画面での確認と合わせて使う（docs/設計/画面翻訳.md「評価」）。
 
 .EXAMPLE
   ./tools/make-en-screen.ps1 -Out tools/testdata/ocr/en-synthetic

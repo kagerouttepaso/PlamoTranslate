@@ -15,11 +15,11 @@ dependencyResolutionManagement {
 
 rootProject.name = "PlamoTranslate"
 include(":app")
-// 中核：端末に依存しない判断と計画（docs/13_画面翻訳の構成.md「層とモジュール」）
+// 中核：端末に依存しない判断と計画（docs/設計/アーキテクチャ.md「層とモジュール」）
 include(":core-pipeline")
 include(":core-llm")
 include(":core-ocr")
 include(":core-asr")
 include(":core-tts")
-// 機能テスト用のアプリ（配布しない。docs/12_機能テスト.md）
+// 機能テスト用のアプリ（配布しない。docs/資料/端末の能力.md）
 include(":featurelab")

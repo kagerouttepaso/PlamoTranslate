@@ -19,7 +19,7 @@ internal data class MangaLine(val text: String, val bounds: Rect, val confidence
  * 縦書きを読める漫画向けの文字認識（PP-OCRv6 manga、Hugging Face `Kellenok/PP-OCRv6_manga`、Apache-2.0）。
  * 中国語・日本語を読む。韓国語は読めない（[BlockMerger] がML Kitの結果と使い分ける）。
  *
- * 前処理と復号はモデルカードと例のコードに合わせた（docs/05_画面翻訳.md「判断の記録」）。
+ * 前処理と復号はモデルカードと例のコードに合わせた（docs/判断/2026-11-05_漫画用OCRにPP-OCRv6のmanga版を足す.md）。
  * - 検出：長辺960px（32の倍数）、BGRで (x/255 − mean)/std。確率が0.3を超える画素のまとまりを1行とし、
  *   平均確率0.6未満は捨てる。DBの後処理の広げ幅（面積×1.5÷周長）で枠を広げる。
  * - 認識：高さ48px、幅は縦横比のまま。縦長（高さ≧幅×1.5）の行は90度左に回して横書きとして読む。
@@ -172,7 +172,7 @@ internal class MangaOcr private constructor(
 
         /**
          * [dir] に det.onnx・rec.onnx・dict.txt があれば読み込む。無ければ null（ML Kitだけで動く）。
-         * 置き場は `files/models/ocr/manga/`（docs/06_開発環境.md）。
+         * 置き場は `files/models/ocr/manga/`（docs/手順/開発環境.md）。
          */
         fun load(dir: File, threads: Int = 4): MangaOcr? {
             val detFile = File(dir, "det.onnx")

@@ -217,7 +217,7 @@ private fun OpaqueOverlayCard() {
                 if (connected) {
                     Text("ユーザー補助：有効（次に訳したときから透けなくなります）", style = MaterialTheme.typography.bodyMedium)
                 } else if (OverlayAccessibilityService.isEnabled(context)) {
-                    // 有効なのにつながっていない：端末に止められて切り離された（REDMAGICのゲーム支援で確かめた。docs/12_機能テスト.md）
+                    // 有効なのにつながっていない：端末に止められて切り離された（REDMAGICのゲーム支援で確かめた。docs/資料/端末の能力.md）
                     Text(
                         "ユーザー補助は有効ですが、端末に止められて切れています（ゲームを開いたときなどに起きます）。" +
                             "ユーザー補助の設定で「PLaMo翻訳（画面翻訳の訳の枠）」を一度オフにしてからオンにしてください。",

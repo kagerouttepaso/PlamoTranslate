@@ -17,7 +17,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 
 /**
- * 機能テストのユーザー補助（問い1・2・3・4。docs/12_機能テスト.md）。
+ * 機能テストのユーザー補助（問い1・2・3・4。docs/資料/端末の能力.md）。
  * - 届いた出来事の種類・アプリ・変化の種類・スクロール量と、キー入力をログに残す（文字や中身は読まない）。
  * - 紫の重ね表示（TYPE_ACCESSIBILITY_OVERLAY）を出し入れする。
  * - 画面の撮影（takeScreenshot）と、前面のアプリの窓だけの撮影（takeScreenshotOfWindow）を試し、紫・水色が写るかを見る。

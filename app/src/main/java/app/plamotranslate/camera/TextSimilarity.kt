@@ -1,7 +1,7 @@
 package app.plamotranslate.camera
 
 /**
- * カメラのコマごとに揺れる読み取りを、同じ文として扱うための比べ方（docs/10_カメラ翻訳.md「追跡と多数決」）。
+ * カメラのコマごとに揺れる読み取りを、同じ文として扱うための比べ方（docs/設計/カメラ翻訳.md「追跡と多数決」）。
  * 行の多数決（[LineTracker]）と訳の控え（[LiveTranslator]）で共通に使う。
  */
 internal object TextSimilarity {

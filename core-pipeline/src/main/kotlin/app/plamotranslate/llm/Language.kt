@@ -2,7 +2,7 @@ package app.plamotranslate.llm
 
 /**
  * PLaMo 3 Translateが扱う53言語（モデルカード「Supported Languages」、2026-11-08確認）。
- * [code] はPFML3の lang 属性に書く値（docs/03_翻訳コア.md）。
+ * [code] はPFML3の lang 属性に書く値（docs/設計/翻訳コア.md）。
  * 並びは選択肢に出す順：よく使う5つを先に、残りは五十音順。
  * どの機能でどの言語を選べるかは、前段の認識器が読める・聞き分けられる言語で決まる（カメラ翻訳・会話翻訳）。
  * `app` の中では、カメラ翻訳・会話翻訳・読み上げの言語もこの型で持つ（画面翻訳の原文は認識器の種類 OcrLanguage で持ち、

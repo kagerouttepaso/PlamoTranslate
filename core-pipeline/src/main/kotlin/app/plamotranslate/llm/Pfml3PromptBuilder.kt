@@ -11,7 +11,7 @@ data class TranslationRequest(
     val form: JapaneseForm = JapaneseForm.POLITE,
     /**
      * 原文の背景（PFML3の context）。短い語だけでは意味が決まらないとき（機器のボタンの「정지」を停止と訳すなど）に渡す。
-     * null なら書かない（docs/03_翻訳コア.md「PFML3プロンプト」）。
+     * null なら書かない（docs/設計/翻訳コア.md「PFML3プロンプト」）。
      */
     val context: String? = null,
 )

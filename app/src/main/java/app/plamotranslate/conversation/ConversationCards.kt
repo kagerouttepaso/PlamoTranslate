@@ -26,7 +26,7 @@ import app.plamotranslate.ReadAloud
 import app.plamotranslate.llm.Language
 
 /*
- * 会話翻訳のカード（docs/04_会話翻訳.md「画面」）。対面のカード・1画面のカード・話している最中のカード。
+ * 会話翻訳のカード（docs/設計/会話翻訳.md「画面」）。対面のカード・1画面のカード・話している最中のカード。
  */
 
 /** 対面で、そのカードを読む人。相手の面のカードは逆さに出し、相手の言語を上に出す。 */

@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   事前に build-android へ llama-completion と llama-bench をビルドし、
-  models/ に plamo-3-translate-0.8b-Q4_K_M.gguf を置いておく（docs/06_開発環境.md）。
+  models/ に plamo-3-translate-0.8b-Q4_K_M.gguf を置いておく（docs/手順/開発環境.md）。
   端末は adb devices に1台だけ見えている状態にする。
 
 .EXAMPLE
@@ -16,7 +16,7 @@ param(
     [string]$Source = "ko",
     [string]$Target = "ja",
     [string]$Model = "plamo-3-translate-0.8b-Q4_K_M.gguf",
-    [int]$Threads = 8,  # CLI単体では8が最速（2026-11-05）。アプリ内は6（docs/00_現在地.md）
+    [int]$Threads = 8,  # CLI単体では8が最速（2026-11-05）。アプリ内は6（docs/現在地.md）
     [switch]$Bench,
     [switch]$SkipPush
 )
@@ -44,7 +44,7 @@ if ($Bench) {
     return
 }
 
-# PFML3プロンプト（docs/03_翻訳コア.md）。改行を入れずに1行でつなぐ
+# PFML3プロンプト（docs/設計/翻訳コア.md）。改行を入れずに1行でつなぐ
 $form = if ($Target -eq "ja") { "<|plamo:key|>form<|plamo:val|>polite" } else { "" }
 $prompt = "<|plamo:tag|>dataset<|plamo:msg|>translation" +
           "<|plamo:tag|>input<|plamo:key|>lang<|plamo:val|>$Source<|plamo:msg|>$Text" +

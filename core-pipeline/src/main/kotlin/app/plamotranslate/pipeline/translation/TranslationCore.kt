@@ -6,7 +6,7 @@ import app.plamotranslate.llm.Language
 data class Piece(val text: String, val single: Boolean = false)
 
 /**
- * 翻訳のコア（docs/13_画面翻訳の構成.md「翻訳の契約」）。訳す片を1回の依頼にまとめ（[plan]）、終わった依頼の訳を片へ戻す（[finish]）。
+ * 翻訳のコア（docs/設計/翻訳コア.md「翻訳の契約」）。訳す片を1回の依頼にまとめ（[plan]）、終わった依頼の訳を片へ戻す（[finish]）。
  * 呼ぶ側（機能）は片の単位で頼み、片の単位で受け取る。行をつなぐ・長文を分ける・訳し直すは、ここに閉じる。
  * 「同時に訳す数」の設定で付け替える（[coreFor]）。
  */

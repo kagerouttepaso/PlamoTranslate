@@ -5,7 +5,7 @@ import app.plamotranslate.ocr.OcrLanguage
 
 /**
  * 画面翻訳の認識モード（2026-11-12、作者の要望。ゲームの画面で、文字の奥のキャラクターが動いて読み取りが崩れる）。
- * [MOTION] は数枚を続けて撮り、画素ごとの中央値で動く背景を消してから読む（[FrameStack]、docs/05_画面翻訳.md「動く画面のモード」）。
+ * [MOTION] は数枚を続けて撮り、画素ごとの中央値で動く背景を消してから読む（[FrameStack]、docs/設計/画面翻訳.md「場面の設定」）。
  */
 internal enum class ScreenRecognition(val menuName: String) {
     NORMAL("通常（1枚で読む）"),
@@ -19,7 +19,7 @@ internal enum class ScreenRecognition(val menuName: String) {
 
 /**
  * 画面翻訳の始め方（2026-11-12、作者の要望「漫画のページ送りや、Discordでスクロールが止まったら、タップ不要で訳す」）。
- * [AUTO] は画面が変わったら訳を消し、画面が止まったら訳す（[ScreenChange]、docs/05_画面翻訳.md「自動で訳す」）。
+ * [AUTO] は画面が変わったら訳を消し、画面が止まったら訳す（[ScreenChange]、docs/設計/画面翻訳.md「判定器」）。
  */
 internal enum class ScreenTrigger(val menuName: String) {
     TAP("タップで訳す"),

@@ -41,7 +41,7 @@ import java.util.concurrent.atomic.AtomicLong
 sealed interface AsrState {
     data object Loading : AsrState
     data object Ready : AsrState
-    /** モデルのファイルが無い。adbで置いてもらう（docs/06_開発環境.md）。 */
+    /** モデルのファイルが無い。adbで置いてもらう（docs/手順/開発環境.md）。 */
     data class Missing(val paths: List<String>) : AsrState
     data class Failed(val message: String) : AsrState
 }
@@ -92,7 +92,7 @@ data class ConversationUiState(
  * 会話翻訳。マイクの音声を発話ごとに認識し、話している間は聞き取りの途中結果とその訳（途中訳）を、
  * 話し終わるたびに確定訳を出す。翻訳モデルは画面翻訳と同じ [EngineHolder] のものを使う。
  *
- * 翻訳エンジンは1本のスレッドで1件ずつ動くので、確定訳を優先する（docs/04_会話翻訳.md「翻訳への渡し方」）。
+ * 翻訳エンジンは1本のスレッドで1件ずつ動くので、確定訳を優先する（docs/設計/会話翻訳.md「翻訳への渡し方」）。
  * - 途中訳は、訳している間に届いた途中の文字のうち最新のものだけを、終わってから訳す（古いものは捨てる）。
  * - 確定した発話が来たら、走っている途中訳を取り消す。確定訳が残っている間は途中訳を始めない。
  */
@@ -280,7 +280,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     private suspend fun translatePartial(request: PartialRequest) {
         if (model.value !is ModelState.Ready) return
         val start = System.nanoTime()
-        // 翻訳の流れを1回ごとに開き、終わったら閉じる（docs/13_画面翻訳の構成.md「翻訳の契約」）。
+        // 翻訳の流れを1回ごとに開き、終わったら閉じる（docs/設計/翻訳コア.md「翻訳の契約」）。
         // 確定訳が来たら呼ぶ側がこのコルーチンを取り消すので、流れも閉じて途中訳の生成を止める
         val result = coroutineScope {
             val stream = Translations.open(

@@ -5,7 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** カメラ翻訳の、文字列だけで決まる判定（docs/10_カメラ翻訳.md）。枠の位置を使う判定は Rect が要るので実機で確かめる。 */
+/** カメラ翻訳の、文字列だけで決まる判定（docs/設計/カメラ翻訳.md）。枠の位置を使う判定は Rect が要るので実機で確かめる。 */
 class CameraTextTest {
     @Test
     fun keyKeepsOnlyLettersAndDigits() {

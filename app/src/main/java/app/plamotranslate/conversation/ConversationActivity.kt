@@ -41,7 +41,7 @@ import app.plamotranslate.llm.Language
 import kotlinx.coroutines.flow.drop
 
 /**
- * 会話翻訳の画面（docs/04_会話翻訳.md「画面」）。
+ * 会話翻訳の画面（docs/設計/会話翻訳.md「画面」）。
  * 対面：上下2分割で、上半分は相手向けに逆さに出す。端末を2人の間に置いて使う。
  * 1画面：2人で同じ一覧を見る。発話ごとに原文と訳を並べる。
  * 会話中は画面を点けたままにする。
@@ -77,7 +77,7 @@ class ConversationActivity : ComponentActivity() {
                         saveLog = logExport::save,
                     ),
                 )
-                // デバッグ版だけ：adb から音声ファイルを流して確かめる（docs/04_会話翻訳.md「動作確認」）
+                // デバッグ版だけ：adb から音声ファイルを流して確かめる（docs/設計/会話翻訳.md「動作確認」）
                 val wav = intent.getStringExtra(EXTRA_WAV)
                 // 実際に話すときと同じく、翻訳モデルの準備が済んでから流す（途中訳も確かめるため）
                 val ready = state.asr == AsrState.Ready && model is ModelState.Ready

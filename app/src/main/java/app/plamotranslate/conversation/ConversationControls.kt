@@ -36,7 +36,7 @@ import app.plamotranslate.ModelSwitch
 import app.plamotranslate.llm.Language
 
 /*
- * 会話翻訳の操作の欄とメニュー（docs/04_会話翻訳.md「画面」）。
+ * 会話翻訳の操作の欄とメニュー（docs/設計/会話翻訳.md「画面」）。
  */
 
 /** 操作の欄：開始・停止、音量、表示モード、自分と相手の言語、ログ、翻訳モデル、状態の表示。 */

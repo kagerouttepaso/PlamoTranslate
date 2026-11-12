@@ -1,5 +1,5 @@
 // 機能テスト用のアプリ（2026-11-12）。画面翻訳の設計を決める前に、端末で何ができるかを1つずつ確かめる。
-// 本体（app）とは別のパッケージ名で、配布しない。docs/12_機能テスト.md
+// 本体（app）とは別のパッケージ名で、配布しない。docs/資料/端末の能力.md
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)

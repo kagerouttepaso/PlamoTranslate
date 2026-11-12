@@ -9,7 +9,7 @@ import app.plamotranslate.pipeline.translation.TranslationStream
 import kotlinx.coroutines.CoroutineScope
 
 /**
- * 機能が翻訳の流れ（中核の [TranslationStream]）を開く入口（docs/13_画面翻訳の構成.md「翻訳の契約」）。
+ * 機能が翻訳の流れ（中核の [TranslationStream]）を開く入口（docs/設計/翻訳コア.md「翻訳の契約」）。
  * テキスト・会話・画面・カメラの翻訳は、どれもここから流れを開き、命令（submit・cancel・clear・close）を出して結果（updates）を購読する。
  *
  * エンジンは [EngineHolder] が持つ今の翻訳モデルを使い、モデルを切り替えたら次の依頼から新しいモデルで訳す

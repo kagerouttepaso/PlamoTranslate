@@ -7,7 +7,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 
 /**
- * 専用の描画面（SurfaceView）に動く絵を描く画面（問い2の続き。docs/12_機能テスト.md）。ゲームや動画はこの描画面に描くので、
+ * 専用の描画面（SurfaceView）に動く絵を描く画面（問い2の続き。docs/資料/端末の能力.md）。ゲームや動画はこの描画面に描くので、
  * ユーザー補助の窓単位の撮影（takeScreenshotOfWindow）でここが写るかを確かめる。画面いっぱいを緑（0,200,0）で塗り、
  * 白い帯を上下に動かす。窓を撮って緑が写れば、描画面も撮れている。
  */

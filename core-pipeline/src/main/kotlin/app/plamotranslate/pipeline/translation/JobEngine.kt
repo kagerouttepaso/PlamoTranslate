@@ -3,7 +3,7 @@ package app.plamotranslate.pipeline.translation
 import app.plamotranslate.llm.TranslationRequest
 
 /**
- * 翻訳のエンジンの差し込み口（docs/13_画面翻訳の構成.md「翻訳の契約」）。llama.cpp のエンジン（core-llm の
+ * 翻訳のエンジンの差し込み口（docs/設計/翻訳コア.md「翻訳の契約」）。llama.cpp のエンジン（core-llm の
  * `TranslationEngine`）が実装する。中核はこの口に対して書くので、単体テストでは偽のエンジンに差し替えられる。
  */
 interface JobEngine {

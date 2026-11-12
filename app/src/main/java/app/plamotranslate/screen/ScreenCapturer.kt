@@ -19,7 +19,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
 /**
- * MediaProjectionの画面を常にImageReaderで受け、最新の1枚だけを持っておく（docs/05_画面翻訳.md）。
+ * MediaProjectionの画面を常にImageReaderで受け、最新の1枚だけを持っておく（docs/設計/画面翻訳.md）。
  * Android 14以降は1つの許可で仮想ディスプレイを1回しか作れないため、サービスの間ずっと使い続ける。
  *
  * 画面を回したら、仮想ディスプレイと受け取る画像の大きさを今の画面に合わせる（[matchScreenSize]）。

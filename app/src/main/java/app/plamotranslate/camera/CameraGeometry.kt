@@ -4,7 +4,7 @@ import android.graphics.Matrix
 import android.graphics.RectF
 
 /**
- * カメラ翻訳の座標の変換（docs/10_カメラ翻訳.md「仕組み」）。描画（[CameraOverlayView]）と訳す順番（[LiveTranslator]）が
+ * カメラ翻訳の座標の変換（docs/設計/カメラ翻訳.md「仕組み」）。描画（[CameraOverlayView]）と訳す順番（[LiveTranslator]）が
  * 同じ計算を使うよう1か所にまとめた。
  *
  * - 縦持ちの画像：カメラのコマを、画面を立てた向きに回したもの（幅 [w]・高さ [h]）。一時停止のときにそのまま出す。

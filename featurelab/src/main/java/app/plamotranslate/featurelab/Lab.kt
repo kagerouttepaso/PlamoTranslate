@@ -6,7 +6,7 @@ import android.util.Log
 
 /**
  * 機能テストの共通部品：ログ（logcat の FeatureLab と画面の表示の両方へ）と、撮った画像に自分の重ね表示が写ったかの判定。
- * 結果は PC から `adb logcat -s FeatureLab` で読む（docs/12_機能テスト.md）。
+ * 結果は PC から `adb logcat -s FeatureLab` で読む（docs/資料/端末の能力.md）。
  */
 object Lab {
     const val TAG = "FeatureLab"

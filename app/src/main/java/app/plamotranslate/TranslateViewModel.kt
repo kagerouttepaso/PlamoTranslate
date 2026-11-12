@@ -163,7 +163,7 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
         translateJob?.cancel()
         translateJob = viewModelScope.launch {
             _state.update { it.copy(output = "", translating = true, error = null, stats = "") }
-            // 翻訳の流れを1回ごとに開き、終わったら閉じる（docs/13_画面翻訳の構成.md「翻訳の契約」）
+            // 翻訳の流れを1回ごとに開き、終わったら閉じる（docs/設計/翻訳コア.md「翻訳の契約」）
             val stream = Translations.open(this, app, TranslationStream.Options(s.source, s.target))
             try {
                 when (val r = stream.translateOne(s.input) { text -> _state.update { it.copy(output = text) } }) {

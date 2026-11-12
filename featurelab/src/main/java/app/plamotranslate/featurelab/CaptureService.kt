@@ -20,7 +20,7 @@ import android.os.SystemClock
 import android.view.WindowManager
 
 /**
- * 機能テストの画面共有（問い2。docs/12_機能テスト.md）。確認画面で「画面全体」か「1つのアプリ」かを選んで始め、
+ * 機能テストの画面共有（問い2。docs/資料/端末の能力.md）。確認画面で「画面全体」か「1つのアプリ」かを選んで始め、
  * 届いた画面の数（1秒ごと）と、撮った1枚に自分の重ね表示（紫・水色）が写ったかを残す。
  * 1つのアプリを選んだとき、そのアプリを離れたら画面が届き続けるか（onCapturedContentVisibilityChanged）も残す。
  */

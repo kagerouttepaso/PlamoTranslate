@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  画面翻訳の評価を端末で回し、結果をPCへ取り出して採点する（docs/05_画面翻訳.md「評価」）。
+  画面翻訳の評価を端末で回し、結果をPCへ取り出して採点する（docs/設計/画面翻訳.md「評価」）。
 
 .DESCRIPTION
   1. tools/testdata/ocr/<Set>/ の画像を端末のアプリ領域 bench/in へ送る（前回分は消して入れ直す）

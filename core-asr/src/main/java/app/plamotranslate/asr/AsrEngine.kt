@@ -1,7 +1,7 @@
 package app.plamotranslate.asr
 
 /**
- * 話し終わった1つの発話（docs/04_会話翻訳.md）。
+ * 話し終わった1つの発話（docs/設計/会話翻訳.md）。
  * [lang] は認識器が判定した言語のコード（"ja"・"ko"・"en"・"zh" など）。判定できなければ null。
  */
 data class Utterance(

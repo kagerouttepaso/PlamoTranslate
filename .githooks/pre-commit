@@ -1,0 +1,28 @@
+#!/bin/sh
+# コミットの前の検査（docs/README.md「区切りでの更新と検査」）。
+# 使うには、クローンごとに一度 `git config core.hooksPath .githooks` を実行する（docs/手順/開発環境.md「リポジトリ」）。
+# 人もAIも、文書の参照切れ・置き場の誤り・判断の記録の書式の欠けを残したままコミットできないようにする。
+
+root=$(git rev-parse --show-toplevel)
+
+if ! command -v pwsh >/dev/null 2>&1; then
+  echo "pre-commit: pwsh（PowerShell 7）が無いので docs の検査を飛ばした。入れてから検査する（docs/手順/開発環境.md「PCに入れるもの」）" >&2
+  exit 0
+fi
+
+if ! pwsh -NoProfile -File "$root/tools/check-docs.ps1"; then
+  echo "pre-commit: docs の検査で誤りがあるのでコミットを止めた。直してからコミットする（docs/README.md）" >&2
+  exit 1
+fi
+
+if ! pwsh -NoProfile -File "$root/tools/check-design.ps1"; then
+  echo "pre-commit: 設計の点検で誤りがあるのでコミットを止めた。直してからコミットする（CLAUDE.md「設計の幹を守る」）" >&2
+  exit 1
+fi
+
+# コードを変えて docs/ を変えていないときの念押し（止めない。設計に関わらない修正もあるため）
+staged=$(git diff --cached --name-only)
+if printf '%s\n' "$staged" | grep -qE '^(app|core-[a-z]+|featurelab)/' && ! printf '%s\n' "$staged" | grep -q '^docs/'; then
+  echo "pre-commit 注意：コードを変えたが docs/ を変えていない。設計や振る舞いを変えたなら、同じコミットで docs/設計/ を直す（docs/README.md「出来事を文書に反映する流れ」）" >&2
+fi
+exit 0

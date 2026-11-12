@@ -15,7 +15,7 @@ class TranslationException(message: String) : Exception(message)
 
 /**
  * CPUで動かすときの細かい設定（2026-11-08、15T Pro（MediaTek）でアプリ内の生成がCLIの約200分の1に落ちたため、
- * 原因の候補を設定の画面で切り替えて試せるようにした。docs/03_翻訳コア.md「CPUの詳細設定」）。既定は今までの動き。
+ * 原因の候補を設定の画面で切り替えて試せるようにした。docs/設計/翻訳コア.md「パフォーマンスの設定」）。既定は今までの動き。
  */
 data class CpuOptions(
     /** 0なら自動（コア数−2、最大6）。 */
@@ -33,7 +33,7 @@ data class CpuOptions(
 )
 
 /**
- * PLaMo 3 Translateを1つ保持し、中核の翻訳のエンジンの差し込み口（[JobEngine]）として訳す（docs/13_画面翻訳の構成.md「翻訳の契約」）。
+ * PLaMo 3 Translateを1つ保持し、中核の翻訳のエンジンの差し込み口（[JobEngine]）として訳す（docs/設計/翻訳コア.md「翻訳の契約」）。
  * 機能はこのクラスを直接呼ばず、中核の翻訳の流れ（`TranslationStream`）を通す。
  * llama.cppのコンテキストは同時に使えないため、すべての呼び出しを1本のスレッドへ寄せる。
  */
@@ -55,7 +55,7 @@ class TranslationEngine private constructor(
     /**
      * [source] から依頼を受け取り、最大 [slots] 本（[MAX_PARALLEL] まで）を同時に訳す（2026-11-12）。
      * 1回の計算で全部の流れを1トークンずつ進めるので、1件ずつ訳すより合計が速い。訳し終わった流れには、ほかの流れを
-     * 待たずにすぐ次の依頼を入れる（docs/03_翻訳コア.md「複数の文を同時に訳す」）。[source] に依頼が無くなり、
+     * 待たずにすぐ次の依頼を入れる（docs/設計/翻訳コア.md「複数の文を同時に訳す」）。[source] に依頼が無くなり、
      * 全部の流れが訳し終えたら戻る。戻り値は全部の依頼を合わせた生成トークン数。1文だけ訳すときも、流れ1本でこれを使う
      * （2026-11-12に1文用の入口と生成の処理を取り除いた。翻訳の契約を1本にするため）。
      */
@@ -118,19 +118,19 @@ class TranslationEngine private constructor(
 
         /**
          * 同時に訳す文の数の既定。2026-11-12にREDMAGIC 11 Proで測り、GPUは4本で生成が約1.7倍（2Bは8本にしても同じ）、
-         * CPUは4本で約2.5倍だった（docs/03_翻訳コア.md「複数の文を同時に訳す」）。端末ごとの値は設定の画面の自動調整で探す。
+         * CPUは4本で約2.5倍だった（docs/設計/翻訳コア.md「複数の文を同時に訳す」）。端末ごとの値は設定の画面の自動調整で探す。
          */
         const val DEFAULT_PARALLEL = 4
 
         /**
          * 全層をGPU（OpenCL、Adreno 840）に載せる。2026-11-05の実測で、プロンプト処理はCPUの約5倍（約1170トークン/秒）、
-         * 生成はCPUと同程度（約80トークン/秒）だが、REDMAGICのCPUクロック上限の影響を受けない（docs/00_現在地.md）。
+         * 生成はCPUと同程度（約80トークン/秒）だが、REDMAGICのCPUクロック上限の影響を受けない（docs/現在地.md）。
          */
         const val DEFAULT_GPU_LAYERS = 99
 
         /**
          * 2026-11-05のREDMAGIC 11 Proでの実測。CLI単体では8スレッドが最速だったが、アプリでは画面描画と
-         * CPUを取り合い、8スレッドは生成35トークン/秒、6スレッドは64トークン/秒だった（docs/00_現在地.md）。
+         * CPUを取り合い、8スレッドは生成35トークン/秒、6スレッドは64トークン/秒だった（docs/現在地.md）。
          */
         const val DEFAULT_THREADS = 6
 
@@ -181,7 +181,7 @@ class TranslationEngine private constructor(
          * 小さいコアに仕事が回ると、ほかのスレッドが待たされて全体が遅くなる（2026-11-08、15T Pro（2.4GHz×4、
          * 3.3GHz×3、3.73GHz×1）で6スレッドは0.3〜0.8トークン/秒、4スレッドは56〜62トークン/秒）。
          * 小さいコアが半分より多い、または周波数が読めない端末は、今までどおり「コア数−2」にする
-         * （REDMAGIC 11 Pro（4.6GHz×2、3.6GHz×6）では6が最速だった。docs/00_現在地.md）。
+         * （REDMAGIC 11 Pro（4.6GHz×2、3.6GHz×6）では6が最速だった。docs/現在地.md）。
          * どちらも2〜[DEFAULT_THREADS]に収める。
          */
         internal fun threadsFor(maxFrequencies: List<Long>): Int {

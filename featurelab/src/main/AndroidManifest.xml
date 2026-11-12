@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 機能テスト用のアプリ（配布しない）。docs/12_機能テスト.md -->
+<!-- 機能テスト用のアプリ（配布しない）。docs/資料/端末の能力.md -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />

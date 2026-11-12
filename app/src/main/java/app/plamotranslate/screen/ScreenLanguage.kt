@@ -33,7 +33,7 @@ internal fun buttonLabel(language: OcrLanguage, trigger: ScreenTrigger): String 
     }
 }
 
-/** 翻訳に渡す原文の言語。自動なら null で、PLaMoが原文から判定する（docs/03_翻訳コア.md）。 */
+/** 翻訳に渡す原文の言語。自動なら null で、PLaMoが原文から判定する（docs/設計/翻訳コア.md）。 */
 internal val OcrLanguage.sourceLanguage: Language?
     get() = when (this) {
         OcrLanguage.AUTO -> null

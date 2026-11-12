@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  会話翻訳の音声認識に使うsherpa-onnxのAARと、音声認識のモデルを取得する（docs/06_開発環境.md）。
+  会話翻訳の音声認識に使うsherpa-onnxのAARと、音声認識のモデルを取得する（docs/手順/開発環境.md）。
 
 .DESCRIPTION
   1. sherpa-onnxのAAR（ONNX Runtimeを静的に組み込んだ版）を third_party/sherpa-onnx/ へ置く。ビルドに要る
@@ -47,5 +47,5 @@ if ($Models) {
     if ((Get-FileHash $model -Algorithm SHA256).Hash -ne "C71F0CE00BEC95B07744E116345E33D8CBBE08CEF896382CF907BF4B51A2CD51") {
         throw "ハッシュが違います: $model"
     }
-    "モデル: $asr（端末へは docs/06_開発環境.md「モデルの置き方」の手順で送る）"
+    "モデル: $asr（端末へは docs/手順/開発環境.md「モデルの取得と置き場」の手順で送る）"
 }

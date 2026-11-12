@@ -59,7 +59,7 @@ data class PartnerMode(val fixed: Language?) {
 data class Direction(val source: Language, val target: Language, val mine: Boolean = source == Language.JA)
 
 /**
- * 発話ごとに訳す方向を決める（docs/04_会話翻訳.md「言語の判定と訳す方向」）。
+ * 発話ごとに訳す方向を決める（docs/設計/会話翻訳.md「言語の判定と訳す方向」）。
  * 自分の言語の発話は相手の言語へ、それ以外は自分の言語へ訳す。
  */
 class LanguageRouter(mode: PartnerMode = PartnerMode.AUTO, self: Language = Language.JA) {

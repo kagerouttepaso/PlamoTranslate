@@ -30,11 +30,11 @@
 
 - このリポジトリのソースコード：[MIT License](LICENSE)
 - 翻訳モデル PLaMo 3 Translate：[PLaMo Community License](https://plamo.preferredai.jp/info/plamo-community-license-ja)。モデルはアプリに同梱せず、使う人の端末が公式の配布元（Hugging Face）からダウンロードします。商用で使う場合は、ライセンスの条件を確かめてください。Built with PLaMo
-- 使っているライブラリとモデル（llama.cpp、sherpa-onnx、SenseVoice、Silero VAD、Supertonic 3（OpenRAIL-M）、ML Kit、PP-OCRなど）のライセンスは、アプリの設定の画面の「このアプリについて」と [docs/02_アーキテクチャ.md](docs/02_アーキテクチャ.md)「採用している技術」にあります。
+- 使っているライブラリとモデル（llama.cpp、sherpa-onnx、SenseVoice、Silero VAD、Supertonic 3（OpenRAIL-M）、ML Kit、PP-OCRなど）のライセンスは、アプリの設定の画面の「このアプリについて」と [docs/設計/アーキテクチャ.md](docs/設計/アーキテクチャ.md)「採用している技術」にあります。
 
 ## ビルド
 
-Windows・JDK 17・Android SDK（API 36）・NDK r28以降で作っています。手順は [docs/06_開発環境.md](docs/06_開発環境.md)。
+Windows・JDK 21・Android SDK（API 36）・NDK 29で作っています。手順は [docs/手順/開発環境.md](docs/手順/開発環境.md)。
 
 ```powershell
 git clone --recurse-submodules https://github.com/kagerouttepaso/PlamoTranslate.git
@@ -46,19 +46,4 @@ $env:PYTHONUTF8="1"
 
 ## 文書
 
-設計と開発の記録は `docs/` にあります。AIのコーディング支援（Claude Codeなど）で開発を続けられるよう、作業規則を [CLAUDE.md](CLAUDE.md) に書いています。
-
-| ファイル | 内容 |
-| --- | --- |
-| [docs/00_現在地.md](docs/00_現在地.md) | 何が終わり、次に何をするか |
-| [docs/01_要件.md](docs/01_要件.md) | 機能と言語、操作、性能の目標 |
-| [docs/02_アーキテクチャ.md](docs/02_アーキテクチャ.md) | モジュール構成と処理の流れ、採用している技術 |
-| [docs/03_翻訳コア.md](docs/03_翻訳コア.md) | llama.cppの組み込み、プロンプトの仕様、パフォーマンスの設定、翻訳モデルの比べ |
-| [docs/04_会話翻訳.md](docs/04_会話翻訳.md) | 音声認識と区切り方、途中訳、画面のデザイン、評価 |
-| [docs/05_画面翻訳.md](docs/05_画面翻訳.md) | 撮影、文字認識、訳す対象の選び方、重ね表示、評価 |
-| [docs/06_開発環境.md](docs/06_開発環境.md) | 開発環境の準備、ビルド、実機への転送、配布用のAPK |
-| [docs/07_進め方とバックログ.md](docs/07_進め方とバックログ.md) | 進め方とバックログ |
-| [docs/08_リスクと未決事項.md](docs/08_リスクと未決事項.md) | 使ってから決める事項と代替案 |
-| [docs/09_参考資料.md](docs/09_参考資料.md) | 根拠にした公式資料と参考実装 |
-| [docs/10_カメラ翻訳.md](docs/10_カメラ翻訳.md) | カメラ翻訳の追跡と多数決、段落のまとめ方、描き方 |
-| [docs/11_リファクタリング候補.md](docs/11_リファクタリング候補.md) | 構成と責務の見直しの候補（技術的負債） |
+設計と開発の文書は `docs/` にあります。文書の置き場と読む順番は [docs/README.md](docs/README.md) にあります。AIのコーディング支援（Claude Codeなど）で開発を続けられるよう、作業規則と、それを支える検査やフックを [CLAUDE.md](CLAUDE.md) に書いています。

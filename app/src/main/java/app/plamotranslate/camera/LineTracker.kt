@@ -13,7 +13,7 @@ internal class Reading(val rect: Rect, val text: String, val colors: BoxColors)
 
 /**
  * コマをまたいで同じ行を追い、多数決で読み取りを安定させる（2026-11-06、作者の要望「連続読み取りの特性を活かしてロバストに」。
- * docs/10_カメラ翻訳.md「追跡と多数決」）。
+ * docs/設計/カメラ翻訳.md「追跡と多数決」）。
  *
  * - 各コマの行を、前のコマの位置が重なる行（IoU [MATCH_IOU] 以上）、なければ近くにある同じ内容の行に結び付ける。
  * - 行ごとに直近 [READINGS] 回の読み取りを持ち、ほかの読み取りといちばん似ているものを原文にする（[Track.consensus]）。

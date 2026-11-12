@@ -1,4 +1,4 @@
-// llama.cppのJNIラッパー（docs/03_翻訳コア.md）。
+// llama.cppのJNIラッパー（docs/設計/翻訳コア.md）。
 // Kotlin側の LlamaNative から呼ぶ。1つのハンドルを同時に複数スレッドから使わないこと（Kotlin側で直列化する）。
 #include <android/log.h>
 #include <android/performance_hint.h>
@@ -331,7 +331,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeFree(JNIEnv *, jobject, jlong hand
     delete engine;
 }
 
-// 訳す依頼を呼ぶ側から1件ずつ受け取り、最大 n_slots 本の流れ（シーケンス）で同時に訳す（2026-11-12。docs/03_翻訳コア.md
+// 訳す依頼を呼ぶ側から1件ずつ受け取り、最大 n_slots 本の流れ（シーケンス）で同時に訳す（2026-11-12。docs/設計/翻訳コア.md
 // 「複数の文を同時に訳す」）。1回のdecodeで全部の流れを1トークンずつ進めるので、1件ずつ訳すより合計が速い。
 // 訳し終わった流れには、ほかの流れの終わりを待たずに、すぐ次の依頼を入れる（作者の指摘「Discordでボットの長文の訳が
 // 終わるまで、次の短文の訳が始まらない」。初めは同時に入れた全部が終わるまで次を入れない作りだった）。
