@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="lab_a11y_description">PLaMo翻訳の機能テスト用です。戻る・ホーム・画面の移動・スクロールでどの合図が届くか、自分の重ね表示を写さずに画面を撮れるかを調べます。届いた合図の種類だけを端末のログに残し、画面の文字は読みません。調べ終わったらオフにしてください。</string>
+</resources>

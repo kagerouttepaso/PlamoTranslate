@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 機能テスト：届く出来事を全種類受け取り、キー入力も受け取り、窓の一覧と撮影も試す。
+     窓の中身（文字やビュー）は読まない。窓単位の撮影に窓の一覧が要るので canRetrieveWindowContent を有効にする -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRequestFilterKeyEvents|flagRetrieveInteractiveWindows"
+    android:canRequestFilterKeyEvents="true"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:description="@string/lab_a11y_description"
+    android:notificationTimeout="0" />
