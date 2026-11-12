@@ -68,7 +68,7 @@ class LiveFrame(
  * 2. 追跡と多数決：行をコマをまたいで追い、読み取りを安定させる（[LineTracker]）。
  * 3. 段落：安定した行を、文章／表・メニューのモードに合わせてまとめる（[Paragraphs]）。表示と翻訳はこの単位。
  * 4. 翻訳：読み取りがそろった段落を、画面に見えているもの・中央に近いものから訳す（[translateLoop]）。
- *    訳は原文のキー（[TextSimilarity.key]）で控え、ほぼ同じ文にも使い回す。翻訳（1文0.1〜1.4秒）は文字認識
+ *    訳は原文のキー（[TextSimilarity.key]）で訳の対応表（[translated]）に入れ、ほぼ同じ文の枠にも出す。翻訳（1文0.1〜1.4秒）は文字認識
  *    （1コマ0.1〜0.5秒）より遅いので、同じ文を訳し直さない。
  *
  * 状態はすべてメインスレッドで触る。
@@ -127,13 +127,16 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
     /** 画面に見えている範囲（正立した画像の座標）。分からなければ null。 */
     private var screen: RectF? = null
 
-    /** 訳し終えた文（キー→訳）。 */
-    private val cache = object : LinkedHashMap<String, String>(256, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > CACHE_SIZE
+    /**
+     * 枠に出す訳の対応表のうち、確定した訳（段落のキー→訳）。訳の控え（翻訳の契約の層）ではなく、コマごとの枠へ訳を当てるための表示の状態。
+     * 読み揺れはキーとほぼ同じ文（[similar]）で吸収する。
+     */
+    private val translated = object : LinkedHashMap<String, String>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > TRANSLATED_LIMIT
     }
 
-    /** 訳している途中の文（キー→途中までの訳）。 */
-    private val partial = HashMap<String, String>()
+    /** 枠に出す訳の対応表のうち、訳している途中の文（段落のキー→途中までの訳）。 */
+    private val translating = HashMap<String, String>()
 
     /**
      * 訳したい文（キー→原文）。映している間は、そのコマで読み取りがそろった文で入れ替える（画面から外れた文は訳さない）。
@@ -230,7 +233,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
                 .thenBy { hypot(it.rect.exactCenterX() - s.centerX(), it.rect.exactCenterY() - s.centerY()) },
         )
         return ordered.map { it.text }
-            .filter { translationOf(key(it)) == null && key(it) !in partial }
+            .filter { translationOf(key(it)) == null && key(it) !in translating }
             .distinctBy(::key)
     }
 
@@ -238,15 +241,15 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
 
     /** 訳を探す。読み取りはコマごとに1〜2文字揺れるので、ほぼ同じ文（[similar]）の訳も使う。 */
     private fun translationOf(key: String): String? {
-        cache[key]?.let { return it }
-        partial[key]?.takeIf { it.isNotBlank() }?.let { return it }
-        return cache.entries.firstOrNull { similar(it.key, key) }?.value
-            ?: partial.entries.firstOrNull { it.value.isNotBlank() && similar(it.key, key) }?.value
+        translated[key]?.let { return it }
+        translating[key]?.takeIf { it.isNotBlank() }?.let { return it }
+        return translated.entries.firstOrNull { similar(it.key, key) }?.value
+            ?: translating.entries.firstOrNull { it.value.isNotBlank() && similar(it.key, key) }?.value
     }
 
     private fun forgetTranslations() {
-        cache.clear()
-        partial.clear()
+        translated.clear()
+        translating.clear()
         stream?.clear()
         submitted.clear()
         keysById.clear()
@@ -273,11 +276,11 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
             val current = stream
             val s = if (current == null || current.options != options || streamEngine !== engine) {
                 // モデルを切り替えたらエンジンが変わる。前のモデルの訳は捨てる
-                if (current != null && streamEngine !== engine) cache.clear()
+                if (current != null && streamEngine !== engine) translated.clear()
                 streamEngine = engine
                 openStream(options)
             } else current
-            val items = wanted.values.filter { translationOf(key(it)) == null && key(it) !in partial }.distinctBy(::key)
+            val items = wanted.values.filter { translationOf(key(it)) == null && key(it) !in translating }.distinctBy(::key)
             wanted.clear()
             if (items.isEmpty()) continue
             val segments = items.map { text ->
@@ -285,7 +288,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
                 val id = nextId++
                 submitted[k] = id
                 keysById[id] = k
-                partial[k] = ""
+                translating[k] = ""
                 Segment(id, text)
             }
             s.submit(segments)
@@ -296,7 +299,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
     private fun openStream(options: TranslationStream.Options): TranslationStream {
         stream?.close()
         streamCollector?.cancel()
-        submitted.keys.forEach { partial.remove(it) }
+        submitted.keys.forEach { translating.remove(it) }
         submitted.clear()
         keysById.clear()
         val s = Translations.open(scope, context, options)
@@ -308,17 +311,17 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
     private fun onUpdate(u: SegmentUpdate) {
         val k = keysById[u.id] ?: return
         when (u) {
-            is SegmentUpdate.Partial -> partial[k] = u.text
+            is SegmentUpdate.Partial -> translating[k] = u.text
             is SegmentUpdate.Final -> {
-                // 訳が空でも控える（控えないと、枠が「訳待ち」のまま残り続ける）
-                cache[k] = u.text.trim().ifEmpty { "（訳せませんでした）" }
-                partial.remove(k)
+                // 訳が空でも表に入れる（入れないと、枠が「訳待ち」のまま残り続ける）
+                translated[k] = u.text.trim().ifEmpty { "（訳せませんでした）" }
+                translating.remove(k)
                 submitted.remove(k)
                 keysById.remove(u.id)
                 Log.i(TAG, "カメラ翻訳: 1件を${u.millis}ms${if (u.cached) "（控え）" else ""}")
             }
             is SegmentUpdate.Failed -> {
-                partial.remove(k)
+                translating.remove(k)
                 submitted.remove(k)
                 keysById.remove(u.id)
                 Log.w(TAG, "カメラ翻訳: 翻訳に失敗 ${u.message}")
@@ -329,7 +332,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
 
     private companion object {
         const val TAG = "PlamoTranslate"
-        const val CACHE_SIZE = 300
+        const val TRANSLATED_LIMIT = 300
 
         /** 表・メニューのモードで翻訳に渡す背景（PFML3の context）。 */
         const val TABLE_CONTEXT = "家電や機器のボタン・表示画面、メニュー、看板、表などに書かれた短い表記。"
