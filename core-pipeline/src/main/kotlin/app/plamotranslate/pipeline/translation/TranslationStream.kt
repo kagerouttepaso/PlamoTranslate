@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
 
 /**
- * 翻訳の契約（docs/13_画面翻訳の構成.md「翻訳の契約」「データの流れの型：命令と購読」）。テキスト・会話・画面・カメラの翻訳は、
+ * 翻訳の契約（docs/設計/翻訳コア.md「翻訳の契約」）。テキスト・会話・画面・カメラの翻訳は、
  * すべてこの流れを通る。
  *
  * - 命令：[submit]（文を頼む）・[cancel]（一部の文をやめる）・[clear]（全部やめる）・[close]（流れを閉じる）。どれも返り値を持たず、すぐ戻る。
@@ -59,7 +59,12 @@ class TranslationStream(
 
     private class Pending(val segment: Segment, val at: Long)
 
-    private class Seg(val pieces: List<String>, val at: Long) {
+    /**
+     * 頼まれた文。[lines] は元の行ごとの片（空の行は片が0個）。片は改行を含まない。
+     * 依頼の行と訳の行を対応させる（逐次のコアのつなぎ方、打ち切りの行数、途中の訳の行送り）ので、改行は片の中に入れず、ここで行に分けて持つ。
+     */
+    private class Seg(val lines: List<List<String>>, val at: Long) {
+        val pieces = lines.flatten()
         var fromEngine = false
     }
 
@@ -217,9 +222,10 @@ class TranslationStream(
                 emit(SegmentUpdate.Final(id, "", cached = true))
                 continue
             }
-            val pieces = TranslationChecks.splitLong(pending.segment.text, core.splitAt)
-            segments[id] = Seg(pieces, pending.at)
-            for (p in pieces.distinct()) {
+            // 行に分けてから片にする（片は改行を含まない。テキスト翻訳は複数行の入力を1つの文として頼む）
+            val seg = Seg(pending.segment.text.lines().map { if (it.isBlank()) emptyList() else TranslationChecks.splitLong(it, core.splitAt) }, pending.at)
+            segments[id] = seg
+            for (p in seg.pieces.distinct()) {
                 waiting.getOrPut(p) { LinkedHashSet() }.add(id)
                 when {
                     p in finals || p in queued -> Unit
@@ -279,7 +285,7 @@ class TranslationStream(
         emit(
             SegmentUpdate.Final(
                 id,
-                TranslationChecks.joinPieces(seg.pieces.map { finals.getValue(it) }),
+                assemble(seg) { finals.getValue(it) },
                 cached = !seg.fromEngine,
                 millis = (System.nanoTime() - seg.at) / 1_000_000,
                 tokens = seg.pieces.distinct().sumOf { pieceTokens[it] ?: 0 },
@@ -294,8 +300,11 @@ class TranslationStream(
         return true
     }
 
-    private fun joined(seg: Seg): String =
-        TranslationChecks.joinPieces(seg.pieces.map { finals[it] ?: current[it]?.toString().orEmpty() })
+    private fun joined(seg: Seg): String = assemble(seg) { finals[it] ?: current[it]?.toString().orEmpty() }
+
+    /** 片の訳を、行の中では [TranslationChecks.joinPieces] でつなぎ、行どうしは元の改行でつなぐ。 */
+    private fun assemble(seg: Seg, textOf: (String) -> String): String =
+        seg.lines.joinToString("\n") { line -> TranslationChecks.joinPieces(line.map(textOf)) }
 
     private fun partialFor(p: String) {
         for (id in waiting[p].orEmpty()) segments[id]?.let { emit(SegmentUpdate.Partial(id, joined(it))) }

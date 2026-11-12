@@ -1,7 +1,7 @@
 package app.plamotranslate.pipeline.screen
 
 /**
- * 場面の設定（docs/13_画面翻訳の構成.md「差し替えるブロックと場面の設定」）。差し替えるブロックの設定の組み合わせに名前を付けたもの。
+ * 場面の設定（docs/設計/画面翻訳.md「場面の設定」）。差し替えるブロックの設定の組み合わせに名前を付けたもの。
  * 制御（状態遷移）は場面で変えない。
  */
 data class SceneProfile(
@@ -35,7 +35,7 @@ data class SceneProfile(
             stackIntervalMs = 110,
             outlinedText = true,
             start = StartParams(stable = 0.04f, settleMs = 600, maxWaitMs = 3000, medianOf = 5, ignoreActive = true),
-            validity = ValidityParams(outside = null, ring = 0.3f, switch = 0.6f, medianOf = 3),
+            validity = ValidityParams(outside = null, ring = 0.3f, switch = 0.6f, medianOf = 3, peekFrames = 3, peekIntervalMs = 80),
         )
     }
 }
@@ -59,6 +59,7 @@ data class StartParams(
  * - [outside]：自分の表示の外のこれだけが変われば、画面が変わった（自動で訳すときだけ。null なら見ない）。
  * - [medianOf]：外周と外の変化を、何回の格子の中央値で比べるか。
  * - [peek]：触れたときに訳の枠を隠してのぞき、枠の下のこれだけが変われば、原文が変わった。
+ * - [peekFrames]・[peekIntervalMs]：のぞくときに撮る枚数と間隔（3枚以上なら中央値で動く背景を消す）。
  */
 data class ValidityParams(
     val outside: Float?,
@@ -67,4 +68,6 @@ data class ValidityParams(
     val medianOf: Int,
     val peek: Float = 0.15f,
     val ringMargin: Int = 2,
+    val peekFrames: Int = 1,
+    val peekIntervalMs: Long = 0,
 )

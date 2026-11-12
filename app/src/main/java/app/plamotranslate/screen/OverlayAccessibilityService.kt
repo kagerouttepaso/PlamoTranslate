@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * 画面翻訳の訳の枠を、透けずに重ねるためのユーザー補助のサービス（2026-11-12、作者の採用。設定の画面で切り替える。
- * docs/05_画面翻訳.md「透けない訳の枠」）。
+ * docs/設計/画面翻訳.md「訳文の重ね表示」）。
  *
  * ほかのアプリの重ね表示（TYPE_APPLICATION_OVERLAY）は、触れた操作を下のアプリへ通すと不透明度0.8までに制限され、元の文字が透けた。
  * ユーザー補助の重ね表示（TYPE_ACCESSIBILITY_OVERLAY）はこの制限を受けないので、不透明のまま操作を通せる。
@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * もう1つ、ほかのアプリの画面の切り替わり（TYPE_WINDOW_STATE_CHANGED：アプリの切り替え・ホーム・最近使ったアプリ・別の画面）と
  * スクロール（TYPE_VIEW_SCROLLED）を受け、訳している途中の処理や古くなった訳を取り消す合図にする（[onWindowChanged]・[onScrolled]）。
- * 戻る操作そのものは受け取れない（ジェスチャーの戻るはキーとして届かない。docs/12_機能テスト.md「問い1」）。
+ * 戻る操作そのものは受け取れない（ジェスチャーの戻るはキーとして届かない。docs/資料/端末の能力.md「問い1」）。
  * 画面の文字は読み取らない（canRetrieveWindowContent="false"）。出来事の種類とスクロールの量だけを使う。
  */
 class OverlayAccessibilityService : AccessibilityService() {
@@ -34,8 +34,7 @@ class OverlayAccessibilityService : AccessibilityService() {
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> onWindowChanged?.invoke()
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
-                // 調査用（2026-11-12、スクロールの合図が効かない）：窓の中身を読まない権限で移動量が取れるかを見る
-                android.util.Log.d("PlamoTranslate", "スクロールの知らせ（調査）: ${event.packageName} dx=${event.scrollDeltaX} dy=${event.scrollDeltaY} 位置=${event.scrollX},${event.scrollY} 項目=${event.fromIndex}-${event.toIndex}/${event.itemCount}")
+                // 窓の中身を読まない権限でも、移動量は届く（2026-11-12、設定アプリで dy=404 などを確かめた）。
                 // 一覧の組み直しなどで、動いていないスクロールの知らせも来る（Discordで dx=dy=0）。通知の引き出しも除く
                 val moved = event.scrollDeltaX != 0 || event.scrollDeltaY != 0
                 if (moved && event.packageName != SYSTEM_UI) onScrolled?.invoke()
@@ -76,15 +75,19 @@ class OverlayAccessibilityService : AccessibilityService() {
         /**
          * ユーザー補助の設定で有効なのに、サービスがつながっていない（端末に止められて切り離された）か。
          * REDMAGICのゲーム支援は、ゲームを開いたときにユーザー補助を止め、利用者がオフ・オンし直すまで切り離したままにする
-         * （2026-11-12、docs/12_機能テスト.md「設計に効く、思わぬ事実」）。
+         * （2026-11-12、docs/資料/端末の能力.md「設計に効く、思わぬ事実」）。
          */
         fun isDetached(context: Context): Boolean = isEnabled(context) && !connected.value
 
-        /** ユーザー補助の設定で有効になっているか（サービスがまだつながっていなくても）。 */
+        /**
+         * ユーザー補助の設定で有効になっているか（サービスがまだつながっていなくても）。
+         * 設定の値は、システムが「パッケージ名/クラスの完全な名前」でも「パッケージ名/.短い名前」でも書くので、
+         * 部品の名前（ComponentName）に戻して比べる（2026-11-12、オン・オフし直した後は短い形で書かれ、完全な名前とだけ比べて見落とした）。
+         */
         fun isEnabled(context: Context): Boolean {
             val enabled = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
-            val name = "${context.packageName}/${OverlayAccessibilityService::class.java.name}"
-            return enabled.split(':').any { it.equals(name, ignoreCase = true) }
+            val me = android.content.ComponentName(context, OverlayAccessibilityService::class.java)
+            return enabled.split(':').any { android.content.ComponentName.unflattenFromString(it) == me }
         }
     }
 }

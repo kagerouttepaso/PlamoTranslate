@@ -20,7 +20,7 @@ class TranslationPreferences(context: Context) {
             ?: TranslationModel.SMALL
         set(value) = translation.edit().putString(KEY_MODEL, value.name).apply()
 
-    /** CPUの詳細設定（2026-11-08、15T Proで翻訳が極端に遅かったため。docs/03_翻訳コア.md「CPUの詳細設定」）。 */
+    /** CPUの詳細設定（2026-11-08、15T Proで翻訳が極端に遅かったため。docs/設計/翻訳コア.md「パフォーマンスの設定」）。 */
     val cpuOptions: CpuOptions
         get() {
             val d = CpuOptions()
@@ -35,7 +35,7 @@ class TranslationPreferences(context: Context) {
         }
 
     /**
-     * まとめ訳し（画面翻訳・カメラ翻訳）が同時に訳す文の数（2026-11-12。docs/03_翻訳コア.md「複数の文を同時に訳す」）。
+     * 翻訳の流れが同時に訳す片の数（4機能すべてに効く。docs/設計/翻訳コア.md「複数の文を同時に訳す」）。
      * 読み直さずに効く（[EngineHolder.setParallel]）。
      */
     var parallel: Int

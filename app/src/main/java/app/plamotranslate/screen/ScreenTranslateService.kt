@@ -63,7 +63,7 @@ import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
 
 /**
- * 画面翻訳のフォアグラウンドサービス（docs/05_画面翻訳.md、構成は docs/13_画面翻訳の構成.md）。
+ * 画面翻訳のフォアグラウンドサービス（docs/設計/画面翻訳.md、構成は docs/設計/画面翻訳.md）。
  *
  * このサービスは部品をつなぐだけで、何をするかは決めない。
  * - 制御：画面翻訳の状態遷移（中核の [ScreenSession]）が、出来事を受け取って次の状態と作業を決める（[dispatch]）。
@@ -167,7 +167,7 @@ class ScreenTranslateService : Service() {
             it.onStatusTap = { dispatch(SessionEvent.StatusTapped) }
             it.opaqueWithAccessibility = { preferences.opaqueOverlay }
         }
-        // ユーザー補助がつながっていれば、ほかのアプリ・画面への切り替わりを合図にする（docs/12_機能テスト.md「問い1」）
+        // ユーザー補助がつながっていれば、ほかのアプリ・画面への切り替わりを合図にする（docs/資料/端末の能力.md「問い1」）
         OverlayAccessibilityService.onWindowChanged = ::onWindowChanged
         OverlayAccessibilityService.onScrolled = ::onScrolled
         touchWatcher = TouchWatcher(this, wm, ::onScreenTouch).also { it.show() }
@@ -314,7 +314,7 @@ class ScreenTranslateService : Service() {
             }
             w.model = ready.model.label
             w.translateStart = SystemClock.uptimeMillis()
-            // 1回の翻訳ごとに翻訳の流れを開き、終わったら閉じる（docs/13_画面翻訳の構成.md「翻訳の契約」）。
+            // 1回の翻訳ごとに翻訳の流れを開き、終わったら閉じる（docs/設計/翻訳コア.md「翻訳の契約」）。
             // 控えは端末のデータベースにも残し、次に始めたときも使う。データベースでは確かなモデル（2B）の訳を優先する（TranslationCache.Scope）
             val store = TranslationCache.get(this@ScreenTranslateService)
             val stream = Translations.open(this, this@ScreenTranslateService, TranslationStream.Options(source, SCREEN_TARGET), memoryCache) { r ->
@@ -327,6 +327,8 @@ class ScreenTranslateService : Service() {
                         is SegmentUpdate.Partial -> overlay?.setTranslation(u.id.toInt(), u.text)
                         is SegmentUpdate.Final -> {
                             overlay?.setTranslation(u.id.toInt(), u.text)
+                            // 最後の確定で状態遷移が Finished を返し、その場で記録する（finished）。それより前に控えの数を渡す
+                            w.stats = stream.stats
                             dispatch(SessionEvent.SegmentDone(session))
                         }
                         is SegmentUpdate.Failed -> dispatch(SessionEvent.TranslationFailed(session, u.message))
@@ -366,7 +368,8 @@ class ScreenTranslateService : Service() {
         val w = workOf(session) ?: return
         if (w.peekJob?.isActive == true) return
         val capturer = capturer ?: return
-        val frames = if (profile.stackFrames > 1) 3 else 1
+        val frames = profile.validity.peekFrames
+        val interval = profile.validity.peekIntervalMs
         w.peekJob = scope.launch(w.job) {
             delay(PEEK_DELAY_MS)
             if (state.phase != Phase.Showing(session) || state.menuOpen) return@launch
@@ -378,13 +381,13 @@ class ScreenTranslateService : Service() {
                 val hiddenAt = SystemClock.uptimeMillis()
                 overlay.setBoxesVisible(false)
                 delay(HIDE_SETTLE_MS)
-                // 枠を隠した後の画面を撮る。動く画面は3枚の中央値で背景の動きを消す
+                // 枠を隠した後の画面を撮る。枚数と間隔は場面の設定（動く画面は3枚の中央値で背景の動きを消す）
                 var after = hiddenAt + 16
                 val deadline = SystemClock.uptimeMillis() + PEEK_TIMEOUT_MS
                 while (thumbs.size < frames && SystemClock.uptimeMillis() < deadline) {
                     capturer.latestThumb(after)?.let { (t, at) ->
                         thumbs += t
-                        after = at + MOTION_PEEK_INTERVAL_MS
+                        after = at + interval
                     }
                     delay(16)
                 }
@@ -455,7 +458,11 @@ class ScreenTranslateService : Service() {
         dispatch(SessionEvent.Invalidated("ほかの画面に切り替わった"))
     }
 
-    /** ほかのアプリの中身がスクロールした（ユーザー補助の知らせ）。原文が動いたので、訳している途中の処理と出している訳を取り消す。 */
+    /**
+     * ほかのアプリの中身がスクロールした（ユーザー補助の知らせ）。原文が動いたので、訳している途中の処理と出している訳を取り消す。
+     * ユーザー補助の知らせは約0.1秒間引いて届くので、通常のモードでは判定Bの「画面が変わった」が先に取り消すことが多い。
+     * 判定Bが遅いとき（動く画面のモードは画面全体の変化を見ず、外周を3回の中央値で比べる）に先に効く予備の合図（2026-11-12に実機で確かめた）。
+     */
     private fun onScrolled() {
         if (state.session == null) return
         Log.i(TAG, "画面翻訳: スクロールしたので取り消した")
@@ -463,7 +470,7 @@ class ScreenTranslateService : Service() {
     }
 
     /**
-     * ユーザー補助が「有効なのにつながっていない」（端末に止められて切り離された）ことを見つけて知らせる（docs/13_画面翻訳の構成.md
+     * ユーザー補助が「有効なのにつながっていない」（端末に止められて切り離された）ことを見つけて知らせる（docs/設計/画面翻訳.md
      * 「使える能力と組み立て」）。切り離されると、訳の枠は透ける重ね表示に、合図は画面の見張りだけになる。
      * 始めた直後はつながるまで少しかかるので、待ってから見る。その後は、つながりが切れたときに見る。
      */
@@ -633,9 +640,6 @@ class ScreenTranslateService : Service() {
 
         /** 訳の枠を隠してから、のぞく画面が届くのを待つ上限。 */
         private const val PEEK_TIMEOUT_MS = 600L
-
-        /** 動く画面のモードで、のぞくときに撮る3枚の間隔。 */
-        private const val MOTION_PEEK_INTERVAL_MS = 80L
 
         /** 始めてから、ユーザー補助が切り離されていないかを見るまでの待ち（始めた直後はつながるまで少しかかる）。 */
         private const val A11Y_CHECK_DELAY_MS = 3000L

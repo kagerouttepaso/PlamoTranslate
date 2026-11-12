@@ -44,7 +44,7 @@ import java.io.File
  * 画面翻訳の評価用（デバッグビルドだけ）。保存したスクリーンショットに、画面翻訳と同じ
  * 文字認識→訳す対象の選別（selectTargets）→まとめ訳しをかけ、所要時間と訳をJSON Linesに、重ね表示の見た目をPNGに書き出す。
  *
- * ふだんは tools/run-bench.ps1 から動かす（画像の転送・起動・取り出し・採点まで行う。docs/05_画面翻訳.md「評価」）。
+ * ふだんは tools/run-bench.ps1 から動かす（画像の転送・起動・取り出し・採点まで行う。docs/設計/画面翻訳.md「評価」）。
  * 原文の言語を指定するときは `--es lang CHINESE` のように渡す（既定は自動）。
  */
 class BenchActivity : ComponentActivity() {
@@ -99,7 +99,8 @@ class BenchActivity : ComponentActivity() {
             // 画像ごとに新しい翻訳の流れを開き、前の画像の訳の控えを使わない（画面翻訳と同じ契約で訳す）
             val translations = Array(targets.size) { StringBuilder() }
             val t1 = SystemClock.uptimeMillis()
-            coroutineScope {
+            // 訳す対象が無い画像（日本語だけ・空の画面）では流れを開かない。空の依頼は何も流さないので、確定を待つと止まる
+            if (targets.isNotEmpty()) coroutineScope {
                 val stream = TranslationStream(this, { TranslationStream.Backend(engine, engine) }, TranslationStream.Options(language.sourceLanguage, SCREEN_TARGET))
                 try {
                     stream.submit(targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })

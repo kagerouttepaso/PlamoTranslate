@@ -90,6 +90,29 @@ class TranslationStreamTest {
         updates.filterIsInstance<SegmentUpdate.Final>().associate { it.id to it.text }
 
     @Test
+    fun 複数行の文は全部の行を訳し改行を残す() {
+        // テキスト翻訳は入力の全体を1つの文として頼む。片は1行に限るので、行ごとに分けてから訳し、元の改行へ戻す
+        for (parallel in listOf(1, 4)) {
+            val engine = FakeEngine(parallel = parallel)
+            val s = stream(engine)
+            s.submit(listOf(Segment(1, "one\ntwo\n\nfour\r\nfive")))
+            assertEquals("parallel=$parallel", "訳「one」\n訳「two」\n\n訳「four」\n訳「five」", finals(s.collectUntilDone(setOf(1)))[1])
+            assertTrue("parallel=$parallel：片に改行を入れない", engine.requests.all { r -> r.split('\n').none { it.isBlank() } })
+        }
+    }
+
+    @Test
+    fun 長い行を分けて訳しても行の区切りは残る() {
+        val engine = FakeEngine(parallel = 4)
+        val s = stream(engine)
+        val long = (1..20).joinToString(" ") { "Sentence number $it is here." }
+        s.submit(listOf(Segment(1, "$long\nlast")))
+        val text = finals(s.collectUntilDone(setOf(1)))[1].orEmpty()
+        assertEquals(2, text.split('\n').size)
+        assertTrue(text.endsWith("\n訳「last」"))
+    }
+
+    @Test
     fun 同時に訳すときは文ごとに1回ずつ訳す() {
         val engine = FakeEngine(parallel = 4)
         val s = stream(engine)
