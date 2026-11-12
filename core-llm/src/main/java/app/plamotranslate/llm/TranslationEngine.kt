@@ -1,26 +1,15 @@
 package app.plamotranslate.llm
 
+import app.plamotranslate.pipeline.translation.JobEngine
+import app.plamotranslate.pipeline.translation.JobSource
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.Executors
-
-/** 翻訳中に流れてくる出来事。 */
-sealed interface TranslationEvent {
-    /** 訳文の続き。 */
-    data class Delta(val text: String) : TranslationEvent
-
-    /** 生成が終わった。[tokens] は生成トークン数、[millis] は依頼から完了までの時間。 */
-    data class Done(val tokens: Int, val millis: Long) : TranslationEvent
-}
 
 class TranslationException(message: String) : Exception(message)
 
@@ -44,78 +33,33 @@ data class CpuOptions(
 )
 
 /**
- * PLaMo 3 Translateを1つ保持し、翻訳を1件ずつ実行する。
+ * PLaMo 3 Translateを1つ保持し、中核の翻訳のエンジンの差し込み口（[JobEngine]）として訳す（docs/13_画面翻訳の構成.md「翻訳の契約」）。
+ * 機能はこのクラスを直接呼ばず、中核の翻訳の流れ（`TranslationStream`）を通す。
  * llama.cppのコンテキストは同時に使えないため、すべての呼び出しを1本のスレッドへ寄せる。
  */
 class TranslationEngine private constructor(
     private val handle: Long,
     /** GPU（OpenCL）で動いているか。false ならCPUだけ。 */
     val usesGpu: Boolean,
-) {
+) : JobEngine {
 
     /**
-     * まとめ訳し（画面翻訳・カメラ翻訳）が同時に訳す文の数（1〜[MAX_PARALLEL]。1なら1件ずつ）。
-     * 設定の画面の「同時に訳す数」をアプリが入れる。読み直さずに変えられる。
+     * 同時に訳す文の数（1〜[MAX_PARALLEL]。1なら1件ずつ）。設定の画面の「同時に訳す数」をアプリが入れる。読み直さずに変えられる。
      */
     @Volatile
-    var parallel: Int = DEFAULT_PARALLEL
+    override var parallel: Int = DEFAULT_PARALLEL
         set(value) {
             field = value.coerceIn(1, MAX_PARALLEL)
         }
 
     /**
-     * 訳文をトークンごとに流す。収集側がキャンセルすると、次のトークンで生成を止める。
-     */
-    fun translate(request: TranslationRequest, maxTokens: Int = DEFAULT_MAX_TOKENS): Flow<TranslationEvent> =
-        callbackFlow {
-            val prompt = Pfml3PromptBuilder.build(request)
-            val job = launch(dispatcher) {
-                // モデルを切り替えて閉じた後に順番が回ってきた依頼は、解放済みのモデルを触らずに失敗させる
-                if (closed) {
-                    close(TranslationException("翻訳モデルを切り替えたため、この翻訳は中止しました"))
-                    return@launch
-                }
-                val start = System.nanoTime()
-                val scope = currentCoroutineContext()
-                val result = LlamaNative.nativeTranslate(handle, prompt, maxTokens) { bytes ->
-                    trySend(TranslationEvent.Delta(String(bytes, Charsets.UTF_8)))
-                    scope.isActive
-                }
-                if (result < 0) {
-                    close(TranslationException(errorMessage(result)))
-                } else {
-                    send(TranslationEvent.Done(result, (System.nanoTime() - start) / 1_000_000))
-                    close()
-                }
-            }
-            awaitClose { job.cancel() }
-        }
-
-    /**
-     * 複数の依頼を同時に訳すときの、依頼の出し手（[translateJobs]）。どのメソッドも推論のスレッドから順に呼ばれる
-     * （同時には呼ばれない）ので、出し手の中の状態はこのスレッドだけで触れば同期は要らない。
-     */
-    interface JobSource {
-        /** 次に訳す依頼と、その番号（出し手が決める）。今は無ければ null。 */
-        fun next(): Pair<Int, TranslationRequest>?
-
-        /** [id] の訳文の続き。true を返すと、その依頼の生成を止める（止まらなくなった生成の打ち切りなど）。 */
-        fun onText(id: Int, text: String): Boolean
-
-        /** [id] の生成が終わった（止めた場合も含む）。ここで訳し直しの依頼を足すと、空いた流れですぐ訳す。 */
-        fun onFinished(id: Int)
-
-        /** [id] は流れ1本分のコンテキストに入らないので訳さなかった。流れを減らして（[translateJobs] の slots を1にして）訳し直せる。 */
-        fun onTooLong(id: Int)
-    }
-
-    /**
      * [source] から依頼を受け取り、最大 [slots] 本（[MAX_PARALLEL] まで）を同時に訳す（2026-11-12）。
      * 1回の計算で全部の流れを1トークンずつ進めるので、1件ずつ訳すより合計が速い。訳し終わった流れには、ほかの流れを
      * 待たずにすぐ次の依頼を入れる（docs/03_翻訳コア.md「複数の文を同時に訳す」）。[source] に依頼が無くなり、
-     * 全部の流れが訳し終えたら戻る。戻り値は全部の依頼を合わせた生成トークン数。
+     * 全部の流れが訳し終えたら戻る。戻り値は全部の依頼を合わせた生成トークン数。1文だけ訳すときも、流れ1本でこれを使う
+     * （2026-11-12に1文用の入口と生成の処理を取り除いた。翻訳の契約を1本にするため）。
      */
-    suspend fun translateJobs(slots: Int, source: JobSource, maxTokens: Int = DEFAULT_MAX_TOKENS): Int =
+    override suspend fun run(slots: Int, source: JobSource, maxTokens: Int): Int =
         withContext(dispatcher) {
             if (closed) throw TranslationException("翻訳モデルを切り替えたため、この翻訳は中止しました")
             val scope = currentCoroutineContext()

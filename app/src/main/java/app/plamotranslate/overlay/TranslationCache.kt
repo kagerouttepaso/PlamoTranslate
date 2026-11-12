@@ -4,6 +4,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import app.plamotranslate.llm.Language
+import app.plamotranslate.pipeline.translation.TranslationMemory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,7 +31,7 @@ class TranslationCache private constructor(context: Context) {
     val entries: StateFlow<Int> = _entries.asStateFlow()
 
     /**
-     * 消した回数。[BatchTranslator] はメモリにも控えを持つので、これが変わったらメモリの控えも捨てる
+     * 消した回数。翻訳の流れはメモリにも控えを持つので、これが変わったらメモリの控えも捨てる（流れの鍵に入れる）
      * （設定の画面で消しても、動いている画面翻訳が古い訳を出し続けないように）。
      */
     @Volatile
@@ -44,14 +45,14 @@ class TranslationCache private constructor(context: Context) {
      * - 書くときは、自分以上のモデルの訳があれば書かない。2Bの訳は0.8Bの訳を上書きしていく。
      * 同じ原文に残る訳は1つだけで、いちばん確かなモデルのもの。[model] は記録用（どのモデルの重みで訳したか）。
      */
-    inner class Scope(private val model: String, private val rank: Int, source: Language?, target: Language, context: String?) {
+    inner class Scope(private val model: String, private val rank: Int, source: Language?, target: Language, context: String?) : TranslationMemory {
         private val key = listOf(source?.code ?: "auto", target.code, context.orEmpty()).joinToString("|")
 
         /** 控えを消した回数（[TranslationCache.generation]）。 */
         val generation: Int get() = this@TranslationCache.generation
 
         /** [texts] のうち、自分以上のモデルの訳が控えにあるもの。使った時刻も新しくする。 */
-        suspend fun lookup(texts: Collection<String>): Map<String, String> = withContext(Dispatchers.IO) {
+        override suspend fun lookup(texts: Collection<String>): Map<String, String> = withContext(Dispatchers.IO) {
             if (texts.isEmpty()) return@withContext emptyMap()
             val found = HashMap<String, String>()
             val db = helper.writableDatabase
@@ -71,7 +72,7 @@ class TranslationCache private constructor(context: Context) {
          * 訳をまとめて控える（1回の翻訳のまとまりごとに1つのトランザクション）。空の訳は控えない（次も訳し直すため）。
          * 自分より確かなモデルの訳がある原文は書き換えない。
          */
-        suspend fun storeAll(translations: Map<String, String>) = withContext(Dispatchers.IO) {
+        override suspend fun store(translations: Map<String, String>) = withContext(Dispatchers.IO) {
             val entries = translations.filterValues { it.isNotBlank() }
             if (entries.isEmpty()) return@withContext
             val db = helper.writableDatabase

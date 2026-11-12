@@ -3,10 +3,14 @@ package app.plamotranslate
 import android.content.Context
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.TranslationEngine
-import app.plamotranslate.llm.TranslationEvent
 import app.plamotranslate.llm.TranslationRequest
+import app.plamotranslate.pipeline.translation.JobSource
+import app.plamotranslate.pipeline.translation.SingleRequest
 
-/** 翻訳の速さを測る（設定の「速さを測る」）。決まった文を訳し、最初の文字までの時間と生成の速さを出す。 */
+/**
+ * 翻訳の速さを測る（設定の「速さを測る」「自動で調整」）。決まった文を訳し、最初の文字までの時間と生成の速さを出す。
+ * 機能の翻訳の流れではなく、エンジンの差し込み口（[TranslationEngine.run]）を直接使う計測の道具。
+ */
 object EngineBenchmark {
     /** 測った結果。[firstMillis] は依頼から最初の文字まで（プロンプトの処理を含む）。 */
     data class Result(val firstMillis: Long, val tokens: Int, val totalMillis: Long) {
@@ -15,24 +19,20 @@ object EngineBenchmark {
             get() = if (tokens > 1 && totalMillis > firstMillis) (tokens - 1) * 1000.0 / (totalMillis - firstMillis) else 0.0
     }
 
-    /** 今の翻訳モデルで測る。モデルが読めない・訳が終わらなければ null。 */
+    /** 今の翻訳モデルで1文を測る。モデルが読めない・訳が終わらなければ null。 */
     suspend fun run(context: Context): Result? {
         val engine = EngineHolder.awaitEngine(context) ?: return null
-        val request = TranslationRequest(
-            "明日の朝は九時に駅の北口で待ち合わせて、そのまま美術館へ向かいましょう。昼ご飯は近くの店を予約してあります。",
-            Language.JA, Language.EN,
+        val source = SingleRequest(
+            TranslationRequest(
+                "明日の朝は九時に駅の北口で待ち合わせて、そのまま美術館へ向かいましょう。昼ご飯は近くの店を予約してあります。",
+                Language.JA, Language.EN,
+            ),
         )
         val start = System.nanoTime()
-        var first = 0L
-        var done: TranslationEvent.Done? = null
-        engine.translate(request, maxTokens = 64).collect { e ->
-            when (e) {
-                is TranslationEvent.Delta -> if (first == 0L) first = System.nanoTime() - start
-                is TranslationEvent.Done -> done = e
-            }
-        }
-        val d = done ?: return null
-        return Result(first / 1_000_000, d.tokens, d.millis)
+        val tokens = engine.run(1, source, maxTokens = 64)
+        val total = (System.nanoTime() - start) / 1_000_000
+        if (source.firstTextAt == 0L) return null
+        return Result((source.firstTextAt - start) / 1_000_000, tokens, total)
     }
 
     /**
@@ -43,16 +43,16 @@ object EngineBenchmark {
         val engine = EngineHolder.awaitEngine(context) ?: return null
         val requests = PARALLEL_TEXTS.take(parallel).map { TranslationRequest(it, Language.JA, Language.EN) }
         // 決まった依頼を一度ずつ出すだけの出し手
-        fun source() = object : TranslationEngine.JobSource {
+        fun source() = object : JobSource {
             private var i = 0
             override fun next() = requests.getOrNull(i)?.let { (i to it).also { i++ } }
             override fun onText(id: Int, text: String) = false
             override fun onFinished(id: Int) = Unit
             override fun onTooLong(id: Int) = Unit
         }
-        engine.translateJobs(parallel, source(), maxTokens = 4)
+        engine.run(parallel, source(), maxTokens = 4)
         val start = System.nanoTime()
-        val tokens = engine.translateJobs(parallel, source(), maxTokens = PARALLEL_TOKENS)
+        val tokens = engine.run(parallel, source(), maxTokens = PARALLEL_TOKENS)
         val millis = (System.nanoTime() - start) / 1_000_000
         return if (millis > 0 && tokens > 0) tokens * 1000.0 / millis else null
     }

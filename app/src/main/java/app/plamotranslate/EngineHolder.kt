@@ -5,6 +5,7 @@ import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.llm.TranslationRequest
 import app.plamotranslate.models.TranslationModel
+import app.plamotranslate.pipeline.translation.SingleRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -131,9 +132,7 @@ object EngineHolder {
      * 読み込み直後に短い文を1回訳しておき、作者の最初の翻訳を待たせない。
      */
     private suspend fun warmUp(engine: TranslationEngine) {
-        runCatching {
-            engine.translate(TranslationRequest("안녕하세요", Language.KO, Language.JA), maxTokens = 8).collect { }
-        }
+        runCatching { engine.run(1, SingleRequest(TranslationRequest("안녕하세요", Language.KO, Language.JA)), maxTokens = 8) }
     }
 
     /** 同時に訳す文の数を保存し、今のエンジンにもすぐ効かせる（読み直さない）。 */

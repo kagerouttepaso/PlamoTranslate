@@ -6,11 +6,6 @@ internal object LlamaNative {
         System.loadLibrary("plamo-llm")
     }
 
-    /** 1トークン分の文字列（UTF-8、文字の途中で切れない）を受け取る。false を返すと生成を止める。 */
-    fun interface TokenCallback {
-        fun onToken(utf8: ByteArray): Boolean
-    }
-
     /**
      * 計算部分のライブラリを [nativeLibDir] から読み込む。[loadGpu] が false ならCPUの部分だけ。
      * 最初の1回だけ有効で、GPUのデバイスが使えるようになったかを返す。[nativeLoad] より前に呼ぶ。
@@ -26,9 +21,6 @@ internal object LlamaNative {
         poll: Int, useThreadPool: Boolean, useMmap: Boolean, boost: Boolean, nSeqMax: Int,
     ): Long
     external fun nativeFree(handle: Long)
-
-    /** 生成したトークン数、または負のエラーコード（-1 トークン化失敗、-2 長すぎる、-3 推論失敗）。 */
-    external fun nativeTranslate(handle: Long, prompt: String, maxTokens: Int, callback: TokenCallback): Int
 
     /** [nativeTranslateJobs] の受け渡し口。どれも推論のスレッドから呼ばれる。 */
     interface JobCallback {
@@ -50,7 +42,8 @@ internal object LlamaNative {
 
     /**
      * [callback] から依頼を受け取り、最大 [slots] 本（[nativeLoad] の nSeqMax まで）を同時に訳す。訳し終わった流れには
-     * すぐ次の依頼を入れる。全部を合わせた生成トークン数、または負のエラーコード（[nativeTranslate] と同じ）。
+     * すぐ次の依頼を入れる。全部を合わせた生成トークン数、または負のエラーコード（-1 トークン化失敗、-3 推論失敗、-4 受け渡しの失敗）。
+     * 1文だけ訳すときも、slots を1にしてこれを使う（生成の処理はこの1本だけ）。
      */
     external fun nativeTranslateJobs(handle: Long, slots: Int, maxTokens: Int, callback: JobCallback): Int
 

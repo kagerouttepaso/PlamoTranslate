@@ -12,11 +12,15 @@ import app.plamotranslate.camera.TextSimilarity.similar
 import app.plamotranslate.llm.Language
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.ocr.OcrLanguage
-import app.plamotranslate.overlay.BatchTranslator
 import app.plamotranslate.overlay.BoxColors
 import app.plamotranslate.overlay.selectTargets
+import app.plamotranslate.pipeline.translation.Segment
+import app.plamotranslate.pipeline.translation.SegmentUpdate
+import app.plamotranslate.pipeline.translation.TranslationStream
+import app.plamotranslate.translation.Translations
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -69,7 +73,7 @@ class LiveFrame(
  *
  * 状態はすべてメインスレッドで触る。
  */
-class LiveTranslator(private val context: Context, scope: CoroutineScope) {
+class LiveTranslator(private val context: Context, private val scope: CoroutineScope) {
     // 1行ずつ読む（段落にまとめると読み揺れで揃わない）。漫画モデルは縦書きの漫画用で遅いので使わない
     private val ocr = MultiScriptOcr(mangaDir = null, groupLines = false)
     private val tracker = LineTracker()
@@ -138,7 +142,16 @@ class LiveTranslator(private val context: Context, scope: CoroutineScope) {
      */
     private val wanted = LinkedHashMap<String, String>()
     private val wake = Channel<Unit>(Channel.CONFLATED)
-    private var translator: BatchTranslator? = null
+
+    /** 訳す流れ（[openStream]）と、それを開いたときのエンジン。 */
+    private var stream: TranslationStream? = null
+    private var streamCollector: Job? = null
+    private var streamEngine: Any? = null
+
+    /** 頼んでいる段落：キー → 文の番号、文の番号 → キー。 */
+    private val submitted = HashMap<String, Long>()
+    private val keysById = HashMap<Long, String>()
+    private var nextId = 1L
 
     init {
         scope.launch { translateLoop() }
@@ -194,7 +207,10 @@ class LiveTranslator(private val context: Context, scope: CoroutineScope) {
         _frame.value?.let { _frame.value = it.with(boxes(includeUnsure = true)) }
     }
 
-    fun close() = ocr.close()
+    fun close() {
+        stream?.close()
+        ocr.close()
+    }
 
     private fun paragraphs(includeUnsure: Boolean): List<Paragraph> =
         Paragraphs.group(tracker.lines(includeUnsure), table = !groupParagraphs)
@@ -231,6 +247,9 @@ class LiveTranslator(private val context: Context, scope: CoroutineScope) {
     private fun forgetTranslations() {
         cache.clear()
         partial.clear()
+        stream?.clear()
+        submitted.clear()
+        keysById.clear()
     }
 
     /** 今のコマの枠に、訳の進み具合を入れ直す。 */
@@ -239,48 +258,78 @@ class LiveTranslator(private val context: Context, scope: CoroutineScope) {
         _frame.value = f.with(f.boxes.map { it.copy(translation = translationOf(key(it.source))) })
     }
 
+    /**
+     * 訳したい段落を、翻訳の流れ（中核の TranslationStream）へ足していく（docs/13_画面翻訳の構成.md「翻訳の契約」）。
+     * 2026-11-12までは4段落ずつ頼み、全部訳し終わるまで次を頼まなかった。今は頼んだ順に、空いた流れですぐ訳す。
+     * 原文の言語・訳す先・モード（背景）・翻訳モデルが変わったら流れを開き直し、前の訳は使わない。
+     */
     private suspend fun translateLoop() {
-        for (signal in wake) while (wanted.isNotEmpty()) {
-            // 一度に訳すのは数件まで。訳している間に一時停止・カメラの移動で、頼む文が変わるため
-            val batch = wanted.values.take(BATCH)
-            batch.forEach { wanted.remove(key(it)) }
-            val pending = batch.filter { translationOf(key(it)) == null && key(it) !in partial }
-            if (pending.isEmpty()) continue
+        for (signal in wake) {
+            if (wanted.isEmpty()) continue
             val engine = EngineHolder.awaitEngine(context) ?: continue
-            // モデルを切り替えたらエンジンが変わる。前のモデルの訳は捨てる
-            if (translator != null && translator?.engine !== engine) cache.clear()
             // 表・メニューのモードは短い語ばかりなので、機器の表示などの短い表記だという背景を渡す
             // （2026-11-06、エアコンのリモコンで「송풍」が宋風→送風になった。効果は限られる）
-            val t = BatchTranslator.reuseOrCreate(
-                translator, engine, target, source, if (groupParagraphs) null else TABLE_CONTEXT,
-            ).also { translator = it }
-            val keys = pending.map(::key)
-            keys.forEach { partial[it] = "" }
-            val t0 = SystemClock.uptimeMillis()
-            try {
-                t.translate(
-                    pending,
-                    onDelta = { i, delta -> partial[keys[i]] = (partial[keys[i]] ?: "") + delta; refresh() },
-                    onReplace = { i, text -> partial[keys[i]] = text; refresh() },
-                )
-                // 訳が空でも控える（控えないと、枠が「訳待ち」のまま残り続ける）
-                keys.forEach { k -> cache[k] = partial.remove(k)?.trim()?.takeIf { it.isNotEmpty() } ?: "（訳せませんでした）" }
-                Log.i(TAG, "カメラ翻訳: ${pending.size}件を${SystemClock.uptimeMillis() - t0}ms")
-            } catch (e: Exception) {
-                keys.forEach { partial.remove(it) }
-                if (e is CancellationException) throw e
-                Log.w(TAG, "カメラ翻訳: 翻訳に失敗", e)
+            val options = TranslationStream.Options(source, target, context = if (groupParagraphs) null else TABLE_CONTEXT)
+            val current = stream
+            val s = if (current == null || current.options != options || streamEngine !== engine) {
+                // モデルを切り替えたらエンジンが変わる。前のモデルの訳は捨てる
+                if (current != null && streamEngine !== engine) cache.clear()
+                streamEngine = engine
+                openStream(options)
+            } else current
+            val items = wanted.values.filter { translationOf(key(it)) == null && key(it) !in partial }.distinctBy(::key)
+            wanted.clear()
+            if (items.isEmpty()) continue
+            val segments = items.map { text ->
+                val k = key(text)
+                val id = nextId++
+                submitted[k] = id
+                keysById[id] = k
+                partial[k] = ""
+                Segment(id, text)
             }
-            refresh()
+            s.submit(segments)
         }
+    }
+
+    /** 翻訳の流れを開き直し、結果を購読する。 */
+    private fun openStream(options: TranslationStream.Options): TranslationStream {
+        stream?.close()
+        streamCollector?.cancel()
+        submitted.keys.forEach { partial.remove(it) }
+        submitted.clear()
+        keysById.clear()
+        val s = Translations.open(scope, context, options)
+        stream = s
+        streamCollector = scope.launch { s.updates.collect(::onUpdate) }
+        return s
+    }
+
+    private fun onUpdate(u: SegmentUpdate) {
+        val k = keysById[u.id] ?: return
+        when (u) {
+            is SegmentUpdate.Partial -> partial[k] = u.text
+            is SegmentUpdate.Final -> {
+                // 訳が空でも控える（控えないと、枠が「訳待ち」のまま残り続ける）
+                cache[k] = u.text.trim().ifEmpty { "（訳せませんでした）" }
+                partial.remove(k)
+                submitted.remove(k)
+                keysById.remove(u.id)
+                Log.i(TAG, "カメラ翻訳: 1件を${u.millis}ms${if (u.cached) "（控え）" else ""}")
+            }
+            is SegmentUpdate.Failed -> {
+                partial.remove(k)
+                submitted.remove(k)
+                keysById.remove(u.id)
+                Log.w(TAG, "カメラ翻訳: 翻訳に失敗 ${u.message}")
+            }
+        }
+        refresh()
     }
 
     private companion object {
         const val TAG = "PlamoTranslate"
         const val CACHE_SIZE = 300
-
-        /** 1回に訳す段落の数。BatchTranslator が数段落を1回の依頼にまとめて訳すので、隣の段落も文脈としてモデルに見える。 */
-        const val BATCH = 4
 
         /** 表・メニューのモードで翻訳に渡す背景（PFML3の context）。 */
         const val TABLE_CONTEXT = "家電や機器のボタン・表示画面、メニュー、看板、表などに書かれた短い表記。"

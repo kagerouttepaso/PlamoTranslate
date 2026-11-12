@@ -1,4 +1,4 @@
-package app.plamotranslate.overlay
+package app.plamotranslate.pipeline.translation
 
 import app.plamotranslate.llm.Language
 import java.lang.Character.UnicodeScript
@@ -7,7 +7,7 @@ import java.lang.Character.UnicodeScript
  * まとめ訳しの点検（2026-11-12、作者の採用。Chrome拡張「PLaMo翻訳」の shared/text.js から移した）。
  * 拡張はこのアプリの BatchTranslator を手本にした後、Webページで見つかった失敗への対策を足していたので、それを持ち込む。
  */
-internal object TranslationChecks {
+object TranslationChecks {
 
     /** 長い1段落は、文の切れ目でおよそこの字数ずつに分けて訳す（拡張と同じ）。 */
     const val LONG_TEXT = 1200

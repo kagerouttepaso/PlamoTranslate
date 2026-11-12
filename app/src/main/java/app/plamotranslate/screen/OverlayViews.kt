@@ -388,7 +388,10 @@ class TranslationOverlay(private val context: Context, private val windowManager
     }
 
     fun clear() {
-        boxes.forEachIndexed { i, box -> runCatching { boxHosts[i].removeView(box) } }
+        boxes.forEachIndexed { i, box ->
+            // 調査用（2026-11-12、消したはずの訳の枠が撮影に写った）：外せなかった枠を残す
+            runCatching { boxHosts[i].removeView(box) }.onFailure { android.util.Log.w("PlamoTranslate", "訳の枠を外せませんでした（調査）", it) }
+        }
         boxes.clear()
         boxRects.clear()
         boxHosts.clear()

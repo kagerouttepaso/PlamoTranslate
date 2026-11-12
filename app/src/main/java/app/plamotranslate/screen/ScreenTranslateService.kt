@@ -29,9 +29,13 @@ import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.ocr.OcrLanguage
-import app.plamotranslate.overlay.BatchTranslator
 import app.plamotranslate.overlay.TranslationCache
 import app.plamotranslate.overlay.selectTargets
+import app.plamotranslate.pipeline.translation.MemoryCache
+import app.plamotranslate.pipeline.translation.Segment
+import app.plamotranslate.pipeline.translation.SegmentUpdate
+import app.plamotranslate.pipeline.translation.TranslationStream
+import app.plamotranslate.translation.Translations
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +46,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
 
 /**
@@ -50,7 +55,7 @@ import kotlinx.coroutines.launch
  * 長押しで原文の言語の選択と終了のメニューを出す。
  *
  * 1回の翻訳の流れ（[translateScreen]）：撮影 → 文字認識（[MultiScriptOcr]）→ 訳す対象と枠の色の選別（[selectTargets]）
- * → まとめ訳し（[BatchTranslator]）→ 重ね表示（[TranslationOverlay]）。
+ * → 翻訳の流れ（[TranslationStream]）→ 重ね表示（[TranslationOverlay]）。
  */
 class ScreenTranslateService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -63,7 +68,8 @@ class ScreenTranslateService : Service() {
     private val preferences by lazy { ScreenPreferences(this) }
     private val ocr by lazy { MultiScriptOcr(ModelCatalog.mangaDir(this)) }
     private var job: Job? = null
-    private var batchTranslator: BatchTranslator? = null
+    /** 翻訳のメモリの控え。1回の翻訳ごとに開く翻訳の流れで共有する（訳したモデルが変わったら捨てる）。 */
+    private val memoryCache = MemoryCache()
     private var debugReceiver: BroadcastReceiver? = null
     private var orientation = Configuration.ORIENTATION_UNDEFINED
 
@@ -206,6 +212,7 @@ class ScreenTranslateService : Service() {
      * [TouchWatcher] には触れた知らせが来ないが、ユーザー補助ならこの知らせで確実に分かる。
      */
     private fun onWindowChanged() {
+        Log.d(TAG, "画面翻訳（調査）: ユーザー補助の画面の切り替わりの知らせ（訳している途中 ${job?.isActive == true}、訳を表示中 ${overlay?.isShowing == true}）")
         if (!preferences.opaqueOverlay) return
         if (job?.isActive == true || overlay?.isShowing == true) {
             Log.i(TAG, "画面翻訳: ほかのアプリの画面が切り替わったので取り消した")
@@ -258,6 +265,7 @@ class ScreenTranslateService : Service() {
      */
     private suspend fun watchScreen() {
         var lastAt = 0L
+        var lastDiagAt = 0L
         recentThumbs.clear()
         beginSettling(SystemClock.uptimeMillis())
         while (true) {
@@ -293,6 +301,16 @@ class ScreenTranslateService : Service() {
                 val masks = overlay?.occupiedRects().orEmpty() + listOfNotNull(button?.bounds)
                 val mask = ScreenChange.union(ScreenChange.mask(thumb, masks), animated)
                 val changed = ScreenChange.changedFraction(ref, thumb, mask)
+                // 調査用（2026-11-12、訳している途中に戻っても取り消されない）：訳している間の見張りの判断を残す
+                if (job?.isActive == true && now - lastDiagAt >= 500) {
+                    lastDiagAt = now
+                    val raw = sample?.first
+                    val rawChanged = raw?.let { ScreenChange.changedFraction(ref, it, ScreenChange.mask(it, masks)) }
+                    val hidden = mask.count { it } * 100 / mask.size
+                    Log.d(TAG, "自動翻訳（調査）: 訳している間の変化 ${"%.2f".format(changed)}（しきい値 ${limits.change}）、" +
+                        "1枚の変化 ${rawChanged?.let { "%.2f".format(it) }}（切り替わり ${if (motion) MOTION_SWITCH_CHANGE else SWITCH_CHANGE}）、" +
+                        "比べないます目 $hidden%、枠 ${overlay?.boxBounds?.size}個、モード ${preferences.recognition}")
+                }
                 if (changed >= limits.change) {
                     Log.i(TAG, "自動翻訳: 画面が変わった（${"%.2f".format(changed)}）ので訳を消す")
                     job?.cancel()
@@ -521,6 +539,7 @@ class ScreenTranslateService : Service() {
 
             // 自分のボタンと前の訳が写らないよう、消してから撮る
             val hiddenAt = SystemClock.uptimeMillis()
+            Log.d(TAG, "画面翻訳（調査）: 訳し始める（${if (fromUser) "タップ" else "自動"}、モード $mode、残っていた訳の枠 ${overlay.boxBounds.size}個）")
             capturing = true
             reference = null
             val captured = try {
@@ -574,24 +593,41 @@ class ScreenTranslateService : Service() {
                 overlay.showStatus("翻訳モデルを読めません。アプリを開いて確認してください")
                 return@launch
             }
-            val engine = ready.engine
             val t1 = SystemClock.uptimeMillis()
-            // 訳の控えは原文の言語・翻訳モデルごと。変えたら作り直す。控えは端末のデータベースにも残し、次に始めたときも使う。
-            // データベースでは確かなモデル（2B）の訳を優先する（TranslationCache.Scope）
+            // 1回の翻訳ごとに翻訳の流れを開き、終わったら閉じる（docs/13_画面翻訳の構成.md「翻訳の契約」）。
+            // メモリの控えはサービスが1つ持って流れどうしで共有し、訳したモデルが変わったら捨てる。
+            // 控えは端末のデータベースにも残し、次に始めたときも使う。データベースでは確かなモデル（2B）の訳を優先する（TranslationCache.Scope）
             val source = language.sourceLanguage
-            val persistent = TranslationCache.get(this@ScreenTranslateService)
-                .scope(ready.model.file.sha256.take(16), ready.model.cacheRank, source, SCREEN_TARGET)
-            val translator = BatchTranslator.reuseOrCreate(batchTranslator, engine, SCREEN_TARGET, source, persistent = persistent)
-                .also { batchTranslator = it }
-            runCatching {
-                translator.translate(
-                    targets.map { it.sourceText },
-                    onDelta = overlay::appendTranslation,
-                    onReplace = overlay::setTranslation,
-                )
-            }.onFailure { e ->
-                if (e is CancellationException) throw e
-                overlay.showStatus("翻訳に失敗しました: ${e.message}")
+            val store = TranslationCache.get(this@ScreenTranslateService)
+            val stream = Translations.open(this, this@ScreenTranslateService, TranslationStream.Options(source, SCREEN_TARGET), memoryCache) { r ->
+                Translations.PersistentMemory(store.scope(r.model.file.sha256.take(16), r.model.cacheRank, source, SCREEN_TARGET), store.generation)
+            }
+            var failure: String? = null
+            try {
+                stream.submit(targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })
+                val done = HashSet<Long>()
+                stream.updates.transformWhile { u ->
+                    when (u) {
+                        is SegmentUpdate.Partial -> overlay.setTranslation(u.id.toInt(), u.text)
+                        is SegmentUpdate.Final -> {
+                            overlay.setTranslation(u.id.toInt(), u.text)
+                            done += u.id
+                        }
+                        is SegmentUpdate.Failed -> {
+                            failure = u.message
+                            done += u.id
+                        }
+                    }
+                    emit(u)
+                    done.size < targets.size
+                }.collect { }
+                val st = stream.stats
+                Log.i(TAG, "まとめ訳し: ${targets.size}件、控え メモリ${st.memoryHits}・データベース${st.storedHits}、訳した${st.pieces}片（訳し直し${st.retried}、打ち切り${st.stopped}）")
+            } finally {
+                stream.close()
+            }
+            failure?.let {
+                overlay.showStatus("翻訳に失敗しました: $it")
                 return@launch
             }
             val translateMillis = SystemClock.uptimeMillis() - t1

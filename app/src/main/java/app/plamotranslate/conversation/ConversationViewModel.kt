@@ -17,9 +17,12 @@ import app.plamotranslate.asr.SenseVoiceAsr
 import app.plamotranslate.asr.Utterance
 import app.plamotranslate.asr.WavFile
 import app.plamotranslate.llm.Language
-import app.plamotranslate.llm.TranslationEvent
-import app.plamotranslate.llm.TranslationRequest
+import app.plamotranslate.pipeline.translation.SegmentUpdate
+import app.plamotranslate.pipeline.translation.TranslationStream
+import app.plamotranslate.pipeline.translation.translateOne
+import app.plamotranslate.translation.Translations
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
@@ -275,20 +278,24 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
 
     /** 途中の文字を訳し、訳し終わったときにまだ同じ発話なら聞き取り中のカードに出す。 */
     private suspend fun translatePartial(request: PartialRequest) {
-        val engine = (model.value as? ModelState.Ready)?.engine ?: return
+        if (model.value !is ModelState.Ready) return
         val start = System.nanoTime()
-        val out = StringBuilder()
-        runCatching {
-            engine.translate(
-                TranslationRequest(request.text, request.direction.source, request.direction.target),
-                maxTokens = PARTIAL_MAX_TOKENS,
-            ).collect { event -> if (event is TranslationEvent.Delta) out.append(event.text) }
-        }.onFailure { e ->
-            if (e is CancellationException) throw e
-            return
+        // 翻訳の流れを1回ごとに開き、終わったら閉じる（docs/13_画面翻訳の構成.md「翻訳の契約」）。
+        // 確定訳が来たら呼ぶ側がこのコルーチンを取り消すので、流れも閉じて途中訳の生成を止める
+        val result = coroutineScope {
+            val stream = Translations.open(
+                this, app,
+                TranslationStream.Options(request.direction.source, request.direction.target, maxTokens = PARTIAL_MAX_TOKENS),
+            )
+            try {
+                stream.translateOne(request.text)
+            } finally {
+                stream.close()
+            }
         }
+        if (result !is SegmentUpdate.Final) return
         if (request.generation != generation.get()) return
-        val text = out.toString().trim()
+        val text = result.text.trim()
         log("途中訳 ${request.text} → $text ${(System.nanoTime() - start) / 1_000_000}ms")
         _state.update { s ->
             val live = s.live ?: return@update s
@@ -314,20 +321,22 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     private suspend fun translate(turn: Turn) {
-        val engine = EngineHolder.awaitEngine(app) ?: return
-        val request = TranslationRequest(turn.original, turn.direction.source, turn.direction.target)
-        runCatching {
-            engine.translate(request).collect { event ->
-                when (event) {
-                    is TranslationEvent.Delta -> updateTurn(turn.id) { it.copy(translation = it.translation + event.text) }
-                    is TranslationEvent.Done -> updateTurn(turn.id) {
-                        it.copy(translated = true, stats = "${it.stats}・翻訳${event.millis}ms")
+        coroutineScope {
+            val stream = Translations.open(this, app, TranslationStream.Options(turn.direction.source, turn.direction.target))
+            try {
+                val result = stream.translateOne(turn.original) { text -> updateTurn(turn.id) { it.copy(translation = text) } }
+                when (result) {
+                    is SegmentUpdate.Final -> updateTurn(turn.id) {
+                        it.copy(translation = result.text, translated = true, stats = "${it.stats}・翻訳${result.millis}ms")
                     }
+                    is SegmentUpdate.Failed -> updateTurn(turn.id) {
+                        it.copy(translated = true, translation = "（翻訳に失敗しました：${result.message}）")
+                    }
+                    is SegmentUpdate.Partial -> Unit
                 }
+            } finally {
+                stream.close()
             }
-        }.onFailure { e ->
-            if (e is CancellationException) throw e
-            updateTurn(turn.id) { it.copy(translated = true, translation = "（翻訳に失敗しました：${e.message}）") }
         }
         _state.value.turns.firstOrNull { it.id == turn.id }?.let {
             log("翻訳 [${it.direction.source.code}→${it.direction.target.code}] ${it.original} → ${it.translation} ${it.stats}")

@@ -35,6 +35,8 @@ android {
 }
 
 dependencies {
+    // 中核（言語の型・翻訳の依頼・プロンプト・エンジンの差し込み口）。app からも見えるよう api にする
+    api(project(":core-pipeline"))
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
 }

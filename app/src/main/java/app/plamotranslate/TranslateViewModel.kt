@@ -12,8 +12,10 @@ import app.plamotranslate.audio.MicRecorder
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.isChinese
 import app.plamotranslate.models.ModelCatalog
-import app.plamotranslate.llm.TranslationEvent
-import app.plamotranslate.llm.TranslationRequest
+import app.plamotranslate.pipeline.translation.SegmentUpdate
+import app.plamotranslate.pipeline.translation.TranslationStream
+import app.plamotranslate.pipeline.translation.translateOne
+import app.plamotranslate.translation.Translations
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -154,26 +156,27 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun translate() {
-        val engine = (model.value as? ModelState.Ready)?.engine ?: return
+        if (model.value !is ModelState.Ready) return
         val s = _state.value
         if (s.input.isBlank()) return
         // 前の翻訳が走っていれば止めて、最新の入力だけを訳す
         translateJob?.cancel()
         translateJob = viewModelScope.launch {
             _state.update { it.copy(output = "", translating = true, error = null, stats = "") }
-            runCatching {
-                engine.translate(TranslationRequest(s.input, s.source, s.target)).collect { event ->
-                    when (event) {
-                        is TranslationEvent.Delta -> _state.update { it.copy(output = it.output + event.text) }
-                        is TranslationEvent.Done -> _state.update {
-                            it.copy(stats = "${event.tokens}トークン・${"%.2f".format(event.millis / 1000.0)}秒")
-                        }
+            // 翻訳の流れを1回ごとに開き、終わったら閉じる（docs/13_画面翻訳の構成.md「翻訳の契約」）
+            val stream = Translations.open(this, app, TranslationStream.Options(s.source, s.target))
+            try {
+                when (val r = stream.translateOne(s.input) { text -> _state.update { it.copy(output = text) } }) {
+                    is SegmentUpdate.Final -> _state.update {
+                        it.copy(output = r.text, stats = "${r.tokens}トークン・${"%.2f".format(r.millis / 1000.0)}秒")
                     }
+                    is SegmentUpdate.Failed -> _state.update { it.copy(error = r.message) }
+                    is SegmentUpdate.Partial -> Unit
                 }
-            }.onFailure { e ->
-                if (e !is CancellationException) _state.update { it.copy(error = e.message ?: e.toString()) }
+            } finally {
+                stream.close()
+                _state.update { it.copy(translating = false) }
             }
-            _state.update { it.copy(translating = false) }
         }
     }
 

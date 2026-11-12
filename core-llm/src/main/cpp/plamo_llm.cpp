@@ -27,9 +27,8 @@
 
 namespace {
 
-// nativeTranslate の戻り値（負の値は失敗）
-constexpr jint ERR_TOKENIZE = -1;
-constexpr jint ERR_TOO_LONG = -2;
+// nativeTranslateJobs の戻り値（負の値は失敗）
+// -1 は以前の「トークンに分けられない」、-2 は以前の「長すぎる」（今はどちらも onTooLong で依頼ごとに返す）
 constexpr jint ERR_DECODE = -3;
 constexpr jint ERR_CALLBACK = -4;
 
@@ -330,66 +329,6 @@ Java_app_plamotranslate_llm_LlamaNative_nativeFree(JNIEnv *, jobject, jlong hand
     if (engine->threadpool && g_threadpool_free) g_threadpool_free(engine->threadpool);
     llama_model_free(engine->model);
     delete engine;
-}
-
-// プロンプトを処理し、生成した文字列を少しずつ callback.onToken(byte[]) へ渡す（UTF-8）。
-// onToken が false を返したら中断する。戻り値は生成したトークン数、または負のエラーコード。
-extern "C" JNIEXPORT jint JNICALL
-Java_app_plamotranslate_llm_LlamaNative_nativeTranslate(JNIEnv *env, jobject, jlong handle, jstring jprompt,
-                                                        jint max_tokens, jobject callback) {
-    auto *engine = reinterpret_cast<Engine *>(handle);
-    const llama_vocab *vocab = llama_model_get_vocab(engine->model);
-
-    jclass cb_class = env->GetObjectClass(callback);
-    jmethodID on_token = env->GetMethodID(cb_class, "onToken", "([B)Z");
-    if (!on_token) return ERR_CALLBACK;
-
-    ensure_hint(engine);
-
-    // 翻訳ごとに独立させるため、前回のKVキャッシュを捨てる
-    llama_memory_clear(llama_get_memory(engine->ctx), true);
-    llama_sampler_reset(engine->sampler);
-
-    // 先頭のBOSは add_special=true でllama.cppが付ける
-    std::vector<llama_token> tokens = tokenize(vocab, to_std_string(env, jprompt), true);
-    if (tokens.empty()) return ERR_TOKENIZE;
-    const int n_prompt = (int) tokens.size();
-    if (n_prompt >= engine->n_ctx) return ERR_TOO_LONG;
-    const int n_predict = std::min<int>(max_tokens, engine->n_ctx - n_prompt);
-
-    const int64_t t_start = ggml_time_us();
-    if (decode(engine, llama_batch_get_one(tokens.data(), n_prompt)) != 0) return ERR_DECODE;
-    const int64_t t_prompt = ggml_time_us();
-
-    std::string pending;
-    int n_generated = 0;
-    while (n_generated < n_predict) {
-        llama_token token = llama_sampler_sample(engine->sampler, engine->ctx, -1);
-        if (llama_vocab_is_eog(vocab, token) ||
-            std::find(engine->stop_tokens.begin(), engine->stop_tokens.end(), token) != engine->stop_tokens.end()) {
-            break;
-        }
-        ++n_generated;
-
-        pending += token_to_piece(vocab, token);
-        const size_t ready = complete_utf8_length(pending);
-        if (ready > 0) {
-            jbyteArray bytes = env->NewByteArray((jsize) ready);
-            env->SetByteArrayRegion(bytes, 0, (jsize) ready, reinterpret_cast<const jbyte *>(pending.data()));
-            const jboolean keep_going = env->CallBooleanMethod(callback, on_token, bytes);
-            env->DeleteLocalRef(bytes);
-            pending.erase(0, ready);
-            if (env->ExceptionCheck() || !keep_going) break;
-        }
-
-        if (decode(engine, llama_batch_get_one(&token, 1)) != 0) return ERR_DECODE;
-    }
-    const int64_t t_end = ggml_time_us();
-    LOGI("翻訳: プロンプト %d トークン %.0fms、生成 %d トークン %.0fms（%.1f トークン/秒） ヒント=%s threads=%d %s",
-         n_prompt, (t_prompt - t_start) / 1000.0, n_generated, (t_end - t_prompt) / 1000.0,
-         n_generated > 0 ? n_generated * 1e6 / (double) (t_end - t_prompt) : 0.0,
-         engine->hint ? "有" : "無", llama_n_threads(engine->ctx), cpu_state().c_str());
-    return n_generated;
 }
 
 // 訳す依頼を呼ぶ側から1件ずつ受け取り、最大 n_slots 本の流れ（シーケンス）で同時に訳す（2026-11-12。docs/03_翻訳コア.md

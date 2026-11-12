@@ -1,4 +1,4 @@
-package app.plamotranslate.overlay
+package app.plamotranslate.pipeline.translation
 
 import app.plamotranslate.llm.Language
 import org.junit.Assert.assertEquals

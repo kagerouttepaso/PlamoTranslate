@@ -7,9 +7,10 @@ import android.widget.TextView
 import app.plamotranslate.llm.JapaneseForm
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.TranslationEngine
-import app.plamotranslate.llm.TranslationEvent
 import app.plamotranslate.llm.TranslationRequest
 import app.plamotranslate.models.TranslationModel
+import app.plamotranslate.pipeline.translation.SingleRequest
+import app.plamotranslate.pipeline.translation.TranslationStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -56,7 +57,7 @@ class TranslateBenchActivity : Activity() {
         val loadStart = System.nanoTime()
         val engine = TranslationEngine.load(model.file.file(this), applicationInfo.nativeLibraryDir, preferGpu = true)
         val loadMs = (System.nanoTime() - loadStart) / 1_000_000
-        engine.translate(TranslationRequest("안녕하세요", Language.KO, Language.JA), maxTokens = 8).collect { }
+        engine.run(1, SingleRequest(TranslationRequest("안녕하세요", Language.KO, Language.JA)), maxTokens = 8)
         val out = StringBuilder("model\tsrc\ttgt\tms\ttokens\ttok_per_s\tsource\ttranslation\n")
         log("${model.label}: 読込 ${loadMs}ms（${if (engine.usesGpu) "GPU" else "CPU"}）")
         var totalMs = 0L
@@ -66,15 +67,12 @@ class TranslateBenchActivity : Activity() {
             val tgt = Language.entries.first { it.code.startsWith(row[1]) }
             // 段落のある長文は、TSVの1行に「\n」と書いて改行を表す（アプリのテキスト翻訳へ貼ったときと同じ入力にする）
             val text = row[2].replace("\\n", "\n")
-            val sb = StringBuilder()
-            var tokens = 0
-            var ms = 0L
-            engine.translate(TranslationRequest(text, src, tgt, JapaneseForm.POLITE, context = context)).collect { e ->
-                when (e) {
-                    is TranslationEvent.Delta -> sb.append(e.text)
-                    is TranslationEvent.Done -> { tokens = e.tokens; ms = e.millis }
-                }
-            }
+            // 計測の道具なので、機能の翻訳の流れを通さず、エンジンの差し込み口で1文ずつ訳す
+            val one = SingleRequest(TranslationRequest(text, src, tgt, JapaneseForm.POLITE, context = context))
+            val start = System.nanoTime()
+            val tokens = engine.run(1, one, TranslationStream.DEFAULT_MAX_TOKENS)
+            val ms = (System.nanoTime() - start) / 1_000_000
+            val sb = StringBuilder(one.text)
             totalMs += ms
             totalTokens += tokens
             val translation = sb.toString().trim().replace("\n", "\\n")

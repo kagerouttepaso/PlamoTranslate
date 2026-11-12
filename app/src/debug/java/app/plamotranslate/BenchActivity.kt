@@ -16,11 +16,13 @@ import androidx.lifecycle.lifecycleScope
 import androidx.activity.ComponentActivity
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.ocr.OcrLanguage
-import app.plamotranslate.overlay.BatchTranslator
 import app.plamotranslate.overlay.OverlaySlot
 import app.plamotranslate.overlay.dp
 import app.plamotranslate.overlay.selectTargets
 import app.plamotranslate.overlay.spToPx
+import app.plamotranslate.pipeline.translation.Segment
+import app.plamotranslate.pipeline.translation.SegmentUpdate
+import app.plamotranslate.pipeline.translation.TranslationStream
 import app.plamotranslate.screen.OverlayStyle
 import app.plamotranslate.screen.SCREEN_TARGET
 import app.plamotranslate.screen.ScreenTranslateService
@@ -30,6 +32,8 @@ import app.plamotranslate.screen.Yokogaki
 import app.plamotranslate.screen.sourceLanguage
 import app.plamotranslate.screen.statusBarHeight
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -92,15 +96,27 @@ class BenchActivity : ComponentActivity() {
             val ocrMillis = SystemClock.uptimeMillis() - t0
             val targets = selectTargets(blocks, bitmap, statusBar, SCREEN_TARGET)
 
-            // 画像ごとに新しく作り、前の画像の訳の控えを使わない
-            val translator = BatchTranslator(engine, SCREEN_TARGET, language.sourceLanguage)
+            // 画像ごとに新しい翻訳の流れを開き、前の画像の訳の控えを使わない（画面翻訳と同じ契約で訳す）
             val translations = Array(targets.size) { StringBuilder() }
             val t1 = SystemClock.uptimeMillis()
-            translator.translate(
-                targets.map { it.sourceText },
-                onDelta = { i, d -> translations[i].append(d) },
-                onReplace = { i, t -> translations[i].setLength(0); translations[i].append(t) },
-            )
+            coroutineScope {
+                val stream = TranslationStream(this, { TranslationStream.Backend(engine, engine) }, TranslationStream.Options(language.sourceLanguage, SCREEN_TARGET))
+                try {
+                    stream.submit(targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })
+                    val done = HashSet<Long>()
+                    stream.updates.transformWhile { u ->
+                        when (u) {
+                            is SegmentUpdate.Partial -> Unit
+                            is SegmentUpdate.Final -> translations[u.id.toInt()].append(u.text).also { done += u.id }
+                            is SegmentUpdate.Failed -> done += u.id
+                        }
+                        emit(u)
+                        done.size < targets.size
+                    }.collect { }
+                } finally {
+                    stream.close()
+                }
+            }
             val translateMillis = SystemClock.uptimeMillis() - t1
 
             val fits = withContext(Dispatchers.IO) {
