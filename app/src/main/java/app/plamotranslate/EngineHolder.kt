@@ -94,7 +94,13 @@ object EngineHolder {
             val start = System.nanoTime()
             // 読み込みと初回の推論（warmUp）の間にGPUのカーネルを組み立てる。ここで落ちたら、次の起動でCPUにする
             if (gpu) GpuGuard.beginGpuLoad(app)
-            _state.value = runCatching { TranslationEngine.load(file, libDir, gpu, cpu = cpu).also { warmUp(it) } }.fold(
+            val parallel = preferences.parallel
+            _state.value = runCatching {
+                TranslationEngine.load(file, libDir, gpu, cpu = cpu).also {
+                    it.parallel = parallel
+                    warmUp(it)
+                }
+            }.fold(
                 onSuccess = { ModelState.Ready(it, model, (System.nanoTime() - start) / 1_000_000) },
                 onFailure = { ModelState.Failed(it.message ?: it.toString()) },
             )
@@ -128,6 +134,12 @@ object EngineHolder {
         runCatching {
             engine.translate(TranslationRequest("안녕하세요", Language.KO, Language.JA), maxTokens = 8).collect { }
         }
+    }
+
+    /** 同時に訳す文の数を保存し、今のエンジンにもすぐ効かせる（読み直さない）。 */
+    fun setParallel(context: Context, parallel: Int) {
+        TranslationPreferences(context.applicationContext).parallel = parallel
+        (_state.value as? ModelState.Ready)?.engine?.parallel = parallel
     }
 
     /** 今の翻訳モデルを閉じて読み直す（CPUの詳細設定を変えたとき。設定は先に [TranslationPreferences.saveCpu] で保存する）。 */

@@ -35,6 +35,7 @@ import kotlinx.coroutines.launch
  */
 
 private val THREAD_CHOICES = listOf(0, 1, 2, 4, 6, 8)
+private val PARALLEL_CHOICES = listOf(1, 2, 3, 4, 6, 8)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -51,6 +52,8 @@ fun PerformanceCard(model: ModelState) {
     var cpuOnly by remember { mutableStateOf(preferences.cpuOnly) }
     var result by remember { mutableStateOf<String?>(null) }
     var measuring by remember { mutableStateOf(false) }
+    var parallel by remember { mutableStateOf(preferences.parallel) }
+    var tuning by remember { mutableStateOf<String?>(null) }
     val busy = model is ModelState.Loading || measuring
     val gpuDisabled = remember { GpuGuard.disabledNote(context) }
 
@@ -82,20 +85,36 @@ fun PerformanceCard(model: ModelState) {
                 OutlinedButton(enabled = !busy && ready != null, onClick = {
                     measuring = true
                     result = null
+                    tuning = null
                     scope.launch {
-                        result = runCatching { EngineBenchmark.run(context) }.fold(
+                        // 1文の速さ（テキスト翻訳・会話翻訳の目安）と、今の「同時に訳す数」での合計の速さ（画面翻訳・カメラ翻訳の目安）を
+                        // 両方出す。2026-11-12、作者の指摘「同時に訳す数を変えても、速さを測るの値が変わらず手動で比べられない」。
+                        // 2行目は「自動で調整」と同じ測り方なので、数を変えて押せば手でも比べられる
+                        val single = runCatching { EngineBenchmark.run(context) }.fold(
                             onSuccess = { b ->
                                 b?.let {
-                                    "最初の文字まで ${it.firstMillis}ms、生成 ${"%.1f".format(it.tokensPerSecond)} トークン/秒" +
+                                    "1文：最初の文字まで ${it.firstMillis}ms、生成 ${"%.1f".format(it.tokensPerSecond)} トークン/秒" +
                                         "（${it.tokens}トークン、全体 ${it.totalMillis}ms）"
-                                } ?: "測れませんでした"
+                                } ?: "1文：測れませんでした"
                             },
-                            onFailure = { it.message ?: it.toString() },
+                            onFailure = { "1文：${it.message ?: it}" },
                         )
+                        val n = parallel
+                        val batch = runCatching { EngineBenchmark.runParallel(context, n) }.fold(
+                            onSuccess = { rate -> rate?.let { "同時に${n}件：合計 ${"%.0f".format(it)} トークン/秒" } ?: "同時に${n}件：測れませんでした" },
+                            onFailure = { "同時に${n}件：${it.message ?: it}" },
+                        )
+                        result = "$single\n$batch（「自動で調整」と同じ測り方）"
                         measuring = false
                     }
                 }) { Text(if (measuring) "測っています…" else "速さを測る") }
-                TextButton(enabled = !busy, onClick = { apply(CpuOptions(), false) }) { Text("既定に戻す") }
+                TextButton(enabled = !busy, onClick = {
+                    parallel = TranslationEngine.DEFAULT_PARALLEL
+                    tuning = null
+                    // 同時に訳す数は読み直しの前に保存しておく（読み直したエンジンが保存した値を読む）
+                    EngineHolder.setParallel(context, parallel)
+                    apply(CpuOptions(), false)
+                }) { Text("既定に戻す") }
             }
             result?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
             gpuDisabled?.let { note ->
@@ -111,6 +130,52 @@ fun PerformanceCard(model: ModelState) {
                     restartApp(context)
                 }) { Text("GPUをもう一度試す（起動し直す）") }
             }
+
+            Text("同時に訳す数", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "画面翻訳とカメラ翻訳で、いくつの文のまとまりを一緒に訳すか。端末によって速い数が違います。" +
+                    "「自動で調整」は3回測って一番合う数にします（十数秒）。手で比べるときは、数を選んで「速さを測る」の" +
+                    "「同時に◯件」の値を見てください。値は原文の読み込みも含めた合計なので、1文の生成の速さとは別の数です。" +
+                    "変えてもモデルは読み直しません。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PARALLEL_CHOICES.forEach { n ->
+                    FilterChip(
+                        selected = parallel == n,
+                        enabled = !busy,
+                        onClick = {
+                            parallel = n
+                            tuning = null
+                            EngineHolder.setParallel(context, n)
+                        },
+                        label = { Text(if (n == 1) "1（1つずつ）" else "$n") },
+                    )
+                }
+            }
+            OutlinedButton(enabled = !busy && ready != null, onClick = {
+                measuring = true
+                scope.launch {
+                    // 少ない手数で決める（ParallelTuner）。測るたびに、そこまでで一番合う数を入れる
+                    val measured = LinkedHashMap<Int, Double>()
+                    fun report(done: Boolean) = measured.entries.joinToString("、") { (n, rate) ->
+                        "${n}本 ${if (rate > 0) "%.0f".format(rate) else "測れず"}"
+                    } + "（合計のトークン/秒）" + if (done) " → ${parallel}本にしました" else " 測っています…"
+                    while (true) {
+                        val n = ParallelTuner.next(measured) ?: break
+                        tuning = if (measured.isEmpty()) "測っています…" else report(false)
+                        measured[n] = runCatching { EngineBenchmark.runParallel(context, n) }
+                            .onFailure { android.util.Log.w("PlamoTranslate", "同時に訳す数の計測に失敗（${n}本）", it) }
+                            .getOrNull() ?: 0.0
+                        parallel = ParallelTuner.best(measured)
+                        EngineHolder.setParallel(context, parallel)
+                    }
+                    tuning = report(true)
+                    measuring = false
+                }
+            }) { Text("自動で調整") }
+            tuning?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
 
             Text("スレッド数", style = MaterialTheme.typography.titleSmall)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

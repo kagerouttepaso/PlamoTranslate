@@ -245,7 +245,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeInit(JNIEnv *env, jobject, jstring
 extern "C" JNIEXPORT jlong JNICALL
 Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring jpath, jint n_ctx, jint n_threads,
                                                    jint n_gpu_layers, jint poll, jboolean use_pool, jboolean use_mmap,
-                                                   jboolean boost) {
+                                                   jboolean boost, jint n_seq_max) {
     const std::string path = to_std_string(env, jpath);
     llama_model_params mparams = llama_model_default_params();
     // false なら、モデルをファイルの写像（mmap）ではなくメモリへ読み込む
@@ -264,6 +264,10 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx = n_ctx;
     cparams.n_batch = n_ctx;  // プロンプトを1回のdecodeで処理する
+    // 複数の文を同時に訳すための流れの数（nativeTranslateJobs）。KVキャッシュは全部の流れで1つを分け合うので、
+    // 1文だけを訳すときは n_ctx をそのまま使える（分けると1本あたり n_ctx / n_seq になり、長い文が入らない）
+    cparams.n_seq_max = n_seq_max;
+    cparams.kv_unified = true;
     cparams.n_threads = n_threads;
     cparams.n_threads_batch = n_threads;
     cparams.no_perf = true;
@@ -386,6 +390,188 @@ Java_app_plamotranslate_llm_LlamaNative_nativeTranslate(JNIEnv *env, jobject, jl
          n_generated > 0 ? n_generated * 1e6 / (double) (t_end - t_prompt) : 0.0,
          engine->hint ? "有" : "無", llama_n_threads(engine->ctx), cpu_state().c_str());
     return n_generated;
+}
+
+// 訳す依頼を呼ぶ側から1件ずつ受け取り、最大 n_slots 本の流れ（シーケンス）で同時に訳す（2026-11-12。docs/03_翻訳コア.md
+// 「複数の文を同時に訳す」）。1回のdecodeで全部の流れを1トークンずつ進めるので、1件ずつ訳すより合計が速い。
+// 訳し終わった流れには、ほかの流れの終わりを待たずに、すぐ次の依頼を入れる（作者の指摘「Discordでボットの長文の訳が
+// 終わるまで、次の短文の訳が始まらない」。初めは同時に入れた全部が終わるまで次を入れない作りだった）。
+//
+// callback（Kotlin の LlamaNative.JobCallback）：
+//   nextJob() → 次の依頼の番号。無ければ -1。prompt(id) → その依頼のプロンプト。
+//   onToken(id, bytes) → 0＝続ける、1＝その依頼だけ止める、2＝全部止める。
+//   onFinished(id) → その依頼の生成が終わった（止めた場合も含む）。onFinished の中で次の依頼を足してよい。
+//   onTooLong(id) → 流れ1本分のコンテキストに入らないので訳さなかった（呼ぶ側が流れを減らして訳し直す）。
+// 戻り値は全部の依頼を合わせた生成トークン数、または負のエラーコード。
+extern "C" JNIEXPORT jint JNICALL
+Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject, jlong handle, jint jslots,
+                                                            jint max_tokens, jobject callback) {
+    auto *engine = reinterpret_cast<Engine *>(handle);
+    const llama_vocab *vocab = llama_model_get_vocab(engine->model);
+
+    jclass cb_class = env->GetObjectClass(callback);
+    jmethodID m_next = env->GetMethodID(cb_class, "nextJob", "()I");
+    jmethodID m_prompt = env->GetMethodID(cb_class, "prompt", "(I)Ljava/lang/String;");
+    jmethodID m_token = env->GetMethodID(cb_class, "onToken", "(I[B)I");
+    jmethodID m_finished = env->GetMethodID(cb_class, "onFinished", "(I)V");
+    jmethodID m_too_long = env->GetMethodID(cb_class, "onTooLong", "(I)V");
+    if (!m_next || !m_prompt || !m_token || !m_finished || !m_too_long) return ERR_CALLBACK;
+
+    const int n_slots = std::clamp<int>(jslots, 1, (int) llama_n_seq_max(engine->ctx));
+    // KVキャッシュは全部の流れで1つを分け合う（kv_unified）。流れ1本が使える分を均等に決め、合計があふれないようにする
+    const int budget = engine->n_ctx / n_slots;
+
+    ensure_hint(engine);
+    llama_memory_t memory = llama_get_memory(engine->ctx);
+    llama_memory_clear(memory, true);
+    llama_sampler_reset(engine->sampler);
+
+    struct Slot {
+        int job = -1;        // 訳している依頼の番号。-1なら空き
+        int n_past = 0;
+        int i_logits = -1;   // 直前のdecodeで、この流れの最後のトークンが入っていた位置
+        int n_generated = 0;
+        int n_predict = 0;
+        std::string pending; // 文字の途中で切れたUTF-8
+    };
+    std::vector<Slot> slots(n_slots);
+
+    // 1回のdecodeに入るのは、各流れの新しいプロンプト（流れ1本分まで）か生成の1トークンなので、n_ctx に収まる
+    llama_batch batch = llama_batch_init(engine->n_ctx, 0, 1);
+    auto add = [&batch](llama_token token, int pos, int seq, bool logits) {
+        batch.token[batch.n_tokens] = token;
+        batch.pos[batch.n_tokens] = pos;
+        batch.n_seq_id[batch.n_tokens] = 1;
+        batch.seq_id[batch.n_tokens][0] = seq;
+        batch.logits[batch.n_tokens] = logits;
+        return batch.n_tokens++;
+    };
+    auto finish = [&](int s) {
+        env->CallVoidMethod(callback, m_finished, (jint) slots[s].job);
+        llama_memory_seq_rm(memory, s, -1, -1);
+        slots[s] = Slot();
+    };
+
+    const int64_t t_start = ggml_time_us();
+    int64_t t_decode = 0;
+    int total = 0;
+    int n_prompt = 0;
+    int n_jobs = 0;
+    int n_max_busy = 0;
+    int rc = 0;
+    bool stop_all = false;
+    while (!stop_all) {
+        batch.n_tokens = 0;
+
+        // 1. 前のdecodeの結果から、各流れの次のトークンを選ぶ
+        for (int s = 0; s < n_slots && !stop_all; ++s) {
+            Slot &q = slots[s];
+            if (q.job < 0 || q.i_logits < 0) continue;
+            // 貪欲法（温度0）は状態を持たないので、サンプラーは全部の流れで1つを使う
+            const llama_token token = llama_sampler_sample(engine->sampler, engine->ctx, q.i_logits);
+            q.i_logits = -1;
+            if (llama_vocab_is_eog(vocab, token) ||
+                std::find(engine->stop_tokens.begin(), engine->stop_tokens.end(), token) != engine->stop_tokens.end()) {
+                finish(s);
+                if (env->ExceptionCheck()) stop_all = true;
+                continue;
+            }
+            ++q.n_generated;
+            ++total;
+            q.pending += token_to_piece(vocab, token);
+            const size_t ready = complete_utf8_length(q.pending);
+            if (ready > 0) {
+                jbyteArray bytes = env->NewByteArray((jsize) ready);
+                env->SetByteArrayRegion(bytes, 0, (jsize) ready, reinterpret_cast<const jbyte *>(q.pending.data()));
+                const jint action = env->CallIntMethod(callback, m_token, (jint) q.job, bytes);
+                env->DeleteLocalRef(bytes);
+                q.pending.erase(0, ready);
+                if (env->ExceptionCheck() || action == 2) {
+                    stop_all = true;
+                    break;
+                }
+                if (action == 1) {
+                    finish(s);
+                    if (env->ExceptionCheck()) stop_all = true;
+                    continue;
+                }
+            }
+            if (q.n_generated >= q.n_predict) {
+                finish(s);
+                if (env->ExceptionCheck()) stop_all = true;
+                continue;
+            }
+            q.i_logits = add(token, q.n_past++, s, true);
+        }
+        if (stop_all) break;
+
+        // 2. 空いた流れに次の依頼を入れる。プロンプトは、ほかの流れの生成の1トークンと同じdecodeで処理する。
+        // 依頼は onFinished の中で足されることがある（訳し直し）ので、一度「無い」と返されても、毎回聞き直す
+        // （2026-11-12、一度無いと返された後は聞かず、後から足された訳し直しを取りこぼして訳が空のまま残った）
+        bool exhausted = false;
+        for (int s = 0; s < n_slots && !exhausted && !stop_all; ++s) {
+            Slot &q = slots[s];
+            if (q.job >= 0) continue;
+            while (true) {
+                const jint id = env->CallIntMethod(callback, m_next);
+                if (env->ExceptionCheck()) {
+                    stop_all = true;
+                    break;
+                }
+                if (id < 0) {
+                    exhausted = true;
+                    break;
+                }
+                auto jprompt = (jstring) env->CallObjectMethod(callback, m_prompt, id);
+                if (env->ExceptionCheck() || !jprompt) {
+                    stop_all = true;
+                    break;
+                }
+                const std::vector<llama_token> tokens = tokenize(vocab, to_std_string(env, jprompt), true);
+                env->DeleteLocalRef(jprompt);
+                const int n = (int) tokens.size();
+                // 原文と同じくらいの長さの訳が流れ1本分に入らなければ、途中で切れるので訳さない
+                if (n == 0 || budget - n < n) {
+                    env->CallVoidMethod(callback, m_too_long, id);
+                    if (env->ExceptionCheck()) {
+                        stop_all = true;
+                        break;
+                    }
+                    continue;
+                }
+                for (int i = 0; i < n; ++i) {
+                    const int at = add(tokens[i], i, s, i == n - 1);
+                    if (i == n - 1) q.i_logits = at;
+                }
+                q.job = id;
+                q.n_past = n;
+                q.n_predict = std::min<int>(max_tokens, budget - n);
+                n_prompt += n;
+                ++n_jobs;
+                break;
+            }
+        }
+        if (stop_all || batch.n_tokens == 0) break;
+
+        int busy = 0;
+        for (const Slot &q : slots) busy += q.job >= 0;
+        n_max_busy = std::max(n_max_busy, busy);
+        const int64_t t0 = ggml_time_us();
+        if (decode(engine, batch) != 0) {
+            rc = ERR_DECODE;
+            break;
+        }
+        t_decode += ggml_time_us() - t0;
+    }
+    llama_batch_free(batch);
+    if (env->ExceptionCheck()) return ERR_CALLBACK;
+    if (rc != 0) return rc;
+    const int64_t t_end = ggml_time_us();
+    LOGI("翻訳（同時%d本）: %d件、プロンプト %d トークン、生成 %d トークン、%.0fms（合計 %.1f トークン/秒、最大%d本が同時） ヒント=%s threads=%d %s",
+         n_slots, n_jobs, n_prompt, total, (t_end - t_start) / 1000.0,
+         t_end > t_start ? (n_prompt + total) * 1e6 / (double) (t_end - t_start) : 0.0, n_max_busy,
+         engine->hint ? "有" : "無", llama_n_threads(engine->ctx), cpu_state().c_str());
+    return total;
 }
 
 // 計測用の切り替え口：性能ヒントの有無とスレッド数を変える（デバッグビルドの切り替えから呼ぶ）

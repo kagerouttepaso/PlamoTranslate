@@ -9,8 +9,6 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Bundle
 import android.os.SystemClock
-import android.text.Layout
-import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.Log
 import android.widget.TextView
@@ -28,6 +26,7 @@ import app.plamotranslate.screen.SCREEN_TARGET
 import app.plamotranslate.screen.ScreenTranslateService
 import app.plamotranslate.screen.Tategaki
 import app.plamotranslate.screen.VerticalTextView
+import app.plamotranslate.screen.Yokogaki
 import app.plamotranslate.screen.sourceLanguage
 import app.plamotranslate.screen.statusBarHeight
 import kotlinx.coroutines.Dispatchers
@@ -170,22 +169,14 @@ class BenchActivity : ComponentActivity() {
                 fits += px / density to fitted
                 return@forEachIndexed
             }
-            // 枠に収まるまで文字を小さくする
-            var size = OverlayStyle.MAX_SP.toFloat()
-            var layout: StaticLayout
-            while (true) {
-                paint.textSize = size * density
-                layout = StaticLayout.Builder.obtain(texts[i], 0, texts[i].length, paint, (box.width() - 2 * innerPad).coerceAtLeast(1))
-                    .setAlignment(Layout.Alignment.ALIGN_NORMAL).setIncludePad(false).build()
-                if (layout.height <= box.height() || size <= OverlayStyle.MIN_SP) break
-                size -= 1f
-            }
-            fits += size to (layout.height <= box.height())
-            canvas.save()
-            canvas.translate((box.left + innerPad).toFloat(), box.top.toFloat())
-            canvas.clipRect(0, 0, box.width() - 2 * innerPad, box.height())
-            layout.draw(canvas)
-            canvas.restore()
+            // 画面の重ね表示（HorizontalTextView）と同じ計算で、枠に収まる最大の大きさで組んで描く
+            val area = RectF(box).apply { inset(innerPad.toFloat(), 0f) }
+            val (layout, fitted) = Yokogaki.fit(
+                texts[i], paint, area.width().toInt(), area.height().toInt(),
+                OverlayStyle.MIN_SP, OverlayStyle.MAX_SP, density, center = slot.bubble,
+            )
+            fits += paint.textSize / density to fitted
+            Yokogaki.draw(canvas, layout, area)
         }
         val small = Bitmap.createScaledBitmap(out, out.width / 2, out.height / 2, true)
         file.outputStream().use { small.compress(Bitmap.CompressFormat.PNG, 100, it) }

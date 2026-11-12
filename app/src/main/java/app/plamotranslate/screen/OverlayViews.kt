@@ -262,7 +262,7 @@ private fun absoluteParams(rect: Rect, flags: Int, type: Int = WindowManager.Lay
  * 画面のどこかに触れたときの扱い（消す・取り消す・枠の下をのぞく）は、サービスが [TouchWatcher] で受けて決める。
  */
 class TranslationOverlay(private val context: Context, private val windowManager: WindowManager) {
-    // 横書きは TextView、縦書きは VerticalTextView。訳の追記・置き換えだけ共通に扱う
+    // 横書きは HorizontalTextView、縦書きは VerticalTextView。訳の追記・置き換えだけ共通に扱う
     private val boxes = mutableListOf<View>()
     private val boxRects = mutableListOf<Rect>()
 
@@ -304,7 +304,8 @@ class TranslationOverlay(private val context: Context, private val windowManager
         val viewContext: Context = a11y ?: context
         val type = if (a11y != null) WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY else WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         for (slot in slots) {
-            val box = if (slot.vertical) VerticalTextView(viewContext) else horizontalBox(viewContext, slot.bubble)
+            // 吹き出しまで広げた枠の横書きは、行を真ん中に寄せる
+            val box = if (slot.vertical) VerticalTextView(viewContext) else HorizontalTextView(viewContext, center = slot.bubble)
             // 元の画面の背景色と文字色にそろえる（2026-11-05、作者の要望）。太字と背景色の縁取りで読みやすくする（OverlayStyle）
             box.setBackgroundColor(slot.colors.background)
             when (box) {
@@ -312,10 +313,9 @@ class TranslationOverlay(private val context: Context, private val windowManager
                     box.textColor = slot.colors.text
                     box.setHalo(slot.colors.background)
                 }
-                is TextView -> {
-                    box.setTextColor(slot.colors.text)
-                    box.typeface = OverlayStyle.TYPEFACE
-                    box.setShadowLayer(OverlayStyle.HALO_DP * context.resources.displayMetrics.density, 0f, 0f, slot.colors.background)
+                is HorizontalTextView -> {
+                    box.textColor = slot.colors.text
+                    box.setHalo(slot.colors.background)
                 }
             }
             val rect = OverlayStyle.boxRect(context, slot)
@@ -340,26 +340,18 @@ class TranslationOverlay(private val context: Context, private val windowManager
         }
     }
 
-    private fun horizontalBox(viewContext: Context, bubble: Boolean) = TextView(viewContext).apply {
-        setPadding(context.dp(OverlayStyle.H_PADDING_DP), 0, context.dp(OverlayStyle.H_PADDING_DP), 0)
-        // 吹き出しまで広げた枠は、真ん中に寄せる
-        gravity = if (bubble) Gravity.CENTER else Gravity.CENTER_VERTICAL
-        includeFontPadding = false
-        // 枠に収まる大きさまで文字を自動で縮める
-        setAutoSizeTextTypeUniformWithConfiguration(OverlayStyle.MIN_SP, OverlayStyle.MAX_SP, 1, TypedValue.COMPLEX_UNIT_SP)
-    }
-
+    // 文字が変わるたびに、枠に収まる大きさを選び直す（HorizontalTextView・VerticalTextView）
     fun appendTranslation(index: Int, delta: String) {
         when (val box = boxes.getOrNull(index)) {
             is VerticalTextView -> box.append(delta)
-            is TextView -> box.append(delta)
+            is HorizontalTextView -> box.append(delta)
         }
     }
 
     fun setTranslation(index: Int, text: String) {
         when (val box = boxes.getOrNull(index)) {
             is VerticalTextView -> box.text = text
-            is TextView -> box.text = text
+            is HorizontalTextView -> box.text = text
         }
     }
 

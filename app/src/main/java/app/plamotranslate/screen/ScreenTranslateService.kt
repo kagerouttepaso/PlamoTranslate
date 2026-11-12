@@ -434,6 +434,10 @@ class ScreenTranslateService : Service() {
      */
     private fun showMenu() {
         val (x, y) = button?.position ?: return
+        // 訳の枠（特にユーザー補助の重ね表示）はメニューより手前に出て、メニューに触れなくなる（2026-11-12、作者の指摘）。
+        // 開くときは訳を消し、訳している途中なら取り消す（取り消さないと、訳し終わった枠がメニューの上に出る）。
+        // 自動で訳すときは、メニューを閉じた後に画面が止まっていれば訳し直す（訳し終えた分は控えから出る）
+        cancelAll()
         val entries = buildList {
             add(MenuEntry.Header("原文の言語"))
             OcrLanguage.entries.forEach { lang ->

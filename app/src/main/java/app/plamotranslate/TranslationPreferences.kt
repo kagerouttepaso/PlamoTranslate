@@ -2,6 +2,7 @@ package app.plamotranslate
 
 import android.content.Context
 import app.plamotranslate.llm.CpuOptions
+import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.models.TranslationModel
 
 /**
@@ -32,6 +33,14 @@ class TranslationPreferences(context: Context) {
                 variant = cpu.getString("variant", d.variant) ?: "",
             )
         }
+
+    /**
+     * まとめ訳し（画面翻訳・カメラ翻訳）が同時に訳す文の数（2026-11-12。docs/03_翻訳コア.md「複数の文を同時に訳す」）。
+     * 読み直さずに効く（[EngineHolder.setParallel]）。
+     */
+    var parallel: Int
+        get() = cpu.getInt("parallel", TranslationEngine.DEFAULT_PARALLEL).coerceIn(1, TranslationEngine.MAX_PARALLEL)
+        set(value) = cpu.edit().putInt("parallel", value).apply()
 
     /** Snapdragonの端末でもGPUを使わず、CPUだけで動かすか（CPUの速さを確かめるため）。 */
     val cpuOnly: Boolean get() = cpu.getBoolean("cpuOnly", false)

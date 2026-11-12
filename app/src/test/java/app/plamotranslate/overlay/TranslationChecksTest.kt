@@ -54,6 +54,22 @@ class TranslationChecksTest {
     }
 
     @Test
+    fun 同時に訳すときは長文を文ごとに細かく分ける() {
+        // Discordのボットの長文くらい（約430字）
+        val text = "Thanks, the log shows why. Auto wanted the Xclipse driver, but it isn't installed on your phone, " +
+            "so Steam ran on the phone's own graphics driver and drew about one frame every two seconds. " +
+            "That is a bug in how Auto falls back, not a problem with your phone, and I've queued it with your log. " +
+            "I'll post here when there is a test build."
+        val parts = TranslationChecks.splitLong(text, TranslationChecks.PARALLEL_SPLIT)
+        // 4文が3片になる。2文目は150字を超えるが文の途中では分けず、3・4文目は合わせて150字以内なので1片にまとめる
+        assertEquals(3, parts.size)
+        assertTrue(parts[1].startsWith("Auto wanted") && parts[1].length > TranslationChecks.PARALLEL_SPLIT)
+        assertEquals(text, parts.joinToString(""))
+        // 短い投稿は分けない
+        assertEquals(listOf("Awesome, thanks a ton!"), TranslationChecks.splitLong("Awesome, thanks a ton!", TranslationChecks.PARALLEL_SPLIT))
+    }
+
+    @Test
     fun 片の訳をつなぐ() {
         assertEquals("今日は晴れ。明日は雨。", TranslationChecks.joinPieces(listOf("今日は晴れ。", "明日は雨。")))
         assertEquals("It is sunny. It rains.", TranslationChecks.joinPieces(listOf("It is sunny.", "It rains.")))

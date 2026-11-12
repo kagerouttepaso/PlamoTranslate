@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
@@ -53,6 +54,16 @@ class TranslationEngine private constructor(
 ) {
 
     /**
+     * まとめ訳し（画面翻訳・カメラ翻訳）が同時に訳す文の数（1〜[MAX_PARALLEL]。1なら1件ずつ）。
+     * 設定の画面の「同時に訳す数」をアプリが入れる。読み直さずに変えられる。
+     */
+    @Volatile
+    var parallel: Int = DEFAULT_PARALLEL
+        set(value) {
+            field = value.coerceIn(1, MAX_PARALLEL)
+        }
+
+    /**
      * 訳文をトークンごとに流す。収集側がキャンセルすると、次のトークンで生成を止める。
      */
     fun translate(request: TranslationRequest, maxTokens: Int = DEFAULT_MAX_TOKENS): Flow<TranslationEvent> =
@@ -80,6 +91,58 @@ class TranslationEngine private constructor(
             awaitClose { job.cancel() }
         }
 
+    /**
+     * 複数の依頼を同時に訳すときの、依頼の出し手（[translateJobs]）。どのメソッドも推論のスレッドから順に呼ばれる
+     * （同時には呼ばれない）ので、出し手の中の状態はこのスレッドだけで触れば同期は要らない。
+     */
+    interface JobSource {
+        /** 次に訳す依頼と、その番号（出し手が決める）。今は無ければ null。 */
+        fun next(): Pair<Int, TranslationRequest>?
+
+        /** [id] の訳文の続き。true を返すと、その依頼の生成を止める（止まらなくなった生成の打ち切りなど）。 */
+        fun onText(id: Int, text: String): Boolean
+
+        /** [id] の生成が終わった（止めた場合も含む）。ここで訳し直しの依頼を足すと、空いた流れですぐ訳す。 */
+        fun onFinished(id: Int)
+
+        /** [id] は流れ1本分のコンテキストに入らないので訳さなかった。流れを減らして（[translateJobs] の slots を1にして）訳し直せる。 */
+        fun onTooLong(id: Int)
+    }
+
+    /**
+     * [source] から依頼を受け取り、最大 [slots] 本（[MAX_PARALLEL] まで）を同時に訳す（2026-11-12）。
+     * 1回の計算で全部の流れを1トークンずつ進めるので、1件ずつ訳すより合計が速い。訳し終わった流れには、ほかの流れを
+     * 待たずにすぐ次の依頼を入れる（docs/03_翻訳コア.md「複数の文を同時に訳す」）。[source] に依頼が無くなり、
+     * 全部の流れが訳し終えたら戻る。戻り値は全部の依頼を合わせた生成トークン数。
+     */
+    suspend fun translateJobs(slots: Int, source: JobSource, maxTokens: Int = DEFAULT_MAX_TOKENS): Int =
+        withContext(dispatcher) {
+            if (closed) throw TranslationException("翻訳モデルを切り替えたため、この翻訳は中止しました")
+            val scope = currentCoroutineContext()
+            val prompts = HashMap<Int, String>()
+            val result = LlamaNative.nativeTranslateJobs(handle, slots, maxTokens, object : LlamaNative.JobCallback {
+                override fun nextJob(): Int {
+                    val (id, request) = source.next() ?: return -1
+                    prompts[id] = Pfml3PromptBuilder.build(request)
+                    return id
+                }
+
+                override fun prompt(id: Int): String = prompts.remove(id).orEmpty()
+
+                override fun onToken(id: Int, utf8: ByteArray): Int = when {
+                    !scope.isActive -> 2
+                    source.onText(id, String(utf8, Charsets.UTF_8)) -> 1
+                    else -> 0
+                }
+
+                override fun onFinished(id: Int) = source.onFinished(id)
+                override fun onTooLong(id: Int) = source.onTooLong(id)
+            })
+            scope.ensureActive()
+            if (result < 0) throw TranslationException(errorMessage(result))
+            result
+        }
+
     /** 推論のスレッドでだけ読み書きする。閉じた後の翻訳を止めるための印。 */
     private var closed = false
 
@@ -99,8 +162,21 @@ class TranslationEngine private constructor(
         withContext(dispatcher) { LlamaNative.nativeConfigure(handle, boost, threads) }
 
     companion object {
-        const val DEFAULT_CONTEXT = 2048
+        /**
+         * コンテキスト長。2026-11-12に2048から4096にした。複数の文を同時に訳すとき、全部の文と訳がこの中に入る必要がある
+         * （1文だけを訳すときは全部を1文に使える）。
+         */
+        const val DEFAULT_CONTEXT = 4096
         const val DEFAULT_MAX_TOKENS = 1024
+
+        /** 同時に訳せる文の数の上限（読み込むときに流れの数として確保する）。 */
+        const val MAX_PARALLEL = 8
+
+        /**
+         * 同時に訳す文の数の既定。2026-11-12にREDMAGIC 11 Proで測り、GPUは4本で生成が約1.7倍（2Bは8本にしても同じ）、
+         * CPUは4本で約2.5倍だった（docs/03_翻訳コア.md「複数の文を同時に訳す」）。端末ごとの値は設定の画面の自動調整で探す。
+         */
+        const val DEFAULT_PARALLEL = 4
 
         /**
          * 全層をGPU（OpenCL、Adreno 840）に載せる。2026-11-05の実測で、プロンプト処理はCPUの約5倍（約1170トークン/秒）、
@@ -141,7 +217,7 @@ class TranslationEngine private constructor(
             val threads = if (cpu.threads > 0) cpu.threads else defaultThreads()
             fun nativeLoad(layers: Int) = LlamaNative.nativeLoad(
                 model.path, nCtx, threads, layers,
-                if (cpu.spinWait) DEFAULT_POLL else 0, cpu.threadPool, cpu.mmap, cpu.boost,
+                if (cpu.spinWait) DEFAULT_POLL else 0, cpu.threadPool, cpu.mmap, cpu.boost, MAX_PARALLEL,
             )
             var handle = nativeLoad(if (gpu) DEFAULT_GPU_LAYERS else 0)
             if (handle == 0L && gpu) {
@@ -198,6 +274,7 @@ class TranslationEngine private constructor(
             -1 -> "文をトークンに分けられませんでした"
             -2 -> "文が長すぎます（${DEFAULT_CONTEXT}トークンまで）"
             -3 -> "推論に失敗しました"
+            -4 -> "翻訳の受け渡しに失敗しました"
             else -> "翻訳に失敗しました（$code）"
         }
     }
