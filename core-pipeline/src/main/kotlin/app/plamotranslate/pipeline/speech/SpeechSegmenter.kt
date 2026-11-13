@@ -157,8 +157,15 @@ class SpeechSegmenter(
 
         // 長さは話し始めから数える（前に足した音声の分だけ早く区切らない）
         if (buffer.size - speechStart >= splitAfterSamples) {
-            // 長く話し続けている：直近の静かなところで区切り、後ろの音声は次のカードの頭として残す
-            val at = CutPoint.longUtterance(buffer, buffer.size - SPLIT_SEARCH_SAMPLES, buffer.size - MIN_TAIL_SAMPLES)
+            // 長く話し続けている：文の切れ目（無ければ静かなところ）で区切り、後ろの音声は次のカードの頭として残す。
+            // 文の切れ目は、直前の途中結果（ためた音声全体の認識。区切ると消えるので、位置はためた音声の頭から）から取る
+            val at = CutPoint.longUtterance(
+                buffer,
+                breakFrom = buffer.size - SPLIT_BREAK_SEARCH_SAMPLES,
+                quietFrom = buffer.size - SPLIT_SEARCH_SAMPLES,
+                to = buffer.size - MIN_TAIL_SAMPLES,
+                breaks = lastPartial?.breaks.orEmpty(),
+            )
             cut(at, "長い発話")?.let(out::add)
         } else {
             sinceLastPartial += samples.size
@@ -360,7 +367,11 @@ class SpeechSegmenter(
         private const val LANG_PROBE_SAMPLES = SAMPLE_RATE
         private const val LANG_PROBE_STEP_SAMPLES = SAMPLE_RATE / 4
 
-        /** 長い発話を区切る位置を探す範囲（直近4秒）と、区切った後ろに残す最小の長さ。 */
+        /**
+         * 長い発話を区切る位置を探す範囲。文の切れ目は直近6秒（カードが読める長さ（約12秒）より短くなりすぎない範囲で、
+         * 文の終わりを見つけやすくする）、切れ目が無いときの静かなところは直近4秒。区切った後ろに残す最小の長さ。
+         */
+        private const val SPLIT_BREAK_SEARCH_SAMPLES = SAMPLE_RATE * 6
         private const val SPLIT_SEARCH_SAMPLES = SAMPLE_RATE * 4
         private const val MIN_TAIL_SAMPLES = SAMPLE_RATE * 3 / 10
     }

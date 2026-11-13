@@ -7,9 +7,10 @@ package app.plamotranslate.pipeline.speech
 data class SegmentationProfile(
     /**
      * 話し終わりとみなす無音の長さ（秒）。文の終わりの無音を含む。途中の訳が見えるので確定を急がず、
-     * 言いよどみや息継ぎでカードが切れないほうを選んだ（`docs/判断/2026-11-06_カードを話し手の交代でも区切る.md`）。
+     * 言いよどみや考える間でカードが切れないほうを選ぶ。作者の会話の録音で、2秒では考える間でまとまりの途中が切れた。
+     * 区切るボタンで人が区切れるので、粘る方へ寄せる。
      */
-    val endSilenceSeconds: Float = 2.0f,
+    val endSilenceSeconds: Float = 3.0f,
     /** 文の終わりとみなす無音（VADの区切り）。言いよどみより長く、話し手の交代を拾える長さ。 */
     val phraseSilenceSeconds: Float = 0.6f,
     /**

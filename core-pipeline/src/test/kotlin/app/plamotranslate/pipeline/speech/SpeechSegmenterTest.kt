@@ -122,7 +122,7 @@ class SpeechSegmenterTest {
     fun 長く話し続けたら区切り後ろは次のカードの頭に残す() {
         val cards = finals(segmenter().feed(Sound.JA to 20.0, Sound.SILENCE to 3.0))
         assertEquals(2, cards.size)
-        // 長さは話し始めから数える（前に足した音声は含めない）
+        // 長さは話し始めから数える（前に足した音声は含めない）。文の切れ目が無ければ直近4秒の静かなところで切る
         assertTrue(cards[0].durationMs <= ((profile.splitAfterSeconds + profile.prerollSeconds) * 1000).toLong())
         assertTrue(cards[0].durationMs > ((profile.splitAfterSeconds - 4) * 1000).toLong())
         // 区切っても音声は欠けない（合わせて20秒分の文字。区切りが0.1秒の途中に入ると、偽の認識は両側で1文字ずつ数える）
@@ -195,6 +195,26 @@ class SpeechSegmenterTest {
         val partials = segmenter().feed(Sound.JA to 1.5, Sound.SILENCE to 1.5).filterIsInstance<SpeechEvent.Partial>()
         assertTrue(partials.isNotEmpty())
         assertEquals(partials.size, partials.map { it.text }.distinct().size)
+    }
+
+    @Test
+    fun 長く話し続けても文の切れ目があればそこで区切る() {
+        // 偽の認識に、10秒目に文の終わりを返させる（区切りの長さの直前6秒の中）
+        val s = SpeechSegmenter(
+            FakeVad((profile.phraseSilenceSeconds * 10).toInt()),
+            object : SpeechRecognizer {
+                val inner = FakeRecognizer(::soundOf)
+                override fun recognize(samples: FloatArray): Recognition {
+                    val r = inner.recognize(samples)
+                    return if (samples.size > SAMPLE_RATE * 11) r.copy(breaks = listOf(SpeechBreak(SAMPLE_RATE * 10, sentence = true))) else r
+                }
+                override fun close() = Unit
+            },
+            profile,
+        )
+        val cards = finals(s.feed(Sound.JA to 20.0, Sound.SILENCE to 4.0))
+        assertTrue(cards.size >= 2)
+        assertTrue("${cards[0].durationMs}", cards[0].durationMs in 9_800L..10_600L)
     }
 
     @Test

@@ -1,5 +1,6 @@
 package app.plamotranslate.asr
 
+import app.plamotranslate.pipeline.speech.SpeechBreak
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -34,6 +35,14 @@ class AsrTest {
     fun 韓国語と英語の空白は残す() {
         assertEquals("훨씬 편할 거야", SenseVoiceRecognizer.removeCjkSpaces("훨씬 편할 거야", "ko"))
         assertEquals("Thank you", SenseVoiceRecognizer.removeCjkSpaces("Thank you", "en"))
+    }
+
+    @Test
+    fun 句読点のトークンの時刻から文の切れ目を作る() {
+        val breaks = SenseVoiceRecognizer.breaksOf(arrayOf("ど", "、", "こ", "？"), floatArrayOf(7.86f, 8.1f, 9.3f, 14.64f))
+        assertEquals(listOf(SpeechBreak(129_600, sentence = false), SpeechBreak(234_240, sentence = true)), breaks)
+        // 時刻が無ければ切れ目も無い
+        assertEquals(emptyList<SpeechBreak>(), SenseVoiceRecognizer.breaksOf(arrayOf("。"), floatArrayOf()))
     }
 
     @Test

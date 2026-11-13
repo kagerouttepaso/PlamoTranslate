@@ -68,8 +68,14 @@ interface VoiceActivity : AutoCloseable {
     fun reset()
 }
 
-/** 認識器が返したそのままの結果。[lang] は判定した言語のコード（判定なしは null）。 */
-data class Recognition(val text: String, val lang: String?)
+/**
+ * 認識器が返したそのままの結果。[lang] は判定した言語のコード（判定なしは null）。
+ * [breaks] は、認識した文の中の切れ目（句点・読点）が、渡した音声の何サンプル目に当たるか。認識器が時刻を返さなければ空。
+ */
+data class Recognition(val text: String, val lang: String?, val breaks: List<SpeechBreak> = emptyList())
+
+/** 認識した文の切れ目。[sentence] が true なら文の終わり（句点・疑問符・感嘆符）、false なら読点。 */
+data class SpeechBreak(val at: Int, val sentence: Boolean)
 
 /** 差し込み口：音声を文字にし、言語を判定する。実装は `core-asr`（SenseVoice）。 */
 interface SpeechRecognizer : AutoCloseable {

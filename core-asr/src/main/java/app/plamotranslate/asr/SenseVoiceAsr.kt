@@ -3,6 +3,7 @@ package app.plamotranslate.asr
 import app.plamotranslate.log.Logs
 import app.plamotranslate.pipeline.speech.Recognition
 import app.plamotranslate.pipeline.speech.SegmentationProfile
+import app.plamotranslate.pipeline.speech.SpeechBreak
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechRecognizer
 import app.plamotranslate.pipeline.speech.SpeechSegmenter
@@ -101,7 +102,7 @@ class SenseVoiceRecognizer private constructor(private val recognizer: OfflineRe
             recognizer.decode(stream)
             val result = recognizer.getResult(stream)
             val lang = parseLang(result.lang)
-            return Recognition(removeCjkSpaces(result.text.trim(), lang), lang)
+            return Recognition(removeCjkSpaces(result.text.trim(), lang), lang, breaksOf(result.tokens, result.timestamps))
         } finally {
             stream.release()
         }
@@ -141,6 +142,22 @@ class SenseVoiceRecognizer private constructor(private val recognizer: OfflineRe
         }
 
         private val KNOWN_LANGS = setOf("ja", "ko", "en", "zh", "yue")
+
+        /**
+         * 句読点のトークンとその時刻（秒）から、文の切れ目を作る。SenseVoice は句読点を付けるとき（ITN）、
+         * 句読点にも時刻を付けて返す（作者の端末で確かめた。「？」が文の終わりの直後の時刻になる）。
+         */
+        internal fun breaksOf(tokens: Array<String>, timestamps: FloatArray): List<SpeechBreak> =
+            tokens.indices.mapNotNull { i ->
+                val t = timestamps.getOrNull(i) ?: return@mapNotNull null
+                val token = tokens[i].trim()
+                val sentence = token in SENTENCE_ENDS
+                if (!sentence && token !in CLAUSE_ENDS) return@mapNotNull null
+                SpeechBreak((t * SpeechEngine.SAMPLE_RATE).toInt(), sentence)
+            }
+
+        private val SENTENCE_ENDS = setOf("。", "？", "！", "?", "!", ".")
+        private val CLAUSE_ENDS = setOf("、", "，", ",")
 
         /**
          * SenseVoiceは語の区切りに空白を入れることがある（「うち の 中学 は」）。

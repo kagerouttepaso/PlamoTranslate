@@ -9,7 +9,7 @@ object TranscriptCleanup {
     fun clean(raw: Recognition): Recognition {
         val text = dropFillers(raw.text.trim(), raw.lang)
         // 中身のない結果（雑音の聞き違い）の言語は使わない。使うと話し手の交代と誤ってカードが切れる
-        return Recognition(text, if (text.isEmpty()) null else raw.lang)
+        return if (text.isEmpty()) Recognition("", null) else raw.copy(text = text)
     }
 
     /**
