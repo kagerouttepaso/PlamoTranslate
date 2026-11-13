@@ -81,6 +81,28 @@
                 android:value="true" />
         </service>
 
+        <!-- クイック設定の「カメラ翻訳」「会話翻訳」タイル。押すと画面を開く（切り替えではない） -->
+        <service
+            android:name=".CameraTranslateTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_camera"
+            android:label="@string/tile_camera"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".ConversationTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_conversation"
+            android:label="@string/tile_conversation"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".screen.ScreenTranslateService"
             android:exported="false"
