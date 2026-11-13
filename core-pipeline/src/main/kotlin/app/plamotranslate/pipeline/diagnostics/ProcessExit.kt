@@ -99,8 +99,13 @@ data class ProcessExit(
     val rawReason: Int = 0,
     val description: String = "",
 ) {
-    /** 同じプロセスの記録を見分ける鍵。印があれば印、無ければ pid。 */
-    val processKey: String get() = mark?.id ?: "pid$pid"
+    /** 同じプロセスの記録を見分ける鍵（[keyOf]）。 */
+    val processKey: String get() = keyOf(mark, pid)
+
+    companion object {
+        /** プロセスの鍵。印があれば印、無ければ pid。記録とログのファイルで同じ鍵を使う。 */
+        fun keyOf(mark: ProcessMark?, pid: Int): String = mark?.id ?: "pid$pid"
+    }
 }
 
 /**
@@ -162,10 +167,9 @@ object ExitTexts {
  * OS の終わり方の記録のうち、何を取り込むかの計画（[plan]）。
  *
  * @property record 記録する終わり方（古い順）
- * @property withLog ログの写しを添える終わり方。写しは取り込む時点の新しい行なので、一番新しい終わり方にだけ添える
  * @property readUntil 次に取り込むときの目印（ここまでの時刻を読んだ）
  */
-class ExitSelection<T>(val record: List<T>, val withLog: T?, val readUntil: Long) {
+class ExitSelection<T>(val record: List<T>, val readUntil: Long) {
     companion object {
         /**
          * [items]（OS の記録。[exitOf] で終わり方に読み替える）から、[readUntil] より後のものを読む。
@@ -181,7 +185,6 @@ class ExitSelection<T>(val record: List<T>, val withLog: T?, val readUntil: Long
             val record = unique.filter { ExitJudge.recordable(exitOf(it)) }.sortedBy { exitOf(it).time }
             return ExitSelection(
                 record = record,
-                withLog = record.lastOrNull(),
                 readUntil = maxOf(readUntil, fresh.maxOfOrNull { exitOf(it).time } ?: readUntil),
             )
         }

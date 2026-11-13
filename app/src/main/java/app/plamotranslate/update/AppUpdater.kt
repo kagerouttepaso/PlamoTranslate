@@ -8,9 +8,15 @@ import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
-import android.util.Log
+import app.plamotranslate.R
+import app.plamotranslate.log.Logs
 import app.plamotranslate.models.ModelDownloads
 import app.plamotranslate.models.ModelFile
+import java.io.File
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,12 +27,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONObject
-import java.io.File
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.security.MessageDigest
-import app.plamotranslate.R
 
 /** GitHubのリリース1件。[apkSha256] はGitHubがアセットに付けるSHA-256（`digest`）。 */
 data class ReleaseInfo(
@@ -68,7 +68,6 @@ sealed interface UpdateState {
  * Google Playで配る版では、Playの規約でアプリ自身の更新が禁じられているので、この機能を外す。
  */
 object AppUpdater {
-    private const val TAG = "PlamoTranslate"
     const val LATEST_API = "https://api.github.com/repos/kagerouttepaso/PlamoTranslate/releases/latest"
     const val RELEASES_PAGE = "https://github.com/kagerouttepaso/PlamoTranslate/releases"
 
@@ -93,7 +92,7 @@ object AppUpdater {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "更新の確認に失敗しました", e)
+                Logs.w("更新の確認に失敗しました", e)
                 UpdateState.Failed(e.message ?: e.toString(), null)
             }
         }
@@ -136,7 +135,7 @@ object AppUpdater {
                 _state.value = UpdateState.Available(release)
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "更新に失敗しました", e)
+                Logs.w("更新に失敗しました", e)
                 _state.value = UpdateState.Failed(e.message ?: e.toString(), release)
             }
         }

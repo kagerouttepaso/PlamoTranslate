@@ -2,40 +2,40 @@ package app.plamotranslate.conversation
 
 import android.Manifest
 import android.app.Application
-import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.plamotranslate.EngineHolder
 import app.plamotranslate.ModelState
 import app.plamotranslate.ReadAloud
-import app.plamotranslate.audio.MicRecorder
-import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.asr.AsrEngine
 import app.plamotranslate.asr.AsrEvent
 import app.plamotranslate.asr.SenseVoiceAsr
 import app.plamotranslate.asr.Utterance
 import app.plamotranslate.asr.WavFile
+import app.plamotranslate.audio.MicRecorder
 import app.plamotranslate.llm.Language
+import app.plamotranslate.log.Logs
+import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
 import app.plamotranslate.pipeline.translation.translateOne
 import app.plamotranslate.translation.Translations
+import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
 
 /** 音声認識モデルの状態。 */
 sealed interface AsrState {
@@ -258,7 +258,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
                 _state.update { it.copy(live = if (event.speaking) LiveSpeech("", null) else null) }
             }
             is AsrEvent.Partial -> {
-                log("途中 [${event.lang}] ${event.text}")
+                logText { "途中 [${event.lang}] ${event.text}" }
                 val direction = router.preview(event.text, event.lang)
                 _state.update {
                     // 前の途中訳は、新しい途中の文字を訳し終わるまで出しておく（ちらつかせない）
@@ -296,7 +296,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         if (result !is SegmentUpdate.Final) return
         if (request.generation != generation.get()) return
         val text = result.text.trim()
-        log("途中訳 ${request.text} → $text ${(System.nanoTime() - start) / 1_000_000}ms")
+        logText { "途中訳 ${request.text} → $text ${(System.nanoTime() - start) / 1_000_000}ms" }
         _state.update { s ->
             val live = s.live ?: return@update s
             s.copy(live = live.copy(translation = text))
@@ -311,7 +311,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
             original = utterance.text,
             stats = "認識${utterance.recognizeMs}ms（発話${"%.1f".format(utterance.durationMs / 1000.0)}秒）",
         )
-        log("認識 [${utterance.lang}→${direction.source.code}] ${utterance.text} ${turn.stats}")
+        logText { "認識 [${utterance.lang}→${direction.source.code}] ${utterance.text} ${turn.stats}" }
         // 話し続けていれば次の途中結果が来るので、ここでは聞き取り中の表示だけ空にする
         _state.update {
             it.copy(turns = it.turns + turn, partner = router.partner, live = it.live?.let { LiveSpeech("", null) })
@@ -339,7 +339,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
             }
         }
         _state.value.turns.firstOrNull { it.id == turn.id }?.let {
-            log("翻訳 [${it.direction.source.code}→${it.direction.target.code}] ${it.original} → ${it.translation} ${it.stats}")
+            logText { "翻訳 [${it.direction.source.code}→${it.direction.target.code}] ${it.original} → ${it.translation} ${it.stats}" }
         }
     }
 
@@ -355,7 +355,10 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         asrExecutor.execute { engine?.close() }
     }
 
-    private fun log(message: String) = Log.i(TAG, "会話: $message")
+    private fun log(message: String) = Logs.i("会話: $message")
+
+    /** 話した言葉や訳を含む行。正式版では書かない（[Logs.text]）。 */
+    private fun logText(message: () -> String) = Logs.text { "会話: ${message()}" }
 
     /** 音量の目安。-55dBFS（静かな部屋）〜-15dBFS（近くで話す）を0〜1に割り当てる。 */
     private fun level(chunk: FloatArray): Float {
@@ -367,8 +370,6 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     companion object {
-        private const val TAG = "PlamoTranslate"
-
         /** 途中訳は話している途中の文なので短い。長く生成して確定訳を待たせないよう上限を低くする。 */
         private const val PARTIAL_MAX_TOKENS = 160
 

@@ -2,22 +2,22 @@ package app.plamotranslate
 
 import android.app.Activity
 import android.os.Bundle
-import android.util.Log
 import android.widget.TextView
 import app.plamotranslate.llm.JapaneseForm
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.llm.TranslationRequest
+import app.plamotranslate.log.Logs
 import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.pipeline.translation.SingleRequest
 import app.plamotranslate.pipeline.translation.TranslationStream
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 /**
  * 翻訳モデル（0.8B・2B）の比べ（デバッグ版だけ。2026-11-06、作者の要望「翻訳品質と速度の違いをチェックしたい」）。
@@ -93,5 +93,5 @@ class TranslateBenchActivity : Activity() {
         super.onDestroy()
     }
 
-    private fun log(message: String) = Log.i("PlamoTranslate", "訳比較: $message")
+    private fun log(message: String) = Logs.text { "訳比較: $message" }
 }

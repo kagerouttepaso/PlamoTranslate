@@ -72,7 +72,6 @@ class ExitJudgeTest {
         val other = exit(ExitCause.NATIVE_CRASH, time = 9_000, pid = 8, mark = ProcessMark("p2"))
         val plan = ExitSelection.plan(listOf(other, second, first), { it }, readUntil = 0)
         assertEquals(listOf(first, other), plan.record)
-        assertEquals(other, plan.withLog)
         assertEquals(9_000L, plan.readUntil)
     }
 
@@ -82,7 +81,6 @@ class ExitJudgeTest {
         val stopped = exit(ExitCause.USER_STOPPED, time = 50, pid = 2)
         val plan = ExitSelection.plan(listOf(old, stopped), { it }, readUntil = 20)
         assertTrue(plan.record.isEmpty())
-        assertNull(plan.withLog)
         assertEquals(50L, plan.readUntil)
         assertEquals(20L, ExitSelection.plan(emptyList<ProcessExit>(), { it }, readUntil = 20).readUntil)
     }

@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.plamotranslate.llm.CpuOptions
 import app.plamotranslate.llm.TranslationEngine
+import app.plamotranslate.log.Logs
 import kotlinx.coroutines.launch
 
 /*
@@ -166,7 +167,7 @@ fun PerformanceCard(model: ModelState) {
                         val n = ParallelTuner.next(measured) ?: break
                         tuning = if (measured.isEmpty()) "測っています…" else report(false)
                         measured[n] = runCatching { EngineBenchmark.runParallel(context, n) }
-                            .onFailure { android.util.Log.w("PlamoTranslate", "同時に訳す数の計測に失敗（${n}本）", it) }
+                            .onFailure { Logs.w("同時に訳す数の計測に失敗（${n}本）", it) }
                             .getOrNull() ?: 0.0
                         parallel = ParallelTuner.best(measured)
                         EngineHolder.setParallel(context, parallel)

@@ -76,6 +76,7 @@ android {
 
 dependencies {
     implementation(project(":core-llm"))
+    implementation(project(":core-log"))
     implementation(project(":core-ocr"))
     implementation(project(":core-asr"))
     implementation(project(":core-tts"))

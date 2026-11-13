@@ -44,10 +44,10 @@ class CrashJournalsTest {
     fun 例外の記録とOSの記録は同じプロセスの鍵を持つ() {
         val mark = ProcessMark("m1")
         val exception = CrashReports.ofException(1, 9, mark, "main", IllegalStateException(), "端末")
-        val exit = CrashReports.ofExit(ProcessExit(2, 9, ExitCause.EXCEPTION, mark = mark), "端末", "log", null)
+        val exit = CrashReports.ofExit(ProcessExit(2, 9, ExitCause.EXCEPTION, mark = mark), "端末", "log".toByteArray(), null)
         assertEquals(exception.process, exit.process)
         assertEquals(setOf(CrashReports.EXIT, CrashReports.LOG), exit.files.keys)
-        val native = CrashReports.ofExit(ProcessExit(2, 9, ExitCause.NATIVE_CRASH), "端末", " ", byteArrayOf(1))
+        val native = CrashReports.ofExit(ProcessExit(2, 9, ExitCause.NATIVE_CRASH), "端末", ByteArray(0), byteArrayOf(1))
         assertEquals(setOf(CrashReports.EXIT, CrashReports.TOMBSTONE), native.files.keys)
     }
 
@@ -65,5 +65,30 @@ class CrashJournalsTest {
         ZipInputStream(ByteArrayInputStream(out.toByteArray())).use { zip -> while (true) names += (zip.nextEntry ?: break).name }
         assertEquals(listOf("records/0001-p1/entry.txt", "records/0001-p1/exit.txt", "now/log.txt"), names)
         assertTrue(CrashArchive.fileName(0).startsWith("mockingword-diagnostics-"))
+    }
+
+    @Test
+    fun ログのファイルは鍵ごとに古い順に並び今のプロセスのもの以外を消す() {
+        assertEquals(listOf("m1.1.log", "m1.log"), ProcessLogs.filesOf("m1"))
+        assertEquals("m1", ProcessLogs.keyOf("m1.log"))
+        assertEquals("m1", ProcessLogs.keyOf("m1.1.log"))
+        assertNull(ProcessLogs.keyOf("note.txt"))
+        assertTrue(ProcessLogs.needsRotation(size = 100, lineBytes = 30, maxBytes = 120))
+        assertTrue(!ProcessLogs.needsRotation(size = 0, lineBytes = 500, maxBytes = 120))
+        assertTrue(!ProcessLogs.needsRotation(size = 90, lineBytes = 30, maxBytes = 120))
+    }
+
+    @Test
+    fun 終わり方を見たプロセスのログを消し見ていないものは新しい順に残す() {
+        val files = mapOf(
+            "now.log" to 900L,
+            "seen.log" to 800L, "seen.1.log" to 700L,
+            "u1.log" to 600L, "u2.log" to 500L, "u3.log" to 400L, "u4.log" to 300L,
+            "x.txt" to 100L,
+        )
+        val deleted = ProcessLogs.toDelete(files, currentKey = "now", seenKeys = setOf("seen", "gone"), keepUnseen = 2)
+        assertEquals(setOf("seen.log", "seen.1.log", "u3.log", "u4.log", "x.txt"), deleted.toSet())
+        assertEquals("pid9", ProcessExit.keyOf(null, 9))
+        assertEquals("m3", ProcessExit.keyOf(ProcessMark("m3"), 9))
     }
 }

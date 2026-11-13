@@ -8,6 +8,8 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdarg>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -21,11 +23,47 @@
 #include "llama.h"
 
 #define TAG "PlamoTranslate"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
-#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+#define LOGI(...) plamo_log(ANDROID_LOG_INFO, __VA_ARGS__)
+#define LOGW(...) plamo_log(ANDROID_LOG_WARN, __VA_ARGS__)
+#define LOGE(...) plamo_log(ANDROID_LOG_ERROR, __VA_ARGS__)
 
 namespace {
+
+// ログの出口（docs/設計/アーキテクチャ.md「ログ」）。ネイティブのログも Kotlin の Logs を通し、アプリのファイルにも残す。
+// JNI_OnLoad で Java の受け口（LlamaNative.onNativeLog）を覚えておき、JVM につながっているスレッドからはそこへ渡す。
+// llama.cpp の計算スレッドのように JVM につながっていないスレッドからは、つなぎに行かず logcat にだけ出す
+// （つないだスレッドは外さないまま終わると異常終了になるため）。
+JavaVM *g_vm = nullptr;
+jclass g_native_class = nullptr;
+jmethodID g_on_native_log = nullptr;
+
+void emit_log(int priority, const char *text) {
+    JNIEnv *env = nullptr;
+    // 呼んだ側で Java の例外が起きていれば、Java を呼ばない（JNI の決まり）。その例外は呼んだ側が確かめるので消さない
+    if (g_vm && g_on_native_log && g_vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_OK &&
+        !env->ExceptionCheck()) {
+        const jsize n = static_cast<jsize>(strlen(text));
+        jbyteArray bytes = env->NewByteArray(n);
+        if (bytes) {
+            env->SetByteArrayRegion(bytes, 0, n, reinterpret_cast<const jbyte *>(text));
+            env->CallStaticVoidMethod(g_native_class, g_on_native_log, static_cast<jint>(priority), bytes);
+            env->DeleteLocalRef(bytes);
+        }
+        // ここで起きた例外（配列を作れない、受け口の失敗）は自分のものなので消して、logcat へ逃がす
+        if (!env->ExceptionCheck()) return;
+        env->ExceptionClear();
+    }
+    __android_log_write(priority, TAG, text);  // logcat への逃げ道
+}
+
+void plamo_log(int priority, const char *format, ...) {
+    char buffer[1024];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    emit_log(priority, buffer);
+}
 
 // nativeTranslateJobs の戻り値（負の値は失敗）
 // -1 は以前の「トークンに分けられない」、-2 は以前の「長すぎる」（今はどちらも onTooLong で依頼ごとに返す）
@@ -114,9 +152,9 @@ int decode(Engine *e, llama_batch batch) {
 void log_callback(ggml_log_level level, const char *text, void *) {
     // llama.cppの情報ログは量が多いので、警告以上だけlogcatへ出す
     if (level == GGML_LOG_LEVEL_ERROR) {
-        __android_log_write(ANDROID_LOG_ERROR, TAG, text);
+        emit_log(ANDROID_LOG_ERROR, text);
     } else if (level == GGML_LOG_LEVEL_WARN) {
-        __android_log_write(ANDROID_LOG_WARN, TAG, text);
+        emit_log(ANDROID_LOG_WARN, text);
     }
 }
 
@@ -187,6 +225,24 @@ size_t complete_utf8_length(const std::string &s) {
 }
 
 }  // namespace
+
+// ライブラリを読み込んだときに、ログの受け口を覚える（emit_log）
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
+    JNIEnv *env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) != JNI_OK) return JNI_VERSION_1_6;
+    jclass cls = env->FindClass("app/plamotranslate/llm/LlamaNative");
+    if (cls) {
+        g_native_class = static_cast<jclass>(env->NewGlobalRef(cls));
+        g_on_native_log = env->GetStaticMethodID(cls, "onNativeLog", "(I[B)V");
+        env->DeleteLocalRef(cls);
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        g_on_native_log = nullptr;
+    }
+    g_vm = vm;
+    return JNI_VERSION_1_6;
+}
 
 // アプリのネイティブライブラリの置き場（nativeLibraryDir）から、計算部分のライブラリを読み込む。
 // load_gpu が false なら、GPU（OpenCL）の部分は読み込まずCPUだけにする。最初の1回だけ有効。

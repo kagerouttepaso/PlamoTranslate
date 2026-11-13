@@ -2,10 +2,10 @@ package app.plamotranslate
 
 import android.content.Context
 import android.os.Build
-import android.util.Log
 import app.plamotranslate.diagnostics.ProcessExits
 import app.plamotranslate.diagnostics.ProcessMarks
 import app.plamotranslate.diagnostics.toProcessExit
+import app.plamotranslate.log.Logs
 import app.plamotranslate.pipeline.diagnostics.ExitJudge
 import app.plamotranslate.pipeline.diagnostics.ExitTexts
 import java.text.SimpleDateFormat
@@ -27,8 +27,6 @@ import java.util.Locale
  * アプリの版か端末のビルド（ドライバーを含む）が変わったら、もう一度GPUを試す。設定の画面からも試し直せる。
  */
 internal object GpuGuard {
-    private const val TAG = "PlamoTranslate"
-
     /** 異常終了でない中断（強制停止・メモリ不足など）が何回続いたらCPUに切り替えるか。 */
     const val MAX_INTERRUPTIONS = 2
 
@@ -64,7 +62,7 @@ internal object GpuGuard {
         preferences.gpuDisabled?.let { disabled ->
             if (disabled.build == build) return false
             // アプリの版か端末のビルドが変わった。直っているかもしれないので、もう一度GPUを試す
-            Log.i(TAG, "GPU: 版が変わったので、もう一度GPUを試します（${disabled.reason}）")
+            Logs.i("GPU: 版が変わったので、もう一度GPUを試します（${disabled.reason}）")
             preferences.gpuDisabled = null
         }
         val pendingPid = preferences.gpuLoadingPid
@@ -79,13 +77,13 @@ internal object GpuGuard {
                 true
             }
             is Decision.Retry -> {
-                Log.w(TAG, "GPU: 前回はGPUでの読み込み中に止まりました（$exitLabel）。もう一度GPUで試します")
+                Logs.w("GPU: 前回はGPUでの読み込み中に止まりました（$exitLabel）。もう一度GPUで試します")
                 preferences.gpuInterruptions = decision.interruptions
                 preferences.gpuLoadingPid = 0
                 true
             }
             is Decision.Disable -> {
-                Log.w(TAG, "GPU: 前回はGPUでの読み込み中に止まりました（${decision.reason}）。CPUで動かします")
+                Logs.w("GPU: 前回はGPUでの読み込み中に止まりました（${decision.reason}）。CPUで動かします")
                 preferences.gpuDisabled = GpuDisabled(decision.reason, build, System.currentTimeMillis())
                 preferences.gpuLoadingPid = 0
                 preferences.gpuInterruptions = 0

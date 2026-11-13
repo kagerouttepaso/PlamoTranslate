@@ -1,9 +1,27 @@
 package app.plamotranslate.llm
 
+import app.plamotranslate.log.LogLevel
+import app.plamotranslate.log.Logs
+
 /** llama.cppのJNI入口。呼び出しは [TranslationEngine] が1本のスレッドに直列化する。 */
 internal object LlamaNative {
     init {
         System.loadLibrary("plamo-llm")
+    }
+
+    /**
+     * ネイティブのログの受け口（`plamo_llm.cpp` の emit_log が、JVM につながっているスレッドから呼ぶ）。ログの出口 [Logs] へ渡す。
+     * [priority] は Android のログの重さ（3 デバッグ、4 情報、5 警告、6 誤り）、[utf8] は1行の文。
+     */
+    @JvmStatic
+    fun onNativeLog(priority: Int, utf8: ByteArray) {
+        val level = when {
+            priority >= 6 -> LogLevel.ERROR
+            priority == 5 -> LogLevel.WARN
+            priority == 4 -> LogLevel.INFO
+            else -> LogLevel.DEBUG
+        }
+        Logs.write(level, utf8.toString(Charsets.UTF_8).trimEnd(), null)
     }
 
     /**

@@ -2,7 +2,7 @@ package app.plamotranslate.diagnostics
 
 import android.app.ActivityManager
 import android.content.Context
-import android.util.Log
+import app.plamotranslate.log.Logs
 import app.plamotranslate.pipeline.diagnostics.ProcessMark
 
 /**
@@ -10,8 +10,6 @@ import app.plamotranslate.pipeline.diagnostics.ProcessMark
  * 同じプロセスの記録を見分けるのと、アプリが意図して終えたかを知るのに使う（不具合の記録と `GpuGuard`）。
  */
 object ProcessMarks {
-    private const val TAG = "PlamoTranslate"
-
     /** このプロセスの印。預けられなかったら null。 */
     @Volatile
     var current: ProcessMark? = null
@@ -33,5 +31,5 @@ object ProcessMarks {
 
     private fun put(context: Context, mark: ProcessMark): Boolean = runCatching {
         context.getSystemService(ActivityManager::class.java).setProcessStateSummary(mark.encode())
-    }.onFailure { Log.w(TAG, "プロセスの印を預けられませんでした", it) }.isSuccess
+    }.onFailure { Logs.w("プロセスの印を預けられませんでした", it) }.isSuccess
 }

@@ -4,7 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
-import android.util.Log
+import app.plamotranslate.log.Logs
 
 /**
  * PackageInstallerのセッションの結果を受け取る（[AppUpdater]）。
@@ -23,7 +23,7 @@ class InstallResultReceiver : BroadcastReceiver() {
             PackageInstaller.STATUS_FAILURE_ABORTED -> AppUpdater.onInstallFinished(false, null)
             else -> {
                 val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
-                Log.w("PlamoTranslate", "更新のインストールに失敗しました: $status $message")
+                Logs.w("更新のインストールに失敗しました: $status $message")
                 AppUpdater.onInstallFinished(false, message ?: "コード $status")
             }
         }

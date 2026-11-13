@@ -5,11 +5,11 @@ import android.graphics.Bitmap
 import android.graphics.Rect
 import android.graphics.RectF
 import android.os.SystemClock
-import android.util.Log
 import app.plamotranslate.EngineHolder
 import app.plamotranslate.camera.TextSimilarity.key
 import app.plamotranslate.camera.TextSimilarity.similar
 import app.plamotranslate.llm.Language
+import app.plamotranslate.log.Logs
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.ocr.OcrLanguage
 import app.plamotranslate.overlay.BoxColors
@@ -19,6 +19,7 @@ import app.plamotranslate.pipeline.translation.Segment
 import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
 import app.plamotranslate.translation.Translations
+import kotlin.math.hypot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -27,7 +28,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlin.math.hypot
 
 /**
  * カメラの1コマの訳の枠。[rect] は正立した画像（[LiveFrame.rotation]、[CameraGeometry]）の座標。
@@ -182,7 +182,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
                 .map { Reading(it.block.bounds, it.sourceText, it.slot.colors) }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            Log.w(TAG, "カメラ翻訳: 文字認識に失敗", e)
+            Logs.w("カメラ翻訳: 文字認識に失敗", e)
             return
         } finally {
             if (upright !== bitmap) upright.recycle()
@@ -319,20 +319,19 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
                 translating.remove(k)
                 submitted.remove(k)
                 keysById.remove(u.id)
-                Log.i(TAG, "カメラ翻訳: 1件を${u.millis}ms${if (u.cached) "（控え）" else ""}")
+                Logs.i("カメラ翻訳: 1件を${u.millis}ms${if (u.cached) "（控え）" else ""}")
             }
             is SegmentUpdate.Failed -> {
                 translating.remove(k)
                 submitted.remove(k)
                 keysById.remove(u.id)
-                Log.w(TAG, "カメラ翻訳: 翻訳に失敗 ${u.message}")
+                Logs.w("カメラ翻訳: 翻訳に失敗 ${u.message}")
             }
         }
         refresh()
     }
 
     private companion object {
-        const val TAG = "PlamoTranslate"
         const val TRANSLATED_LIMIT = 300
 
         /** 表・メニューのモードで翻訳に渡す背景（PFML3の context）。 */

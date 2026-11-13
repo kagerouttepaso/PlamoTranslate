@@ -1,7 +1,13 @@
 package app.plamotranslate.models
 
 import android.content.Context
-import android.util.Log
+import app.plamotranslate.log.Logs
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,12 +20,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.io.File
-import java.io.FileOutputStream
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.security.MessageDigest
 
 /** モデルのダウンロードの状態。 */
 sealed interface DownloadState {
@@ -56,7 +56,6 @@ data class BundleFailure(val bundle: ModelBundle, val message: String)
  * 翻訳・認識の処理そのものは通信しない。通信するのはこのダウンロードだけ。
  */
 object ModelDownloads {
-    private const val TAG = "PlamoTranslate"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _state = MutableStateFlow<DownloadState>(DownloadState.Idle(emptyList()))
     val state: StateFlow<DownloadState> = _state.asStateFlow()
@@ -93,7 +92,7 @@ object ModelDownloads {
                 refreshAfter(app)
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "モデルのダウンロードに失敗しました", e)
+                Logs.w("モデルのダウンロードに失敗しました", e)
                 val message = e.message ?: e.toString()
                 val required = ModelBundle.REQUIRED.missing(app)
                 // 初回のファイルがそろっていれば、足す組の失敗は「モデルの準備」の欄には出さない
@@ -132,7 +131,7 @@ object ModelDownloads {
         var actual = sha256(part)
         if (resumed && !actual.equals(model.sha256, ignoreCase = true)) {
             // 続きから取った前半が別の版のファイルだった（版を上げる前の `.part` が残っていた）。最初から取り直す
-            Log.w(TAG, "途中のファイルが合わないので最初から取り直します: ${target.path}")
+            Logs.w("途中のファイルが合わないので最初から取り直します: ${target.path}")
             part.delete()
             fetch(model.url, part, model.size, onProgress)
             actual = sha256(part)
@@ -143,7 +142,7 @@ object ModelDownloads {
         }
         if (target.exists()) target.delete()
         if (!part.renameTo(target)) throw IOException("${model.label} を置けませんでした: ${target.path}")
-        Log.i(TAG, "モデルを置きました: ${target.path}")
+        Logs.i("モデルを置きました: ${target.path}")
     }
 
     private suspend fun fetch(url: String, part: File, size: Long, onProgress: (Long) -> Unit) {

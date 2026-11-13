@@ -66,8 +66,8 @@ fun DiagnosticsSettings() {
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
-                "書き出すと、記録と、書き出した時点の端末のログを1つの zip にします。ログには、このアプリが出した内容" +
-                    "（会話翻訳の文と訳など）が入ります。人に渡す前に中身を確かめてください。",
+                "書き出すと、記録と、今のアプリのログを1つの zip にします。ログには、アプリの動き（訳した件数や時間、" +
+                    "失敗など）が入り、訳した文や話した言葉は入りません。",
                 style = MaterialTheme.typography.bodySmall,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

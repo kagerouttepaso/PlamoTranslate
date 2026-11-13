@@ -35,7 +35,7 @@ class FileCrashJournalTest {
         journal.recordNow(CrashReports.ofException(1_000L, 42, ProcessMark("m1"), "main", IllegalStateException("x"), "端末"))
         // 次の起動：記録を読み直してから、OS の記録を足す
         val next = FileCrashJournal(dir, worker = now)
-        next.record(CrashReports.ofExit(exit(100_000L, 42, "m1"), "端末", log = "log", trace = null))
+        next.record(CrashReports.ofExit(exit(100_000L, 42, "m1"), "端末", log = "log".toByteArray(), trace = null))
         val entry = next.entries.value.single()
         assertEquals("例外で落ちた（IllegalStateException）", entry.title)
         assertEquals(listOf(CrashReports.EXIT, CrashReports.LOG, CrashReports.REPORT), entry.files)
@@ -71,7 +71,7 @@ class FileCrashJournalTest {
     @Test
     fun 書き出しは記録と今の様子をzipに入れる() = runBlocking {
         val journal = FileCrashJournal(dir, worker = now)
-        journal.record(CrashReports.ofExit(exit(5_000L, 7, "m7"), "端末", "log", null))
+        journal.record(CrashReports.ofExit(exit(5_000L, 7, "m7"), "端末", "log".toByteArray(), null))
         val out = ByteArrayOutputStream()
         journal.export(mapOf(CrashReports.NOW_LOG to "now".toByteArray()), out)
         val names = mutableListOf<String>()

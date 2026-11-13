@@ -1,9 +1,9 @@
 package app.plamotranslate
 
 import android.content.Context
-import android.util.Log
 import android.widget.Toast
 import app.plamotranslate.llm.Language
+import app.plamotranslate.log.Logs
 import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.tts.Speaker
 import app.plamotranslate.tts.SupertonicSpeaker
@@ -27,8 +27,6 @@ import kotlinx.coroutines.launch
  * 設定（読むもの・声・速さ・段数）は [SpeechPreferences] にあり、読むたびに読む。設定の画面で変えると次に読むときから効く。
  */
 object ReadAloud {
-    private const val TAG = "PlamoTranslate"
-
     /** 読み終わってからも、部屋の反響が消えるまでマイクを無音にしておく時間。 */
     private const val ECHO_MILLIS = 400L
 
@@ -62,7 +60,7 @@ object ReadAloud {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "読み上げに失敗しました", e)
+                Logs.w("読み上げに失敗しました", e)
                 Toast.makeText(app, e.message ?: "読み上げに失敗しました", Toast.LENGTH_LONG).show()
             } finally {
                 if (_speaking.value == key) {

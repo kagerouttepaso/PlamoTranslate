@@ -20,14 +20,14 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
-import android.util.Log
 import android.view.WindowManager
 import android.widget.Toast
 import app.plamotranslate.EngineHolder
+import app.plamotranslate.R
+import app.plamotranslate.log.Logs
 import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.ocr.MultiScriptOcr
-import app.plamotranslate.translation.SqlitePersistentCache
 import app.plamotranslate.overlay.toBox
 import app.plamotranslate.pipeline.screen.SceneProfile
 import app.plamotranslate.pipeline.screen.ScreenChange
@@ -43,6 +43,7 @@ import app.plamotranslate.pipeline.translation.MemoryCache
 import app.plamotranslate.pipeline.translation.Segment
 import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
+import app.plamotranslate.translation.SqlitePersistentCache
 import app.plamotranslate.translation.Translations
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -57,7 +58,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
-import app.plamotranslate.R
 
 /**
  * 画面翻訳のフォアグラウンドサービス（docs/設計/画面翻訳.md、構成は docs/設計/画面翻訳.md）。
@@ -356,9 +356,7 @@ class ScreenTranslateService : Service() {
         val stacked = if (frame.frames > 1) "・${frame.frames}枚重ね" else ""
         overlay?.showStatus("${page.targets.size}件・${"%.1f".format(total / 1000.0)}秒・${run.model}$stacked")
         val st = run.stats
-        Log.i(
-            TAG,
-            "画面翻訳: ${page.lines}行・${page.units}単位中${page.targets.size}件（${frame.choice.grouping}）、撮影 ${frame.captureMillis}ms（${frame.frames}枚）、" +
+        Logs.i("画面翻訳: ${page.lines}行・${page.units}単位中${page.targets.size}件（${frame.choice.grouping}）、撮影 ${frame.captureMillis}ms（${frame.frames}枚）、" +
                 "文字認識 ${page.ocrMillis}ms、翻訳 ${translateMillis}ms、モデル ${run.model}、重要度 ${importance()}、画面 ${frame.size}、状態バー ${frame.statusBar}px" +
                 (st?.let { "、控え メモリ${it.memoryHits}・データベース${it.storedHits}、訳した${it.pieces}片（訳し直し${it.retried}、打ち切り${it.stopped}）" } ?: ""),
         )
@@ -401,7 +399,7 @@ class ScreenTranslateService : Service() {
             val verdict = if (thumbs.isEmpty()) Validity.Valid else {
                 validity.peek(if (thumbs.size >= 3) ScreenChange.median(thumbs) else thumbs.last(), boxes.map { it.toBox() })
             }
-            Log.i(TAG, "自動翻訳: 触れたので訳の枠の下を見た（$verdict）")
+            Logs.i("自動翻訳: 触れたので訳の枠の下を見た（$verdict）")
             if (verdict is Validity.Invalid) dispatch(SessionEvent.Invalidated(verdict.reason)) else overlay.setBoxesVisible(true)
         }
     }
@@ -433,7 +431,7 @@ class ScreenTranslateService : Service() {
                     val boxes = overlay?.boxBounds.orEmpty().map { it.toBox() }
                     val verdict = validity.feed(thumb, boxes, own, watchOutside = state.trigger == ScreenSession.Trigger.AUTO)
                     if (verdict is Validity.Invalid) {
-                        Log.i(TAG, "画面翻訳: ${verdict.reason}（${"%.2f".format(verdict.amount)}）ので取り消した")
+                        Logs.i("画面翻訳: ${verdict.reason}（${"%.2f".format(verdict.amount)}）ので取り消した")
                         dispatch(SessionEvent.Invalidated(verdict.reason))
                     }
                 }
@@ -451,14 +449,14 @@ class ScreenTranslateService : Service() {
 
     /** ほかのアプリの画面に触れたとき（[TouchWatcher]。自分のボタン・メニュー・表示への操作は除いてある）。 */
     private fun onScreenTouch() {
-        if (state.working) Log.i(TAG, "画面翻訳: 訳している途中に画面を操作したので取り消した")
+        if (state.working) Logs.i("画面翻訳: 訳している途中に画面を操作したので取り消した")
         dispatch(SessionEvent.OutsideTouched)
     }
 
     /** ほかのアプリ・画面への切り替わり（ユーザー補助の知らせ。アプリの切り替え・ホーム・最近使ったアプリ・別の画面）。 */
     private fun onWindowChanged() {
         if (state.session == null) return
-        Log.i(TAG, "画面翻訳: ほかのアプリの画面が切り替わったので取り消した")
+        Logs.i("画面翻訳: ほかのアプリの画面が切り替わったので取り消した")
         dispatch(SessionEvent.Invalidated("ほかの画面に切り替わった"))
     }
 
@@ -469,7 +467,7 @@ class ScreenTranslateService : Service() {
      */
     private fun onScrolled() {
         if (state.session == null) return
-        Log.i(TAG, "画面翻訳: スクロールしたので取り消した")
+        Logs.i("画面翻訳: スクロールしたので取り消した")
         dispatch(SessionEvent.Invalidated("スクロールした"))
     }
 
@@ -487,7 +485,7 @@ class ScreenTranslateService : Service() {
 
     private fun notifyIfDetached() {
         if (!preferences.opaqueOverlay || !OverlayAccessibilityService.isDetached(this)) return
-        Log.w(TAG, "画面翻訳: ユーザー補助が有効なのにつながっていない")
+        Logs.w("画面翻訳: ユーザー補助が有効なのにつながっていない")
         val text = "ユーザー補助が切れています。ユーザー補助の設定で「${getString(R.string.a11y_overlay_label)}」を一度オフにしてからオンにしてください"
         overlay?.showStatus(text)
         Toast.makeText(this, text, Toast.LENGTH_LONG).show()
@@ -608,7 +606,6 @@ class ScreenTranslateService : Service() {
     }
 
     companion object {
-        private const val TAG = "PlamoTranslate"
         private const val CHANNEL_ID = "screen_translate"
         private const val NOTIFICATION_ID = 1
 

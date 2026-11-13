@@ -1,7 +1,5 @@
 package app.plamotranslate
 
-import app.plamotranslate.models.ModelCatalog
-
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -10,18 +8,19 @@ import android.graphics.RectF
 import android.os.Bundle
 import android.os.SystemClock
 import android.text.TextPaint
-import android.util.Log
 import android.widget.TextView
-import androidx.lifecycle.lifecycleScope
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.lifecycleScope
+import app.plamotranslate.log.Logs
+import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.ocr.OcrLanguage
 import app.plamotranslate.overlay.OverlaySlot
 import app.plamotranslate.overlay.dp
-import app.plamotranslate.overlay.selectTargets
 import app.plamotranslate.overlay.groupLines
-import app.plamotranslate.pipeline.layout.Grouping
+import app.plamotranslate.overlay.selectTargets
 import app.plamotranslate.overlay.spToPx
+import app.plamotranslate.pipeline.layout.Grouping
 import app.plamotranslate.pipeline.translation.Segment
 import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
@@ -33,6 +32,7 @@ import app.plamotranslate.screen.VerticalTextView
 import app.plamotranslate.screen.Yokogaki
 import app.plamotranslate.screen.sourceLanguage
 import app.plamotranslate.screen.statusBarHeight
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.transformWhile
@@ -40,7 +40,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 
 /**
  * 画面翻訳の評価用（デバッグビルドだけ）。保存したスクリーンショットに、画面翻訳と同じ
@@ -60,7 +59,7 @@ class BenchActivity : ComponentActivity() {
     }
 
     private fun say(text: String) {
-        Log.i(TAG, text)
+        Logs.text { text }
         log.append(text + "\n")
     }
 
@@ -202,9 +201,5 @@ class BenchActivity : ComponentActivity() {
         small.recycle()
         out.recycle()
         return fits
-    }
-
-    private companion object {
-        const val TAG = "PlamoTranslate"
     }
 }

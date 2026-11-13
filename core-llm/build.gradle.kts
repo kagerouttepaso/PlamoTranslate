@@ -10,6 +10,8 @@ android {
 
     defaultConfig {
         minSdk = 33  // 性能ヒント（APerformanceHint）がAPI 33から
+        // JNI から名前で呼ばれる受け口を、使う側で縮小しても残す
+        consumerProguardFiles("consumer-rules.pro")
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -37,6 +39,7 @@ android {
 dependencies {
     // 中核（言語の型・翻訳の依頼・プロンプト・エンジンの差し込み口）。app からも見えるよう api にする
     api(project(":core-pipeline"))
+    implementation(project(":core-log"))
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
 }

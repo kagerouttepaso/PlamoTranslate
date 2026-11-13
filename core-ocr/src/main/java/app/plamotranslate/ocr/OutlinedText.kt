@@ -2,6 +2,7 @@ package app.plamotranslate.ocr
 
 import android.graphics.Bitmap
 import android.graphics.Rect
+import app.plamotranslate.log.Logs
 import java.lang.Character.UnicodeScript
 
 /**
@@ -45,11 +46,11 @@ object OutlinedText {
             }
             val primaryScore = overlapping.sumOf { score(it) }
             if (score(alt) > primaryScore + MARGIN) {
-                android.util.Log.d(
-                    "PlamoTranslate",
+                // 読み取った文字を含むので、正式版では書かない
+                Logs.text {
                     "白縁の読み比べ: 元「${overlapping.joinToString("／") { it.text }}」${primaryScore}点を、" +
-                        "最小値の画像の「${alt.text}」${score(alt)}点に置き換えた",
-                )
+                        "最小値の画像の「${alt.text}」${score(alt)}点に置き換えた"
+                }
                 result.removeAll(overlapping.toSet())
                 result += alt
             }

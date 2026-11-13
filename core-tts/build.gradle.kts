@@ -22,6 +22,7 @@ dependencies {
     // ライブラリモジュールはローカルAARを同梱できないので、ここではコンパイルだけに使い、appで同梱する
     compileOnly(files(rootProject.file("third_party/sherpa-onnx/sherpa-onnx-static-link-onnxruntime-${libs.versions.sherpa.onnx.get()}.aar")))
     implementation(libs.kotlinx.coroutines.android)
+    implementation(project(":core-log"))
     testImplementation(libs.junit)
 }
 

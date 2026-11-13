@@ -18,6 +18,7 @@ android {
 
 dependencies {
     implementation(libs.kotlinx.coroutines.android)
+    implementation(project(":core-log"))
     // モデル同梱版（bundled）。端末がオフラインでも初回から動く（docs/設計/画面翻訳.md）
     // 英字専用（英語の漫画の手書き風の大文字に強い。2026-11-06）
     implementation(libs.mlkit.text.latin)

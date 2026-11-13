@@ -23,7 +23,7 @@ object CrashReports {
     const val TRACE = "trace.txt"
     const val TOMBSTONE = "tombstone.pb"
 
-    /** 書き出したときに添える、その時点の端末の情報とログ。 */
+    /** 書き出したときに添える、その時点の端末の情報と、今のプロセスのログ。 */
     const val NOW_DEVICE = "device.txt"
     const val NOW_LOG = "log.txt"
 
@@ -48,10 +48,10 @@ object CrashReports {
     }
 
     /**
-     * OS の終わり方の記録から作る記録。[log] は取り込んだ時点の端末のログ、[trace] は OS が残した様子
+     * OS の終わり方の記録から作る記録。[log] はそのプロセスのログ（[ProcessLogs]）、[trace] は OS が残した様子
      * （ネイティブの落ち方なら tombstone の protobuf、応答なしならスレッドの様子の文字）。
      */
-    fun ofExit(exit: ProcessExit, device: String, log: String?, trace: ByteArray?): CrashReport {
+    fun ofExit(exit: ProcessExit, device: String, log: ByteArray?, trace: ByteArray?): CrashReport {
         val label = ExitTexts.label(exit)
         val body = buildString {
             append("種類：").append(label).append('\n')
@@ -62,7 +62,7 @@ object CrashReports {
         }
         val files = buildMap {
             put(EXIT, body.toByteArray())
-            log?.takeIf { it.isNotBlank() }?.let { put(LOG, it.toByteArray()) }
+            log?.takeIf { it.isNotEmpty() }?.let { put(LOG, it) }
             trace?.let { put(if (exit.cause == ExitCause.NATIVE_CRASH) TOMBSTONE else TRACE, it) }
         }
         return CrashReport(exit.time, exit.processKey, label, files)

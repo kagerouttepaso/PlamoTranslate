@@ -7,8 +7,8 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.Typeface
-import android.os.SystemClock
 import android.graphics.drawable.GradientDrawable
+import android.os.SystemClock
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -19,11 +19,12 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import app.plamotranslate.log.Logs
 import app.plamotranslate.overlay.OverlaySlot
+import app.plamotranslate.overlay.dp
 import app.plamotranslate.overlay.toBox
 import app.plamotranslate.overlay.toRect
 import app.plamotranslate.pipeline.layout.Rooms
-import app.plamotranslate.overlay.dp
 import kotlin.math.abs
 
 /**
@@ -399,7 +400,7 @@ class TranslationOverlay(private val context: Context, private val windowManager
     fun clear() {
         // 外せなかった枠は画面に残るので、記録する（2026-11-12、消したはずの訳の枠が撮影に写ったことがあった）
         boxes.forEachIndexed { i, box ->
-            runCatching { boxHosts[i].removeView(box) }.onFailure { android.util.Log.w("PlamoTranslate", "画面翻訳: 訳の枠を外せませんでした", it) }
+            runCatching { boxHosts[i].removeView(box) }.onFailure { Logs.w("画面翻訳: 訳の枠を外せませんでした", it) }
         }
         boxes.clear()
         boxRects.clear()

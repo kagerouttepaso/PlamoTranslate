@@ -3,12 +3,14 @@ package app.plamotranslate.tts
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
-import android.util.Log
+import app.plamotranslate.log.Logs
 import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsSupertonicModelConfig
+import java.io.File
+import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -20,8 +22,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.util.concurrent.Executors
 
 /**
  * Supertonic 3（Supertone、約99Mパラメーター、int8）をsherpa-onnxで動かす読み上げ（2026-11-08）。
@@ -92,7 +92,7 @@ class SupertonicSpeaker(
                     try {
                         track.play()
                         for (samples in chunks) {
-                            if (frames == 0L) Log.i(TAG, "読み上げ: 最初の音まで ${(System.nanoTime() - start) / 1_000_000}ms")
+                            if (frames == 0L) Logs.i("読み上げ: 最初の音まで ${(System.nanoTime() - start) / 1_000_000}ms")
                             // 1文をまとめて書くと、書き終わる（ほぼ鳴り終わる）まで戻らず、止めても鳴り続けて
                             // 次の読み上げと重なった（2026-11-08、実機）。短く区切って書き、区切りごとに止めるかを見る
                             var offset = 0
@@ -110,7 +110,7 @@ class SupertonicSpeaker(
                         // 止めたときは、書いてある分も捨ててすぐ黙らせる。音を作り終えるのは待たない
                         track.pause()
                         track.flush()
-                        if (!isActive) Log.i(TAG, "読み上げ: 途中で止めました（${(System.nanoTime() - start) / 1_000_000}ms）")
+                        if (!isActive) Logs.i("読み上げ: 途中で止めました（${(System.nanoTime() - start) / 1_000_000}ms）")
                     }
                 }
                 try {
@@ -148,7 +148,7 @@ class SupertonicSpeaker(
         )
         OfflineTts(assetManager = null, config = config).also {
             tts = it
-            Log.i(TAG, "読み上げのモデルを読み込みました（${(System.nanoTime() - start) / 1_000_000}ms、声 ${it.numSpeakers()}）")
+            Logs.i("読み上げのモデルを読み込みました（${(System.nanoTime() - start) / 1_000_000}ms、声 ${it.numSpeakers()}）")
         }
     }
 
@@ -158,8 +158,6 @@ class SupertonicSpeaker(
     }
 
     companion object {
-        private const val TAG = "PlamoTranslate"
-
         /** Supertonic 3が読める言語（モデルのREADMEの31言語）。中国語は無い。 */
         val LANGUAGES = setOf(
             "en", "ko", "ja", "ar", "bg", "cs", "da", "de", "el", "es", "et", "fi", "fr", "hi", "hr", "hu",
