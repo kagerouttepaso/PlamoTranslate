@@ -8,8 +8,9 @@
 # sherpa-onnxのAAR（37MB。tools/get-sherpa-onnx.ps1 で取得する）
 /third_party/sherpa-onnx/
 
-# 作者の声を含むテスト音声
+# 作者の声を含むテスト音声と、その会話の中身（会話翻訳の区切りの正解）
 /tools/testdata/**/*.wav
+/tools/testdata/conversation/
 
 # 画面翻訳の評価用スクリーンショット（漫画など著作物を含むためPC内だけに置く）
 /tools/testdata/ocr/
