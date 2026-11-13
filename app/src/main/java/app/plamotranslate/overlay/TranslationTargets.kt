@@ -19,11 +19,9 @@ internal class TranslationTarget(val block: TextBlock, val slot: OverlaySlot) {
 }
 
 /**
- * 認識結果から訳す対象を選び、訳の枠の色を撮影画像から読み取る。
+ * 選ぶ工程と枠を決める工程を続けて行い、訳す対象を返す。
  * 画面翻訳（ScreenTranslateService）とカメラ翻訳（LiveTranslator）が使い、評価（BenchActivity）もここを通して同じ処理を測る。
  * [target] は訳す先。仮名やハングルを訳すかは訳す先で変わるので、呼ぶ側が自分の訳す先を渡す。
- *
- * 状態バー（時刻・通信速度など）にかかるまとまりと、訳す必要のないまとまり（[needsTranslation]）は除く。
  * 色を読み取るので、撮影画像を捨てる前に呼ぶ。
  */
 internal fun selectTargets(
@@ -31,23 +29,16 @@ internal fun selectTargets(
     bitmap: Bitmap,
     statusBarHeight: Int,
     target: Language,
-    /** 訳の枠を吹き出しの内側まで広げるか（画面翻訳の長押しのメニュー。[BubbleFit]）。 */
+    /** 訳の枠を広げるか（画面翻訳の長押しのメニュー。広げ方は単位の種類で決まる。[SlotLayout]）。 */
     fitBubbles: Boolean = false,
-): List<TranslationTarget> {
-    val kept = blocks.filter { it.bounds.top >= statusBarHeight && it.needsTranslation(target) }
-    // 訳さないまとまり（日本語など）も含めた、画面の文字の範囲。広げた枠がほかの文字にかかるなら広げない
-    val texts = blocks.map { it.bounds }
-    return kept.map { block ->
-        val colors = ColorSampler.sample(bitmap, block.bounds)
-        val bubble = if (fitBubbles) {
-            BubbleFit.expand(bitmap, block.bounds, colors.background)
-                ?.takeIf { grown -> texts.none { it !== block.bounds && Rect.intersects(it, grown) } }
-        } else {
-            null
-        }
-        TranslationTarget(block, OverlaySlot(bubble ?: block.bounds, block.vertical, colors, bubble = bubble != null))
-    }
-}
+): List<TranslationTarget> =
+    chooseTargets(blocks, statusBarHeight, target).map { TranslationTarget(it, SlotLayout.slot(it, bitmap, fitBubbles)) }
+
+/**
+ * 選ぶ工程：状態バー（時刻・通信速度など）にかかる単位と、訳す必要のない単位（[needsTranslation]）を除く。単位は作り変えない。
+ */
+internal fun chooseTargets(blocks: List<TextBlock>, statusBarHeight: Int, target: Language): List<TextBlock> =
+    blocks.filter { it.bounds.top >= statusBarHeight && it.needsTranslation(target) }
 
 /**
  * 訳す必要がある文字か。訳先が日本語なら、仮名を含む（日本語の）ブロックと、

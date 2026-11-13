@@ -94,7 +94,7 @@ class BenchActivity : ComponentActivity() {
                 })
             } ?: continue
             val t0 = SystemClock.uptimeMillis()
-            val blocks = groupLines(ocr.recognize(bitmap, language), Grouping.BUBBLE)
+            val blocks = groupLines(ocr.recognize(bitmap, language), Grouping.BUBBLE, bitmap.width, bitmap.height)
             val ocrMillis = SystemClock.uptimeMillis() - t0
             val targets = selectTargets(blocks, bitmap, statusBar, SCREEN_TARGET)
 

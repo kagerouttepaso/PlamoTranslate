@@ -297,7 +297,7 @@ class ScreenTranslateService : Service() {
                 emptyList()
             }
             val ocrMillis = SystemClock.uptimeMillis() - t0
-            val units = groupLines(lines, choice.grouping)
+            val units = groupLines(lines, choice.grouping, frame.image.width, frame.image.height)
             val targets = selectTargets(units, frame.image, frame.statusBar, SCREEN_TARGET, fitBubbles = choice.fitBubbles)
             frame.release()
             w.page = PageLayout(lines = lines.size, units = units.size, targets = targets, ocrMillis = ocrMillis, error = error)
