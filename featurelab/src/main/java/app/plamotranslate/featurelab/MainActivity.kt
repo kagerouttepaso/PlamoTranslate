@@ -51,6 +51,7 @@ class MainActivity : Activity() {
         log = TextView(this).apply { textSize = 11f }
         column.addView(log)
         setContentView(ScrollView(this).apply { addView(column) })
+        intent.getStringExtra("exit")?.let { ExitLab.run(this, it) }
         if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 0)
         }
