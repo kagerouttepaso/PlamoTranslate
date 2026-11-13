@@ -32,7 +32,22 @@ internal enum class ScreenTrigger(val menuName: String) {
 }
 
 /**
- * 画面翻訳の設定（原文の言語、認識モード、始め方）。端末に残し、次に始めたときも引き継ぐ。
+ * 訳の消え方（2026-11-13、作者の要望「背景のキャラが元気よく走り回ると、画面が変わったとみなされて訳が消える」）。
+ * [ON_TOUCH] は画面の動きでは消さず、触れたとき（のぞいて枠の下が変わっていれば）と画面の丸ごとの切り替わりで消す
+ * （`SceneProfile.untilTouched`、docs/設計/画面翻訳.md「場面の設定」）。
+ */
+internal enum class ScreenDismissal(val menuName: String) {
+    ON_CHANGE("画面が変わったら消す"),
+    ON_TOUCH("触れるまで残す"),
+    ;
+
+    companion object {
+        fun parse(name: String?): ScreenDismissal = entries.firstOrNull { it.name == name } ?: ON_CHANGE
+    }
+}
+
+/**
+ * 画面翻訳の設定（原文の言語、認識モード、始め方、訳の消え方）。端末に残し、次に始めたときも引き継ぐ。
  * カメラ翻訳は言語そのものを選ぶので別に持つ（camera/CameraPreferences.kt）。
  * 翻訳モデルはアプリ全体で1つなので、ここではなく TranslationPreferences が持つ。
  */
@@ -54,6 +69,11 @@ internal class ScreenPreferences(context: Context) {
         get() = ScreenTrigger.parse(prefs.getString(KEY_TRIGGER, null))
         set(value) = prefs.edit().putString(KEY_TRIGGER, value.name).apply()
 
+    /** 浮遊ボタンの長押しで選んだ訳の消え方。読めなければ画面が変わったら消す。 */
+    var dismissal: ScreenDismissal
+        get() = ScreenDismissal.parse(prefs.getString(KEY_DISMISSAL, null))
+        set(value) = prefs.edit().putString(KEY_DISMISSAL, value.name).apply()
+
     /** 訳の枠を吹き出しの内側まで広げるか（浮遊ボタンの長押しで切り替える。overlay/BubbleFit.kt）。 */
     var fitBubbles: Boolean
         get() = prefs.getBoolean(KEY_FIT_BUBBLES, false)
@@ -71,6 +91,7 @@ internal class ScreenPreferences(context: Context) {
         const val KEY_LANGUAGE = "language"
         const val KEY_RECOGNITION = "recognition"
         const val KEY_TRIGGER = "trigger"
+        const val KEY_DISMISSAL = "dismissal"
         const val KEY_FIT_BUBBLES = "fit_bubbles"
         const val KEY_OPAQUE_OVERLAY = "opaque_overlay"
     }

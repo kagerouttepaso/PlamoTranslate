@@ -487,18 +487,22 @@ class ScreenTranslateService : Service() {
         Toast.makeText(this, text, Toast.LENGTH_LONG).show()
     }
 
-    /** 場面の設定（認識モード）を今の設定に合わせ、判定器を作り直す。 */
+    /** 場面の設定（認識モードと訳の消え方）を今の設定に合わせ、判定器を作り直す。 */
     private fun applyProfile() {
-        profile = when (preferences.recognition) {
+        val scene = when (preferences.recognition) {
             ScreenRecognition.NORMAL -> SceneProfile.NORMAL
             ScreenRecognition.MOTION -> SceneProfile.MOTION
+        }
+        profile = when (preferences.dismissal) {
+            ScreenDismissal.ON_CHANGE -> scene
+            ScreenDismissal.ON_TOUCH -> scene.untilTouched()
         }
         startJudge = StartJudge(profile.start).also { it.reset(SystemClock.uptimeMillis()) }
         validity = ValidityJudge(profile.validity)
     }
 
     /**
-     * 長押しのメニュー：原文の言語、始め方、認識モード、訳の枠、翻訳モデル、終了。
+     * 長押しのメニュー：原文の言語、始め方、認識モード、訳の消え方、訳の枠、翻訳モデル、終了。
      * 翻訳モデルはアプリ全体で1つなので、ここで変えると会話・カメラ・テキストの画面のモデルも変わる。
      * 開くと訳を消し、訳している途中なら取り消す（訳の枠がメニューより手前に出て触れなくなるため。状態遷移の MenuOpened）。
      */
@@ -525,6 +529,13 @@ class ScreenTranslateService : Service() {
             ScreenRecognition.entries.forEach { mode ->
                 add(MenuEntry.Item(mode.menuName, checked = mode == preferences.recognition) {
                     preferences.recognition = mode
+                    applyProfile()
+                })
+            }
+            add(MenuEntry.Header("訳の消え方"))
+            ScreenDismissal.entries.forEach { d ->
+                add(MenuEntry.Item(d.menuName, checked = d == preferences.dismissal) {
+                    preferences.dismissal = d
                     applyProfile()
                 })
             }

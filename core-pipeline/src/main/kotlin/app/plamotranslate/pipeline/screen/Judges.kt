@@ -90,13 +90,14 @@ class ValidityJudge(private val p: ValidityParams) {
         while (recent.size > p.medianOf) recent.removeFirst()
         val t = if (p.medianOf >= 3 && recent.size >= 3) ScreenChange.median(recent.toList()) else raw
 
-        if (boxes.isNotEmpty()) {
+        val ringLimit = p.ring
+        if (ringLimit != null && boxes.isNotEmpty()) {
             val ring = ScreenChange.ring(t, boxes, p.ringMargin)
             // 外周のうち、自分の表示（上部の表示・浮遊ボタン・ほかの訳の枠）にかかるます目は比べない
             val compare = BooleanArray(ring.size) { !ring[it] || ownMask[it] }
             if (ScreenChange.counted(compare) > 0) {
                 val moved = ScreenChange.changedFraction(ref, t, compare)
-                if (moved >= p.ring) return Validity.Invalid("原文の周りが変わった", moved)
+                if (moved >= ringLimit) return Validity.Invalid("原文の周りが変わった", moved)
             }
         }
         val outside = p.outside

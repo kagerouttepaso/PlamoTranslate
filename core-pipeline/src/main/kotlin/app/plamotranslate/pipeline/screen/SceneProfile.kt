@@ -13,6 +13,13 @@ data class SceneProfile(
     val start: StartParams,
     val validity: ValidityParams,
 ) {
+    /**
+     * 触れるまで訳を残す組（メニューの「訳の消え方」。2026-11-13、作者の要望「背景のキャラが走り回ると訳が消える」）。
+     * 有効性の判定Bのうち、画面の動きで消す規則（原文の周り・画面全体の変化）を見ない。
+     * 画面の丸ごとの切り替わり、ユーザー補助の合図、触れたときののぞきでは今までどおり消える。
+     */
+    fun untilTouched(): SceneProfile = copy(validity = validity.copy(ring = null, outside = null))
+
     companion object {
         /** 通常（チャット・ウェブ・漫画）。 */
         val NORMAL = SceneProfile(
@@ -55,7 +62,7 @@ data class StartParams(
 /**
  * 有効性の判定Bの設定。
  * - [switch]：中央値を通さない1枚で、自分の表示の外のこれだけが変われば、画面が丸ごと切り替わった。
- * - [ring]：原文の外周（訳の枠の周り2ます）のこれだけが変われば、原文が動いた・消えた。
+ * - [ring]：原文の外周（訳の枠の周り2ます）のこれだけが変われば、原文が動いた・消えた（null なら見ない）。
  * - [outside]：自分の表示の外のこれだけが変われば、画面が変わった（自動で訳すときだけ。null なら見ない）。
  * - [medianOf]：外周と外の変化を、何回の格子の中央値で比べるか。
  * - [peek]：触れたときに訳の枠を隠してのぞき、枠の下のこれだけが変われば、原文が変わった。
@@ -63,7 +70,7 @@ data class StartParams(
  */
 data class ValidityParams(
     val outside: Float?,
-    val ring: Float,
+    val ring: Float?,
     val switch: Float,
     val medianOf: Int,
     val peek: Float = 0.15f,

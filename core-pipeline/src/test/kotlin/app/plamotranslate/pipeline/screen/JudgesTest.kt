@@ -86,6 +86,38 @@ class JudgesTest {
     }
 
     @Test
+    fun 判定B_触れるまで残す組は原文の周りや画面が動いても有効() {
+        // 背景のキャラが原文のすぐ横を走り抜けても消さない（2026-11-13、作者の要望）
+        for (profile in listOf(SceneProfile.NORMAL, SceneProfile.MOTION)) {
+            val judge = ValidityJudge(profile.untilTouched().validity)
+            judge.begin(reference)
+            val runner = grid { c, r -> if (c in 12..17 && r in 12..17) 250 else if (c in 8..21 && r in 8..21 && (c + r) % 2 == 0) 0 else if (c in 10..19 && r in 10..19) 250 else 50 }
+            repeat(3) { assertEquals(Validity.Valid, judge.feed(runner, listOf(bubble), listOf(bubble), watchOutside = true)) }
+            // 同じ動きで、ふだんの組は消す（この試験の画面が規則2に当たることの確かめ）
+            val usual = ValidityJudge(profile.validity).apply { begin(reference) }
+            var verdict: Validity = Validity.Valid
+            repeat(3) { verdict = usual.feed(runner, listOf(bubble), listOf(bubble), watchOutside = true) }
+            assertTrue(verdict is Validity.Invalid)
+        }
+    }
+
+    @Test
+    fun 判定B_触れるまで残す組でも画面が丸ごと切り替われば無効() {
+        val judge = ValidityJudge(SceneProfile.MOTION.untilTouched().validity)
+        judge.begin(reference)
+        val other = grid { c, r -> if (r % 3 == 0) 230 else 20 }
+        assertTrue(judge.feed(other, listOf(bubble), listOf(bubble), watchOutside = true) is Validity.Invalid)
+    }
+
+    @Test
+    fun 判定B_触れるまで残す組でものぞいて枠の下が変われば無効() {
+        val judge = ValidityJudge(SceneProfile.MOTION.untilTouched().validity)
+        judge.begin(reference)
+        val nextLine = grid { c, r -> if (c in 12..17 && r in 12..17 && (c + r) % 2 == 0) 0 else if (c in 10..19 && r in 10..19) 250 else 50 }
+        assertTrue(judge.peek(nextLine, listOf(bubble)) is Validity.Invalid)
+    }
+
+    @Test
     fun 判定B_のぞいて枠の下が変われば無効() {
         val judge = ValidityJudge(SceneProfile.MOTION.validity)
         judge.begin(reference)
