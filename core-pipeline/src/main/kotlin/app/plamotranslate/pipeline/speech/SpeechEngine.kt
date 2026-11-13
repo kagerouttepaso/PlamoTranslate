@@ -45,6 +45,9 @@ interface SpeechEngine : AutoCloseable {
     /** 残っている音声を発話として確定させる（停止時・音声ファイルの終わり）。 */
     fun flush(): List<SpeechEvent>
 
+    /** 話している分を確定させ、聞き続ける（利用者が区切るボタンを押したとき）。続けて話した音声は次の発話になる。 */
+    fun cut(): List<SpeechEvent>
+
     /** 途中の音声を捨てて、新しい会話として始め直す。 */
     fun reset()
 

@@ -191,6 +191,13 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         listenJob?.cancel()
     }
 
+    /** 今話している分を確定して次のカードにする（聞くのは続ける）。音声認識は同じスレッドから呼ぶ。 */
+    fun cut() {
+        val engine = asr ?: return
+        if (listenJob?.isActive != true) return
+        viewModelScope.launch(asrDispatcher) { post(engine.cut()) }
+    }
+
     fun clear() {
         handle(Event.Cleared)
         _state.update { it.copy(error = null) }

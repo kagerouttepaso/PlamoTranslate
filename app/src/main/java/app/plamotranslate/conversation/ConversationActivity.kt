@@ -69,6 +69,7 @@ class ConversationActivity : ComponentActivity() {
                     actions = ConversationActions(
                         start = ::startListening,
                         stop = vm::stop,
+                        cut = vm::cut,
                         partnerMode = vm::setMode,
                         self = vm::setSelf,
                         viewMode = vm::setViewMode,
@@ -114,6 +115,8 @@ class ConversationActivity : ComponentActivity() {
 internal class ConversationActions(
     val start: () -> Unit,
     val stop: () -> Unit,
+    /** 今話している分を確定して次のカードにする（聞くのは続ける）。 */
+    val cut: () -> Unit,
     val partnerMode: (PartnerMode) -> Unit,
     val self: (Language) -> Unit,
     val viewMode: (ViewMode) -> Unit,

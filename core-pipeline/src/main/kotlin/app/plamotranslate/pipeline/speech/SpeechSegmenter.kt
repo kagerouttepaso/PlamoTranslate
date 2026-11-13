@@ -12,6 +12,7 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  * - 次の文が前の文と違う言語で始まった（話し手の交代・間あり）
  * - 話している最中に、直近の言語が2回続けてカードの言語と違った（話し手の交代・間なし）
  * - [SegmentationProfile.splitAfterSeconds] 話し続けた（長い発話）
+ * - 利用者が区切った（[cut]）
  *
  * 話している間は、ためた音声全体を0.5秒ごとに認識し直して途中結果を出す（疑似ストリーミング）。
  * 判断は部品に分ける：言語が話し手の交代の根拠になるかは [LanguageEvidence]、区切る位置は [CutPoint]、
@@ -256,6 +257,12 @@ class SpeechSegmenter(
         buffer.clear()
         out += SpeechEvent.Speaking(false)
         return out
+    }
+
+    override fun cut(): List<SpeechEvent> {
+        if (closed || !buffer.active) return emptyList()
+        // 話し続けたまま区切るのと同じく、ためた分を確定させ、続く音声は次のカードの頭にする
+        return listOfNotNull(cut(buffer.size, "手で区切り"))
     }
 
     override fun reset() {

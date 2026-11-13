@@ -150,6 +150,20 @@ class SpeechSegmenterTest {
     }
 
     @Test
+    fun 手で区切ったら話した分を確定し続けた話は次のカードにする() {
+        val s = segmenter()
+        s.feed(Sound.JA to 1.5)
+        val cut = finals(s.cut())
+        assertEquals(1, cut.size)
+        assertTrue(cut[0].text.all { it == 'あ' })
+        // 聞くのは続けるので、続けて話した分は次のカードになり、話し終わりで確定する
+        val rest = finals(s.feed(Sound.KO to 1.5, Sound.SILENCE to 3.0))
+        assertEquals(listOf("ko"), rest.map { it.lang })
+        // 話していないときに押しても何も起きない
+        assertTrue(s.cut().isEmpty())
+    }
+
+    @Test
     fun 途中結果は同じ文字を続けて出さない() {
         val partials = segmenter().feed(Sound.JA to 1.5, Sound.SILENCE to 1.5).filterIsInstance<SpeechEvent.Partial>()
         assertTrue(partials.isNotEmpty())

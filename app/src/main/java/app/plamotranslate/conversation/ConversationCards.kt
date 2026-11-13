@@ -30,6 +30,8 @@ import app.plamotranslate.llm.Language
 
 /*
  * 会話翻訳のカード（docs/設計/会話翻訳.md「画面」）。対面のカード・1画面のカード・話している最中のカード。
+ * 対面は、その面を読む人の言語の文が面を占めるように、見出しとかかった時間を出さず、もう一方の言語を小さくする。
+ * 1画面は2人が同じカードの全部を読むので、見出し・原文・訳を同じ重さで出す。
  */
 
 /** 対面で、そのカードを読む人。相手の面のカードは逆さに出し、相手の言語を上に出す。 */
@@ -44,8 +46,11 @@ private object ConversationType {
     /** 読む人の言語で書かれた方（対面）、訳文（1画面）。 */
     val main = TextStyle(fontSize = 26.sp, lineHeight = 34.sp, fontWeight = FontWeight.Medium)
 
-    /** もう一方の言語（対面）、原文（1画面）。 */
+    /** 原文（1画面）。 */
     val sub = TextStyle(fontSize = 20.sp, lineHeight = 27.sp)
+
+    /** もう一方の言語（対面）。読む人には読めない言語なので、話した人が聞き取りを確かめられる程度に小さくする。 */
+    val faceSub = TextStyle(fontSize = 14.sp, lineHeight = 19.sp)
 }
 
 /** 誰の発話かで色を決める。対面の上下どちらの半分でも、同じ人の発話は同じ色にする。 */
@@ -55,17 +60,19 @@ private fun speakerColors(mine: Boolean): Pair<Color, Color> {
     return if (mine) c.primaryContainer to c.onPrimaryContainer else c.tertiaryContainer to c.onTertiaryContainer
 }
 
-/** カードの見出し。相手向けの面では相手が日本語を読めないので、言語の略号だけにする。 */
-private fun cardLabel(direction: Direction, reader: Reader?): String = when (reader) {
-    Reader.PARTNER -> "${direction.source.code.substringBefore('-').uppercase()} → ${direction.target.code.substringBefore('-').uppercase()}"
-    else -> "${if (direction.mine) "自分" else "相手"}・${direction.source.label} → ${direction.target.label}"
-}
+/** 1画面のカードの見出し（誰が・何語から何語へ）。 */
+private fun cardLabel(direction: Direction): String =
+    "${if (direction.mine) "自分" else "相手"}・${direction.source.label} → ${direction.target.label}"
+
 
 /** 対面で、その面を読む人の言語。自分の面は自分が話した・訳された言語、相手の面は相手のもの。 */
 private fun readerLanguage(d: Direction, reader: Reader): Language =
     if (d.mine == (reader == Reader.ME)) d.source else d.target
 
-/** 対面のカード。読む人の言語で書かれた方を上に大きく、もう一方をその下に出す。 */
+/**
+ * 対面のカード。読む人の言語で書かれた方を上に大きく、もう一方をその下に小さく出す。
+ * 誰が何語から何語へ話したかは、色と左右と読む人の言語で分かるので見出しを出さない（読み上げ中の🔊だけ出す）。
+ */
 @Composable
 internal fun FaceCard(turn: Turn, reader: Reader) {
     val d = turn.direction
@@ -75,14 +82,16 @@ internal fun FaceCard(turn: Turn, reader: Reader) {
     UtteranceCard(
         turn = turn,
         translationIsMain = !originalFirst,
-        label = cardLabel(d, reader),
+        label = null,
         mine = d.mine,
         right = d.mine == (reader == Reader.ME),
         main = if (originalFirst) turn.original else translation,
         mainPending = !originalFirst && !turn.translated,
         sub = if (originalFirst) translation else turn.original,
         subPending = originalFirst && !turn.translated,
-        stats = if (reader == Reader.ME) turn.statsText else "",
+        stats = "",
+        subStyle = ConversationType.faceSub,
+        compact = true,
     )
 }
 
@@ -92,7 +101,7 @@ internal fun SharedCard(turn: Turn) {
     UtteranceCard(
         turn = turn,
         translationIsMain = true,
-        label = cardLabel(turn.direction, null),
+        label = cardLabel(turn.direction),
         mine = turn.direction.mine,
         right = turn.direction.mine,
         main = turn.shownTranslation.ifEmpty { "…" },
@@ -105,7 +114,8 @@ internal fun SharedCard(turn: Turn) {
 }
 
 /**
- * 確定したカード。見出し（誰が・何語から何語へ）、本文2つ、かかった時間を縦に並べる。
+ * 確定したカード。見出し（誰が・何語から何語へ。[label] が null なら読み上げ中の🔊だけ）、本文2つ、かかった時間を縦に並べる。
+ * [compact] は対面のカードで、余白を詰めて本文に面を譲る。
  * 色は話した人ごとに分け、背景と混ざらないよう地の色との差がはっきりした組み合わせにする。
  * 訳文をタップすると、訳した先の言語で読み上げる（2026-11-08、作者の要望。[ReadAloud]）。読んでいる間は見出しに🔊を出し、
  * もう一度タップすると止める。
@@ -114,7 +124,7 @@ internal fun SharedCard(turn: Turn) {
 private fun UtteranceCard(
     turn: Turn,
     translationIsMain: Boolean,
-    label: String,
+    label: String?,
     mine: Boolean,
     right: Boolean,
     main: String,
@@ -123,6 +133,8 @@ private fun UtteranceCard(
     subPending: Boolean,
     stats: String,
     subFirst: Boolean = false,
+    subStyle: TextStyle = ConversationType.sub,
+    compact: Boolean = false,
 ) {
     val (container, content) = speakerColors(mine)
     val pendingColor = content.copy(alpha = 0.45f)
@@ -134,18 +146,22 @@ private fun UtteranceCard(
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (right) Arrangement.End else Arrangement.Start) {
         Surface(
-            modifier = Modifier.fillMaxWidth(0.92f),
+            modifier = Modifier.fillMaxWidth(if (compact) 0.96f else 0.92f),
             shape = RoundedCornerShape(16.dp),
             color = container,
             contentColor = content,
         ) {
             SelectionContainer {
-                Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        if (speaking == key) "🔊 $label" else label,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = content.copy(alpha = 0.7f),
-                    )
+                Column(
+                    Modifier.padding(horizontal = if (compact) 12.dp else 14.dp, vertical = if (compact) 8.dp else 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (compact) 3.dp else 6.dp),
+                ) {
+                    val heading = when {
+                        label == null -> if (speaking == key) "🔊" else null
+                        speaking == key -> "🔊 $label"
+                        else -> label
+                    }
+                    heading?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = content.copy(alpha = 0.7f)) }
                     val mainText = @Composable {
                         Text(
                             main,
@@ -158,7 +174,7 @@ private fun UtteranceCard(
                         if (sub.isNotEmpty()) {
                             Text(
                                 sub,
-                                style = ConversationType.sub,
+                                style = subStyle,
                                 color = if (subPending) pendingColor else content.copy(alpha = 0.85f),
                                 modifier = if (translationIsMain) Modifier else speak,
                             )
@@ -176,7 +192,8 @@ private fun UtteranceCard(
 
 /**
  * 話している最中の聞き取りと途中訳。2人が注視して読むものなので、確定したカードと同じ大きさ・濃さで出し、
- * 枠線で囲って「話し中（まだ変わる）」ことを見出しで示す。話し終わると確定したカードに置き換わる。
+ * 枠線で囲って「話し中（まだ変わる）」ことを示す。1画面は見出しも出し、対面は確定したカードと同じく見出しを出さず
+ * もう一方の言語を小さくする。話し終わると確定したカードに置き換わる。
  */
 @Composable
 internal fun LiveCard(live: LiveSpeech, reader: Reader?) {
@@ -192,23 +209,24 @@ internal fun LiveCard(live: LiveSpeech, reader: Reader?) {
     val translation = live.translation.ifEmpty { "…" }
     // 1画面は確定したカードと同じく「原文の下に訳」。対面は読む人の言語を上に
     val originalFirst = reader == null || d == null || d.source == readerLanguage
-    val label = if (reader == Reader.PARTNER) "● LIVE" else "● 話し中"
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (right) Arrangement.End else Arrangement.Start) {
         Surface(
-            modifier = Modifier.fillMaxWidth(0.92f),
+            modifier = Modifier.fillMaxWidth(if (reader == null) 0.92f else 0.96f),
             shape = RoundedCornerShape(16.dp),
             color = c.surfaceContainerHigh,
             contentColor = c.onSurface,
             border = BorderStroke(2.dp, c.primary),
         ) {
-            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(label, style = MaterialTheme.typography.labelLarge, color = c.primary)
-                if (reader == null) {
+            if (reader == null) {
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("● 話し中", style = MaterialTheme.typography.labelLarge, color = c.primary)
                     Text(original, style = ConversationType.sub)
                     Text(translation, style = ConversationType.main)
-                } else {
+                }
+            } else {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(if (originalFirst) original else translation, style = ConversationType.main)
-                    Text(if (originalFirst) translation else original, style = ConversationType.sub, color = c.onSurfaceVariant)
+                    Text(if (originalFirst) translation else original, style = ConversationType.faceSub, color = c.onSurfaceVariant)
                 }
             }
         }
