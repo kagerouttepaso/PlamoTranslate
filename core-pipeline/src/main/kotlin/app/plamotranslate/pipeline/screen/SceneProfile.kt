@@ -21,6 +21,15 @@ data class SceneProfile(
     fun untilTouched(): SceneProfile = copy(validity = validity.copy(ring = null, outside = null))
 
     companion object {
+        /**
+         * メニューの設定から場面の設定を組み立てる1か所。[motion] は認識モードが動く画面か、[untilTouched] は訳の消え方が触れるまで残すか。
+         * アプリごとに場面を選ぶ部品を足すときも、ここで組み立てる。
+         */
+        fun of(motion: Boolean, untilTouched: Boolean): SceneProfile {
+            val scene = if (motion) MOTION else NORMAL
+            return if (untilTouched) scene.untilTouched() else scene
+        }
+
         /** 通常（チャット・ウェブ・漫画）。 */
         val NORMAL = SceneProfile(
             stackFrames = 1,

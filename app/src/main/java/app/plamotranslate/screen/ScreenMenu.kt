@@ -74,8 +74,8 @@ internal class ScreenMenu(private val context: Context, private val windowManage
         params = p
     }
 
-    /** 選択肢を押した後、選んだ印を今の設定に合わせて描き直す。 */
-    private fun refresh() {
+    /** 選んだ印と選べるかを、今の設定に合わせて描き直す（選択肢を押した後と、翻訳モデルの状態が変わったとき）。 */
+    fun refresh() {
         val view = root ?: return
         val p = params ?: return
         fill(view, p)

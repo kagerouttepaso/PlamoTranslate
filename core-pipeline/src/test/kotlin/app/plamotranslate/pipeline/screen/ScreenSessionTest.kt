@@ -116,6 +116,17 @@ class ScreenSessionTest {
     }
 
     @Test
+    fun メニューを開いたまま自動に変えても閉じるまで訳し始めない() {
+        // メニューは選んでも閉じないので、始め方の変更はメニューを開いたまま届く
+        val (s, effects) = run(tap, SessionEvent.MenuOpened, SessionEvent.TriggerChanged(Trigger.AUTO), SessionEvent.Settled)
+        assertEquals(Phase.Watching, s.phase)
+        assertTrue(effects.none { it is Effect.Capture })
+        val (s2, e2) = run(s, SessionEvent.MenuClosed, SessionEvent.Settled)
+        assertEquals(Phase.Capturing(1), s2.phase)
+        assertEquals(listOf(Effect.ResetStart, Effect.Capture(1)), e2)
+    }
+
+    @Test
     fun 訳す文字が無ければ知らせて判定Bを続ける() {
         val (s, effects) = run(auto, SessionEvent.Settled, SessionEvent.Captured(1, true), SessionEvent.Recognized(1, 0))
         assertEquals(Phase.Showing(1), s.phase)

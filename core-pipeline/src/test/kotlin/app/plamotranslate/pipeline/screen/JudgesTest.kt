@@ -102,6 +102,24 @@ class JudgesTest {
     }
 
     @Test
+    fun 場面の設定はメニューの2つの設定の組み合わせで決まる() {
+        assertEquals(SceneProfile.NORMAL, SceneProfile.of(motion = false, untilTouched = false))
+        assertEquals(SceneProfile.MOTION, SceneProfile.of(motion = true, untilTouched = false))
+        for (motion in listOf(false, true)) {
+            val p = SceneProfile.of(motion, untilTouched = true)
+            assertEquals(null, p.validity.ring)
+            assertEquals(null, p.validity.outside)
+            // 撮り方・読み方・判定Aと、規則1・のぞきは認識モードのまま
+            val scene = SceneProfile.of(motion, untilTouched = false)
+            assertEquals(scene.stackFrames, p.stackFrames)
+            assertEquals(scene.outlinedText, p.outlinedText)
+            assertEquals(scene.start, p.start)
+            assertEquals(scene.validity.switch, p.validity.switch)
+            assertEquals(scene.validity.peekFrames, p.validity.peekFrames)
+        }
+    }
+
+    @Test
     fun 判定B_触れるまで残す組でも画面が丸ごと切り替われば無効() {
         val judge = ValidityJudge(SceneProfile.MOTION.untilTouched().validity)
         judge.begin(reference)

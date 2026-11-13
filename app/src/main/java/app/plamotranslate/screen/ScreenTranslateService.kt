@@ -123,6 +123,9 @@ class ScreenTranslateService : Service() {
     private var hiding = false
     private var modelJob: Job? = null
 
+    /** メニューを出している間だけ、翻訳モデルの状態を購読する。 */
+    private var menuJob: Job? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     /** 画面を回したら、前の向きで置いた訳の枠は位置が合わないので消す。浮遊ボタンは今の画面の同じ割合の位置へ移す。 */
@@ -171,7 +174,12 @@ class ScreenTranslateService : Service() {
         OverlayAccessibilityService.onWindowChanged = ::onWindowChanged
         OverlayAccessibilityService.onScrolled = ::onScrolled
         touchWatcher = TouchWatcher(this, wm, ::onScreenTouch).also { it.show() }
-        menu = ScreenMenu(this, wm).also { it.onDismiss = { dispatch(SessionEvent.MenuClosed) } }
+        menu = ScreenMenu(this, wm).also {
+            it.onDismiss = {
+                menuJob?.cancel()
+                dispatch(SessionEvent.MenuClosed)
+            }
+        }
         button = FloatingButton(this, wm, onTap = ::onButtonTap, onLongPress = ::showMenu).also {
             it.setLabel(buttonLabel(preferences.language, preferences.trigger))
             it.setActive(true)
@@ -489,14 +497,10 @@ class ScreenTranslateService : Service() {
 
     /** 場面の設定（認識モードと訳の消え方）を今の設定に合わせ、判定器を作り直す。 */
     private fun applyProfile() {
-        val scene = when (preferences.recognition) {
-            ScreenRecognition.NORMAL -> SceneProfile.NORMAL
-            ScreenRecognition.MOTION -> SceneProfile.MOTION
-        }
-        profile = when (preferences.dismissal) {
-            ScreenDismissal.ON_CHANGE -> scene
-            ScreenDismissal.ON_TOUCH -> scene.untilTouched()
-        }
+        profile = SceneProfile.of(
+            motion = preferences.recognition == ScreenRecognition.MOTION,
+            untilTouched = preferences.dismissal == ScreenDismissal.ON_TOUCH,
+        )
         startJudge = StartJudge(profile.start).also { it.reset(SystemClock.uptimeMillis()) }
         validity = ValidityJudge(profile.validity)
     }
@@ -510,6 +514,9 @@ class ScreenTranslateService : Service() {
         val (x, y) = button?.position ?: return
         dispatch(SessionEvent.MenuOpened)
         menu?.show(x, y, ::menuEntries)
+        // 翻訳モデルの読み込みが進んだら、選べるモデルの印を描き直す（メニューは選んでも閉じないため）
+        menuJob?.cancel()
+        menuJob = scope.launch { EngineHolder.state.drop(1).collect { menu?.refresh() } }
     }
 
     /** メニューの行。選択肢を押すたびに作り直すので、今の設定を読んで作る。 */
