@@ -181,7 +181,10 @@ class FloatingButton(
     private val view = FrameLayout(context).apply {
         elevation = context.dp(6).toFloat()
         contentDescription = "画面翻訳"
-        addView(mark, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
+        // アイコンの格子108のうち、真ん中の72（アダプティブアイコンの見える範囲）を丸いっぱいに描く。
+        // 108全体を丸に収めると図柄が小さくなる。はみ出した外周は丸の外なので、親の枠で切れる
+        val full = size * 108 / 72
+        addView(mark, FrameLayout.LayoutParams(full, full, Gravity.CENTER))
         addView(badge, FrameLayout.LayoutParams(context.dp(18), context.dp(18), Gravity.BOTTOM or Gravity.END))
     }
 
