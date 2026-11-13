@@ -232,7 +232,7 @@ private fun TranslationCacheCard() {
     LaunchedEffect(Unit) { cache.refreshCount() }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("画面翻訳の訳の控え", style = MaterialTheme.typography.titleMedium)
+            Text("訳の控え", style = MaterialTheme.typography.titleMedium)
             Text(
                 "一度訳した文を端末に残し、同じ文はすぐ出します。2Bの訳があれば0.8Bでもそれを使い、" +
                     "2Bで訳すと0.8Bの訳を上書きします。${SqlitePersistentCache.MAX_ENTRIES}件を超えると古いものから消します。",
