@@ -135,7 +135,12 @@ class CameraSession<L>(
         when (event) {
             is Event.Read -> {
                 if (paused && !event.still) return emptyList()
-                tracker.update(event.readings)
+                val updated = tracker.update(event.readings)
+                if (!event.still) {
+                    readCount += updated.size
+                    blurredCount += updated.count { it.lastBlurred() }
+                    updated.forEach { t -> t.lastRatio()?.let { sharpnessRatios[minOf(9, (it * 10).toInt())]++ } }
+                }
                 event.screen?.let { screen = it }
                 regroup(observe = true)
             }
@@ -231,6 +236,17 @@ class CameraSession<L>(
         private set
     var resubmittedCount = 0
         private set
+
+    /** 読めた行の数と、そのうちぶれたコマとして票を軽くした数（[LineTracker.Track.lastBlurred]）。鋭さの重みを実機で確かめるため。 */
+    var readCount = 0
+        private set
+    var blurredCount = 0
+        private set
+
+    /** 読めた行の鋭さの割合（[LineTracker.Track.ratios]）の分布（0.1刻みの10区間の度数）。重みの境を実機の数値で決めるため。 */
+    private val sharpnessRatios = IntArray(10)
+
+    fun sharpnessRatios(): List<Int> = sharpnessRatios.toList()
 
     /**
      * 空いた分だけ、その時点でいちばん先に訳すべき段落を選んで渡す（[TranslationPlan.choose]）。

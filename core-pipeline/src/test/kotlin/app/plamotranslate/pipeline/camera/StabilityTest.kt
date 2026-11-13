@@ -131,4 +131,65 @@ class StabilityTest {
         // 行1と2が区切りに無い行として戻ってきても、前の区切りは覚えていない
         assertEquals(listOf(listOf(1L), listOf(2L)), g.groups(listOf(1L, 2L)))
     }
+
+    @Test
+    fun ぶれたコマの読み取りは票が軽い() {
+        // ぶれた2回が同じ崩れ方をしても、鋭い1回の読み取りが勝つ
+        assertEquals("COLD BREW", ReadingFusion.fuse(listOf("COLD BREW", "C0LD BRCW", "C0LD BRCW"), 0, listOf(1.0, 0.2, 0.2)).text)
+        val t = LineTracker.Track<Unit>(1)
+        listOf("C0LD BRCW" to 1.0, "COLD BREW" to 10.0, "C0LD BRCW" to 1.5).forEach { (text, s) ->
+            t.add(Reading(Box(0, 0, 100, 20), text, Unit, sharpness = s))
+        }
+        assertEquals("COLD BREW", t.consensus())
+        assertTrue(t.lastBlurred())
+    }
+
+    @Test
+    fun 鋭さの小さな揺れでは票を軽くしない() {
+        val t = LineTracker.Track<Unit>(1)
+        listOf(10.0, 8.0, 9.0).forEach { t.add(Reading(Box(0, 0, 100, 20), "COLD BREW", Unit, sharpness = it)) }
+        assertEquals(listOf(1.0, 1.0, 1.0), t.weights())
+        assertTrue(t.settled())
+    }
+
+    private fun track(vararg readings: Triple<String, Double?, Int>) = LineTracker.Track<Unit>(1).also { t ->
+        readings.forEach { (text, sharp, height) -> t.add(Reading(Box(0, 0, 400, height), text, Unit, sharpness = sharp)) }
+    }
+
+    @Test
+    fun 偶数回のときはいちばん軽い読み取りを除き鋭い読み取りは外れない() {
+        // 古い順に、鋭い正しい読み取り、ぶれた崩れた読み取りが3回。偶数回でも、鋭い1回を除かない
+        val t = track(
+            Triple("COLD BREW", 10.0, 20), Triple("C0LD BRCW", 1.0, 20), Triple("C0LD BRCW", 1.5, 20),
+        )
+        assertEquals("COLD BREW", t.consensus())
+        t.add(Reading(Box(0, 0, 400, 20), "COLD BRFW", Unit, sharpness = 1.2))
+        assertEquals("COLD BREW", t.consensus())
+    }
+
+    @Test
+    fun 鋭い1回の票だけではそろったとしない() {
+        // 鋭い1回とぶれた2回が互いに一致しない。確かさは高く出るが、票の重みの合計が2回分に足りない
+        val t = track(Triple("abcd", 10.0, 20), Triple("wxyz", 1.0, 20), Triple("pqrs", 1.0, 20))
+        assertFalse(t.settled())
+    }
+
+    @Test
+    fun 鋭さを測れなかった読み取りはほかと同じ重み() {
+        val t = track(Triple("COLD BREW", 10.0, 20), Triple("COLD BREW", null, 20), Triple("COLD BREW", 9.0, 20))
+        assertEquals(listOf(1.0, 1.0, 1.0), t.weights())
+    }
+
+    @Test
+    fun 鋭さは同じくらいの大きさに写ったコマどうしでだけ比べる() {
+        // 近づいて大きく写ったコマは鋭さの値が違っても、小さく写ったコマの基準にしない
+        val t = track(Triple("COLD BREW", 3.0, 20), Triple("COLD BREW", 10.0, 60), Triple("COLD BREW", 2.8, 20))
+        assertEquals(listOf(1.0, 1.0, 1.0), t.weights())
+    }
+
+    @Test
+    fun 重みの小数の誤差で同数の決め方が変わらない() {
+        // 0.1 + 0.2 と 0.3 は2進の小数では等しくないが、同数として土台の文字を採る
+        assertEquals("abcd", ReadingFusion.fuse(listOf("abcd", "abcx", "abcd", "abcx"), 0, listOf(0.1, 0.3, 0.2, 1e-12)).text)
+    }
 }

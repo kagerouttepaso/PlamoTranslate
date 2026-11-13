@@ -22,6 +22,7 @@ import app.plamotranslate.pipeline.camera.CameraSession.Effect
 import app.plamotranslate.pipeline.camera.CameraSession.Event
 import app.plamotranslate.pipeline.camera.CameraSession.Settings
 import app.plamotranslate.pipeline.camera.Reading
+import app.plamotranslate.pipeline.camera.Sharpness
 import app.plamotranslate.pipeline.screen.Box
 import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
@@ -31,11 +32,13 @@ import kotlin.math.ceil
 import kotlin.math.floor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * カメラの1コマの訳の枠。[rect] は正立した画像（[LiveFrame.rotation]、[CameraGeometry]）の座標。
@@ -131,7 +134,9 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
             field = value
             pausedAt = if (value) SystemClock.uptimeMillis() else null
             if (value) Logs.i("カメラ翻訳: 一時停止（見えている訳待ち ${session.waitingOnScreen()}件、訳している途中 ${session.inFlightCount}件、" +
-                "ここまでに渡した ${session.submittedCount}件・うち訳し直し ${session.resubmittedCount}件）")
+                "ここまでに渡した ${session.submittedCount}件・うち訳し直し ${session.resubmittedCount}件、" +
+                "読めた行 ${session.readCount}件・うちぶれて軽くした ${session.blurredCount}件、" +
+                "鋭さの割合の分布 ${session.sharpnessRatios().joinToString("/")}（0.1刻み））")
             apply(session.handle(if (value) Event.Paused else Event.Resumed))
         }
 
@@ -192,9 +197,12 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
         val t0 = SystemClock.uptimeMillis()
         return try {
             // カメラでは1文字だけの読み取りを捨てる（韓国語のラベルを中国語の認識器が読み違えた「太」「我」などの雑音が多い）
-            val readings = selectTargets(ocr.recognize(upright, recognizers).map(TextBlock::of), upright, statusBarHeight = 0, target = target)
+            val targets = selectTargets(ocr.recognize(upright, recognizers).map(TextBlock::of), upright, statusBarHeight = 0, target = target)
                 .filter { t -> t.sourceText.count { it.isLetter() } >= 2 }
-                .map { Reading(it.block.bounds.toBox(), it.sourceText, it.slot.colors) }
+            // 鋭さは行の数だけ画素を回るので、画面のスレッドを塞がない
+            val readings = withContext(Dispatchers.Default) {
+                targets.map { Reading(it.block.bounds.toBox(), it.sourceText, it.slot.colors, sharpness(upright, it.block.bounds)) }
+            }
             readings to SystemClock.uptimeMillis() - t0
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -203,6 +211,15 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
         } finally {
             if (upright !== bitmap) upright.recycle()
         }
+    }
+
+    /** 行の範囲の画像の鋭さ（[Sharpness]。手ぶれ・ピンぼけのコマの読み取りを、多数決で軽くするため）。 */
+    private fun sharpness(image: Bitmap, bounds: Rect): Double? {
+        val r = Rect(bounds)
+        if (!r.intersect(0, 0, image.width, image.height)) return null
+        val pixels = IntArray(r.width() * r.height())
+        image.getPixels(pixels, 0, r.width(), r.left, r.top, r.width(), r.height())
+        return Sharpness.of(pixels, r.width(), r.height())
     }
 
     /** 止めた画像を読み直す（一時停止中に原文の言語を変えたとき）。 */
