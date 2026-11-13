@@ -33,7 +33,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.compose.material3.Switch
-import app.plamotranslate.overlay.SqlitePersistentCache
+import app.plamotranslate.translation.SqlitePersistentCache
 import app.plamotranslate.screen.OverlayAccessibilityService
 import app.plamotranslate.screen.ScreenPreferences
 import kotlinx.coroutines.launch

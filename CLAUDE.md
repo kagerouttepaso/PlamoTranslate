@@ -67,7 +67,7 @@
 
 | モジュール | 役割 |
 | --- | --- |
-| `app` | 画面（Jetpack Compose。トップ・テキスト翻訳・設定・会話翻訳・カメラ翻訳）、翻訳モデルの選択と読み込み、モデルのダウンロード（`models/`）、アプリの更新（`update/`）、画面翻訳のフォアグラウンドサービスと重ね表示・クイック設定のタイル（`screen/`）、カメラ翻訳（`camera/`。CameraX、行の追跡と段落）、会話翻訳（`conversation/`）。翻訳の流れを開く入口は `translation/`、画面翻訳とカメラ翻訳の共通部品は `overlay/`、マイクは `audio/`、設定の保存は機能ごとの `*Preferences`。`src/debug` に評価用の `BenchActivity` と翻訳モデルの比べの `TranslateBenchActivity` |
+| `app` | 画面（Jetpack Compose。トップ・テキスト翻訳・設定・会話翻訳・カメラ翻訳）、翻訳モデルの選択と読み込み、モデルのダウンロード（`models/`）、アプリの更新（`update/`）、画面翻訳のフォアグラウンドサービスと重ね表示・クイック設定のタイル（`screen/`）、カメラ翻訳（`camera/`。CameraX、行の追跡と段落）、会話翻訳（`conversation/`）。翻訳の流れを開く入口と永続の控えの実装は `translation/`、画面翻訳とカメラ翻訳の共通部品は `overlay/`、マイクは `audio/`、設定の保存は機能ごとの `*Preferences`。`src/debug` に評価用の `BenchActivity` と翻訳モデルの比べの `TranslateBenchActivity` |
 | `core-pipeline` | 中核（Kotlin/JVM、Androidに依存しない）。翻訳の契約 `TranslationStream` とコア、画面翻訳の状態遷移 `ScreenSession`・判定器・場面の設定、言語の型・PFML3プロンプトの組み立て。単体テストはここで書く |
 | `core-llm` | llama.cppのJNIラッパーと、中核のエンジンの差し込み口（`JobEngine`）の実装 |
 | `core-ocr` | 文字認識のインターフェースと実装（ML Kit、漫画用OCR）、行の選択とまとまりの組み立て |

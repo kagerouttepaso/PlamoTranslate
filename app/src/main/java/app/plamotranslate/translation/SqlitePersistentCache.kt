@@ -1,4 +1,4 @@
-package app.plamotranslate.overlay
+package app.plamotranslate.translation
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase

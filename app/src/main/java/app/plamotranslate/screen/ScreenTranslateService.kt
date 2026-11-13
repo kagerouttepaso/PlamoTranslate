@@ -29,7 +29,7 @@ import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.ocr.OcrLanguage
-import app.plamotranslate.overlay.SqlitePersistentCache
+import app.plamotranslate.translation.SqlitePersistentCache
 import app.plamotranslate.overlay.TranslationTarget
 import app.plamotranslate.overlay.selectTargets
 import app.plamotranslate.pipeline.screen.SceneProfile
