@@ -88,9 +88,9 @@ class TranslationStreamTest {
         @Volatile
         override var generation = 0
 
-        override suspend fun lookup(scope: CacheScope, minQuality: Int, texts: Collection<String>): Map<String, String> {
+        override suspend fun lookup(scope: CacheScope, minQuality: Int, texts: Collection<String>): Map<String, CachedTranslation> {
             lookups += scope to minQuality
-            return texts.mapNotNull { t -> saved["${scope.id}|$t"]?.takeIf { it.second >= minQuality }?.let { t to it.first } }.toMap()
+            return texts.mapNotNull { t -> saved["${scope.id}|$t"]?.takeIf { it.second >= minQuality }?.let { t to CachedTranslation(it.first, it.second) } }.toMap()
         }
 
         override suspend fun store(scope: CacheScope, origin: ModelOrigin, generation: Int, translations: Map<String, String>) {
@@ -265,6 +265,39 @@ class TranslationStreamTest {
         assertEquals(1, second.stats.memoryHits)
         assertEquals(1, persistent.lookups.size)
         assertTrue(engine.requests.isEmpty())
+    }
+
+    @Test
+    fun 永続の控えの訳は確かさを保ってメモリの控えに入れる() {
+        // 小さいモデルの流れが大きいモデルの訳を永続の控えから引いたら、大きいモデルに替えた後もメモリの控えで当たる
+        val persistent = FakePersistent()
+        persistent.saved["${TranslationStream.Options(Language.EN, Language.JA).cacheScope.id}|Hello"] = "大「Hello」" to LARGE.quality
+        val cache = MemoryCache()
+        val engine = FakeEngine(parallel = 1)
+        stream(engine, cache, persistent, origin = SMALL).also { it.submit(listOf(Segment(1, "Hello"))) }.collectUntilDone(setOf(1))
+        val up = stream(engine, cache, persistent, origin = LARGE)
+        up.submit(listOf(Segment(2, "Hello")))
+        assertEquals("大「Hello」", finals(up.collectUntilDone(setOf(2)))[2])
+        assertEquals(1, up.stats.memoryHits)
+        assertTrue(engine.requests.isEmpty())
+    }
+
+    @Test
+    fun 永続の控えを持つ流れと持たない流れでメモリの控えを共有しても捨て合わない() {
+        val persistent = FakePersistent()
+        persistent.generation = 3
+        val cache = MemoryCache()
+        val engine = FakeEngine(parallel = 1)
+        stream(engine, cache, persistent).also { it.submit(listOf(Segment(1, "Hello"))) }.collectUntilDone(setOf(1))
+        val plain = stream(engine, cache)
+        plain.submit(listOf(Segment(2, "Hello")))
+        plain.collectUntilDone(setOf(2))
+        val again = stream(engine, cache, persistent)
+        again.submit(listOf(Segment(3, "Hello")))
+        again.collectUntilDone(setOf(3))
+        assertEquals(1, plain.stats.memoryHits)
+        assertEquals(1, again.stats.memoryHits)
+        assertEquals(1, engine.requests.size)
     }
 
     @Test

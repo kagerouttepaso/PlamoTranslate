@@ -186,9 +186,10 @@ class TranslationStream(
                     fail("翻訳モデルを読めません")
                     break
                 }
-                // 永続の控えを消していたら（設定の画面）、メモリの控えも捨てる。書くときは、訳し始める前のこの世代を渡す
+                // 永続の控えを消していたら（設定の画面）、メモリの控えも捨てる。書くときは、訳し始める前のこの世代を渡す。
+                // 永続の控えを持たない流れは世代に触れない（持つ流れとメモリの控えを共有しても、捨て合わない）
                 val stored = b.persistent?.let { it to it.generation }
-                cache.sync(stored?.second ?: 0)
+                stored?.let { cache.sync(it.second) }
                 val gen: Int
                 val lookup = synchronized(lock) {
                     core = coreFor(b.engine.parallel)
@@ -263,7 +264,7 @@ class TranslationStream(
     }
 
     /** 永続の控えを引いた結果で、片を確定するか並べる。[lock] の中で呼ぶ。 */
-    private fun enqueue(texts: List<String>, hits: Map<String, String>) {
+    private fun enqueue(texts: List<String>, hits: Map<String, CachedTranslation>) {
         for (p in texts) {
             if (waiting[p] == null) {
                 // 引いている間にやめた
@@ -273,9 +274,9 @@ class TranslationStream(
             val hit = hits[p]
             if (hit != null) {
                 storedHits++
-                // 永続の控えの訳は今のモデル以上の確かさだが、正確な値は持たないので今のモデルの確かさで入れる
-                cache.put(cacheScope, p, hit, origin.quality)
-                pieceFinal(p, hit, fromEngine = false)
+                // 永続の控えの確かさのまま入れる（低く入れると、モデルを上げたときに途中で頼まれた片が1次で外れる）
+                cache.put(cacheScope, p, hit.translation, hit.quality)
+                pieceFinal(p, hit.translation, fromEngine = false)
             } else {
                 queue.addLast(Piece(p))
             }

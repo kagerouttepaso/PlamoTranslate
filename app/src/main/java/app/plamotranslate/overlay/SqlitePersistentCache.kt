@@ -4,6 +4,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import app.plamotranslate.pipeline.translation.CacheScope
+import app.plamotranslate.pipeline.translation.CachedTranslation
 import app.plamotranslate.pipeline.translation.ModelOrigin
 import app.plamotranslate.pipeline.translation.PersistentCache
 import kotlinx.coroutines.Dispatchers
@@ -36,18 +37,18 @@ class SqlitePersistentCache private constructor(context: Context) : PersistentCa
         private set
 
     /** [texts] のうち、確かさが [minQuality] 以上の訳が控えにあるもの。使った時刻も新しくする。 */
-    override suspend fun lookup(scope: CacheScope, minQuality: Int, texts: Collection<String>): Map<String, String> = withContext(Dispatchers.IO) {
+    override suspend fun lookup(scope: CacheScope, minQuality: Int, texts: Collection<String>): Map<String, CachedTranslation> = withContext(Dispatchers.IO) {
         if (texts.isEmpty()) return@withContext emptyMap()
         val key = scope.id
-        val found = HashMap<String, String>()
+        val found = HashMap<String, CachedTranslation>()
         val db = helper.writableDatabase
         // SQLiteの変数の上限（999）に収まるよう分けて引く
         for (part in texts.distinct().chunked(500)) {
             val marks = part.joinToString(",") { "?" }
             db.rawQuery(
-                "SELECT text, translation FROM $TABLE WHERE scope = ? AND quality >= ? AND text IN ($marks)",
+                "SELECT text, translation, quality FROM $TABLE WHERE scope = ? AND quality >= ? AND text IN ($marks)",
                 arrayOf(key, minQuality.toString()) + part,
-            ).use { c -> while (c.moveToNext()) found[c.getString(0)] = c.getString(1) }
+            ).use { c -> while (c.moveToNext()) found[c.getString(0)] = CachedTranslation(c.getString(1), c.getInt(2)) }
         }
         if (found.isNotEmpty()) touch(db, key, found.keys)
         found

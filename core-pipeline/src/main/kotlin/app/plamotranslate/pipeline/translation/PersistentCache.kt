@@ -19,6 +19,9 @@ data class CacheScope(val source: Language?, val target: Language, val form: Jap
  */
 data class ModelOrigin(val id: String, val quality: Int)
 
+/** 控えにある訳と、それを訳したモデルの確かさ。層から層へ移しても確かさを保つ。 */
+data class CachedTranslation(val translation: String, val quality: Int)
+
 /**
  * 永続の控え（2次の層）の差し込み口。端末のデータベースなど、流れやアプリを終えても残る控え。今は画面翻訳だけが渡す
  * （app の `SqlitePersistentCache`）。どちらも呼んだコルーチンの中で終わらせる。
@@ -30,8 +33,8 @@ interface PersistentCache {
      */
     val generation: Int
 
-    /** [texts] のうち、[scope] で確かさが [minQuality] 以上の訳がある片の訳。 */
-    suspend fun lookup(scope: CacheScope, minQuality: Int, texts: Collection<String>): Map<String, String>
+    /** [texts] のうち、[scope] で確かさが [minQuality] 以上の訳がある片の訳と、その確かさ。 */
+    suspend fun lookup(scope: CacheScope, minQuality: Int, texts: Collection<String>): Map<String, CachedTranslation>
 
     /** 訳し終えた片を書く。[generation] が今と違えば書かない。同じ鍵に [origin] より確かな訳があれば書き換えない。 */
     suspend fun store(scope: CacheScope, origin: ModelOrigin, generation: Int, translations: Map<String, String>)
