@@ -9,7 +9,6 @@ import android.graphics.Rect
 import android.graphics.Typeface
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.LayerDrawable
 import android.os.SystemClock
 import android.util.TypedValue
 import android.view.Gravity
@@ -152,12 +151,16 @@ class FloatingButton(
     onTap: () -> Unit,
     onLongPress: () -> Unit,
 ) {
-    private val size = context.dp(56)
+    /** 鳥の入る丸の大きさ。 */
+    private val faceSize = context.dp(56)
+
+    /** ボタンの窓の大きさ。丸の外に、自動のときの輪を描く分の余白を取る。 */
+    private val size = faceSize + context.dp(10)
 
     /** 今の画面の大きさ。画面を回したら [fitToScreen] で更新する。 */
     private var screen = windowManager.maximumWindowMetrics.bounds
     private val params = overlayParams(size, size, Gravity.TOP or Gravity.START).apply {
-        x = screen.width() - size - context.dp(8)
+        x = screen.width() - size - context.dp(3)
         y = screen.height() / 3
     }
 
@@ -178,17 +181,24 @@ class FloatingButton(
         includeFontPadding = false
         visibility = View.GONE
     }
-    private val view = FrameLayout(context).apply {
+
+    /** 鳥の入る丸。印は、この丸の形で切り抜く（輪や縁の線が鳥に重ならない）。 */
+    private val face = FrameLayout(context).apply {
         elevation = context.dp(6).toFloat()
-        contentDescription = "画面翻訳"
+        clipToOutline = true
         // アイコンの格子108のうち、真ん中の72（アダプティブアイコンの見える範囲）を丸いっぱいに描く。
-        // 108全体を丸に収めると図柄が小さくなる。はみ出した外周は丸の外なので、親の枠で切れる
-        val full = size * 108 / 72
+        // 108全体を丸に収めると図柄が小さくなる。はみ出した外周は丸で切れる
+        val full = faceSize * 108 / 72
         addView(mark, FrameLayout.LayoutParams(full, full, Gravity.CENTER))
+    }
+    private val view = FrameLayout(context).apply {
+        contentDescription = "画面翻訳"
+        clipChildren = false
+        addView(face, FrameLayout.LayoutParams(faceSize, faceSize, Gravity.CENTER))
         addView(badge, FrameLayout.LayoutParams(context.dp(18), context.dp(18), Gravity.BOTTOM or Gravity.END))
     }
 
-    /** 自動で訳すか。自動なら、丸の外にもう1本の輪を出す。 */
+    /** 自動で訳すか。自動なら、丸の外側にもう1本の輪を出す（丸は縮めない）。 */
     private var auto = false
 
     /**
@@ -203,17 +213,14 @@ class FloatingButton(
             shape = GradientDrawable.OVAL
             setColor(palette.primary)
         }
-        val face = GradientDrawable().apply {
+        face.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(palette.surfaceRaised)
             setStroke(context.dp(2), palette.primary)
         }
-        view.background = if (!auto) face else {
-            val ring = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setStroke(context.dp(2), palette.primary)
-            }
-            LayerDrawable(arrayOf(ring, face)).apply { setLayerInset(1, context.dp(5), context.dp(5), context.dp(5), context.dp(5)) }
+        view.background = if (!auto) null else GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setStroke(context.dp(2), palette.primary)
         }
     }
 
