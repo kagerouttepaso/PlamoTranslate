@@ -67,7 +67,6 @@ fun SpeechCard() {
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("読み上げ", style = MaterialTheme.typography.titleMedium)
             Text(
                 "会話翻訳のカードの訳文をタップしたとき、テキスト翻訳の🔊を押したときに読みます。",
                 style = MaterialTheme.typography.bodySmall,

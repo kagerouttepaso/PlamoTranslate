@@ -148,15 +148,13 @@ fun LicenseAgreementNote() {
     }
 }
 
-/** 設定の画面の「このアプリについて」。版、非公式であること、通信とプライバシー、使っているモデルとソフトウェアのライセンス。 */
+/** 設定の「このアプリについて」のページ。版と更新、非公式であること、通信とプライバシー。 */
 @Composable
 fun AboutCard(version: String) {
     val context = LocalContext.current
-    var shown by remember { mutableStateOf<LicenseText?>(null) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("このアプリについて", style = MaterialTheme.typography.titleMedium)
-            Text("${stringResource(R.string.app_name)} $version", style = MaterialTheme.typography.bodyMedium)
+            Text("${stringResource(R.string.app_name)} $version", style = MaterialTheme.typography.titleMedium)
             UpdateSection()
             Text(BUILT_WITH_PLAMO, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
             Text(
@@ -183,6 +181,17 @@ fun AboutCard(version: String) {
                 ) { Text("ML Kit が送るもの", style = MaterialTheme.typography.labelMedium) }
             }
 
+        }
+    }
+}
+
+/** 設定の「ライセンス」のページ。使っているモデルとソフトウェアのライセンスと、同梱した全文。 */
+@Composable
+fun LicensesCard() {
+    val context = LocalContext.current
+    var shown by remember { mutableStateOf<LicenseText?>(null) }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("使っているモデル（端末がダウンロードする）", style = MaterialTheme.typography.titleSmall)
             MODELS.forEach { m ->
                 Column {

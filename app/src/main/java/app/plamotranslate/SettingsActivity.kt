@@ -2,8 +2,10 @@ package app.plamotranslate
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +18,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -25,8 +28,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import android.content.Intent
@@ -48,7 +53,10 @@ import app.plamotranslate.models.ModelBundle
 import app.plamotranslate.models.ModelDownloads
 import app.plamotranslate.models.TranslationModel
 
-/** 設定（2026-11-06、トップ画面から分けた）。翻訳モデルの選択・2Bのダウンロード・今の状態・読み上げ・パフォーマンス・このアプリについて（2026-11-08）。 */
+/**
+ * 設定（docs/設計/アーキテクチャ.md「設定の画面」）。トップに項目のまとまりを並べ、押すとそのページへ進む階層にする
+ * （2026-11-13、作者の指摘「設定のページが長大すぎる」。それまでは全部を1ページに並べていた）。
+ */
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,29 +71,92 @@ class SettingsActivity : ComponentActivity() {
     }
 }
 
+/**
+ * 設定のページ。[group] はトップでの見出し、[parent] は戻る先。
+ * 何についての設定かでまとめる：全機能で共通の「翻訳」、機能ごとの「機能」、ふつうは触らない「詳細」、アプリそのものの「アプリ」。
+ * 機能ごとの設定が増えたら「機能」にページを足す（カメラ翻訳・会話翻訳など）。
+ */
+private enum class SettingsPage(val title: String, val group: String?, val parent: SettingsPage?) {
+    HOME("設定", null, null),
+    MODEL("翻訳モデル", "翻訳", HOME),
+    SCREEN("画面翻訳", "機能", HOME),
+    SPEECH("読み上げ", "機能", HOME),
+    PERFORMANCE("性能", "詳細", HOME),
+    ABOUT("このアプリについて", "アプリ", HOME),
+    LICENSES("ライセンス", "アプリ", HOME),
+}
+
 @Composable
 private fun SettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val model by EngineHolder.state.collectAsStateWithLifecycle()
-    Scaffold { padding ->
+    var page by rememberSaveable { mutableStateOf(SettingsPage.HOME) }
+    BackHandler(enabled = page.parent != null) { page = page.parent ?: SettingsPage.HOME }
+    // ページごとに上から見せるので、スクロールの位置はページごとに持つ
+    Scaffold { padding -> key(page) {
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("←", fontSize = 22.sp) }
-                Text("設定", style = MaterialTheme.typography.titleLarge)
+                TextButton(onClick = { page.parent?.let { page = it } ?: onBack() }) { Text("←", fontSize = 22.sp) }
+                Text(page.title, style = MaterialTheme.typography.titleLarge)
             }
-            ModelChooser(model)
-            ModelStatus(model, onRetry = { EngineHolder.ensureLoaded(context.applicationContext) })
-            SpeechCard()
-            TranslationCacheCard()
-            OpaqueOverlayCard()
-            PerformanceCard(model)
-            val version = remember {
-                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
+            when (page) {
+                SettingsPage.HOME -> SettingsHome(model) { page = it }
+                SettingsPage.MODEL -> {
+                    ModelStatus(model, onRetry = { EngineHolder.ensureLoaded(context.applicationContext) })
+                    ModelChooser(model)
+                }
+                SettingsPage.SCREEN -> {
+                    OpaqueOverlayCard()
+                    TranslationCacheCard()
+                }
+                SettingsPage.SPEECH -> SpeechCard()
+                SettingsPage.PERFORMANCE -> PerformanceCard(model)
+                SettingsPage.ABOUT -> {
+                    val version = remember {
+                        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
+                    }
+                    AboutCard(version)
+                }
+                SettingsPage.LICENSES -> LicensesCard()
             }
-            AboutCard(version)
+        }
+    } }
+}
+
+/** 設定のトップ。まとまりごとに見出しを付け、各ページを1行で、今の状態の一言と並べる。 */
+@Composable
+private fun SettingsHome(model: ModelState, open: (SettingsPage) -> Unit) {
+    val context = LocalContext.current
+    val speech = remember { SpeechPreferences(context).engine }
+    val opaque = remember { ScreenPreferences(context).opaqueOverlay }
+    fun summary(p: SettingsPage): String = when (p) {
+        SettingsPage.MODEL -> when (model) {
+            is ModelState.Ready -> "${model.model.label}・${if (model.engine.usesGpu) "GPU" else "CPU"}で動作"
+            ModelState.Loading -> "読み込み中"
+            else -> "使えません"
+        }
+        SettingsPage.SCREEN -> "訳の枠を透かさない：${if (opaque) "オン" else "オフ"}、訳の控え"
+        SettingsPage.SPEECH -> speech.label
+        SettingsPage.PERFORMANCE -> "同時に訳す数、スレッド、速さを測る"
+        SettingsPage.ABOUT -> "版と更新、通信とプライバシー"
+        SettingsPage.LICENSES -> "使っているモデルとソフトウェア"
+        SettingsPage.HOME -> ""
+    }
+    SettingsPage.entries.filter { it.group != null }.groupBy { it.group }.forEach { (group, pages) ->
+        Text(group ?: "", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Card(modifier = Modifier.fillMaxWidth()) {
+            pages.forEachIndexed { i, p ->
+                if (i > 0) HorizontalDivider()
+                Column(
+                    Modifier.fillMaxWidth().clickable { open(p) }.padding(horizontal = 16.dp, vertical = 12.dp),
+                ) {
+                    Text(p.title, style = MaterialTheme.typography.titleMedium)
+                    Text(summary(p), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
     }
 }
@@ -103,7 +174,6 @@ private fun ModelChooser(model: ModelState) {
     var refresh by remember { mutableStateOf(0) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("翻訳モデル", style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TranslationModel.entries.forEach { m ->
                     val present = remember(refresh, download) { m.isPresent(context) }

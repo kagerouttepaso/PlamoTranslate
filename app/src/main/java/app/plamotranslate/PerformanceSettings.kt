@@ -67,7 +67,6 @@ fun PerformanceCard(model: ModelState) {
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("パフォーマンス", style = MaterialTheme.typography.titleMedium)
             Text(
                 "翻訳が遅いときに、端末に合う組み合わせを探すための設定です。変えるとモデルを読み直します。" +
                     "「速さを測る」で比べてください。",
