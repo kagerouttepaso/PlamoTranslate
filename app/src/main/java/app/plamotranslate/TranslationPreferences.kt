@@ -20,7 +20,7 @@ class TranslationPreferences(context: Context) {
             ?: TranslationModel.SMALL
         set(value) = translation.edit().putString(KEY_MODEL, value.name).apply()
 
-    /** CPUの詳細設定（2026-11-08、15T Proで翻訳が極端に遅かったため。docs/設計/翻訳コア.md「パフォーマンスの設定」）。 */
+    /** CPUの詳細設定（2026-11-08、15T Proで翻訳が極端に遅かったため。docs/設計/翻訳コア.md「性能の設定」）。 */
     val cpuOptions: CpuOptions
         get() {
             val d = CpuOptions()

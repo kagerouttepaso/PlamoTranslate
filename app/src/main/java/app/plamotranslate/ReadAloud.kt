@@ -83,10 +83,10 @@ object ReadAloud {
     suspend fun supertonicVoices(context: Context): Int =
         if (!ModelCatalog.speechPresent(context)) 0 else supertonic(context.applicationContext).voices()
 
-    /** Supertonic 3を選んでいて、モデルがそろっていて、その言語を読めれば使う。それ以外は端末の読み上げ。 */
+    /** Supertonic 3を選んでいて、利用条件に同意し、モデルがそろっていて、その言語を読めれば使う。それ以外は端末の読み上げ。 */
     private fun speakerFor(app: Context, lang: String): Speaker {
         val preferences = SpeechPreferences(app)
-        if (preferences.engine == SpeechEngine.SUPERTONIC && ModelCatalog.speechPresent(app)) {
+        if (preferences.engine == SpeechEngine.SUPERTONIC && preferences.supertonicAgreed && ModelCatalog.speechPresent(app)) {
             val s = supertonic(app)
             if (s.supports(lang)) {
                 s.voice = preferences.voice

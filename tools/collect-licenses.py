@@ -22,7 +22,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "app", "src", "main", "assets", "licenses")
-CACHE = os.path.join(os.path.expanduser("~"), ".gradle", "caches", "modules-2", "files-2.1")
+CACHE = os.path.join(os.environ.get("GRADLE_USER_HOME") or os.path.join(os.path.expanduser("~"), ".gradle"), "caches", "modules-2", "files-2.1")
 
 
 def runtime_dependencies():

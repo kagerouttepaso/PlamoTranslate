@@ -1,6 +1,8 @@
 package app.plamotranslate
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -56,6 +58,7 @@ fun SpeechCard() {
     var steps by remember { mutableStateOf(preferences.steps) }
     var refresh by remember { mutableStateOf(0) }
     var askConsent by remember { mutableStateOf(false) }
+    var agreed by remember { mutableStateOf(preferences.supertonicAgreed) }
     val present = remember(refresh, download) { ModelCatalog.speechPresent(context) }
     // 声の数はモデルを読み込むと分かる。Supertonic 3を選んでいてモデルがあれば、開いたときに読み込む
     var voices by remember { mutableStateOf(0) }
@@ -109,11 +112,23 @@ fun SpeechCard() {
                     OutlinedButton(enabled = !busy, onClick = { askConsent = true }) { Text("Supertonic 3をダウンロード") }
                     if (busy) Text("ほかのモデルのダウンロードが終わると押せます", style = MaterialTheme.typography.bodySmall)
                 }
+                // 前の版でモデルを取った人は、同意するまで端末の読み上げで読む
+                if (present && !agreed) {
+                    Text(
+                        "Supertonic 3 を使うには、利用条件への同意が要ります。同意するまでは端末の読み上げで読みます。",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedButton(onClick = { askConsent = true }) { Text("利用条件を読んで同意する") }
+                }
                 if (askConsent) {
                     SupertonicConsentDialog(
+                        downloading = !present,
                         onAgree = {
                             askConsent = false
-                            ModelDownloads.start(context, ModelBundle.SPEECH, onCompleted = { refresh++ })
+                            preferences.supertonicAgreed = true
+                            agreed = true
+                            if (!present) ModelDownloads.start(context, ModelBundle.SPEECH, onCompleted = { refresh++ })
                         },
                         onDismiss = { askConsent = false },
                     )
@@ -189,16 +204,17 @@ fun SpeechCard() {
  * BigScience Open RAIL-M License 第5項は、アプリの作者に、使う人へ用途の制限（Attachment A）を守らせるよう求める。
  */
 @Composable
-private fun SupertonicConsentDialog(onAgree: () -> Unit, onDismiss: () -> Unit) {
+private fun SupertonicConsentDialog(downloading: Boolean, onAgree: () -> Unit, onDismiss: () -> Unit) {
     var fullText by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Supertonic 3 の利用条件") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // 項目が多く、横向きでは収まらないので、中身をスクロールできるようにする
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     "Supertonic 3（Supertone Inc.）は BigScience Open RAIL-M License のもとで使えます。" +
-                        "ダウンロードする前に、次の使い方をしないことに同意してください（ライセンスの Attachment A の要旨。正本は全文）。",
+                        "使う前に、次の使い方をしないことに同意してください（ライセンスの Attachment A の要旨。正本は全文）。",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
@@ -219,7 +235,7 @@ private fun SupertonicConsentDialog(onAgree: () -> Unit, onDismiss: () -> Unit) 
                 TextButton(onClick = { fullText = true }) { Text("ライセンスの全文") }
             }
         },
-        confirmButton = { TextButton(onClick = onAgree) { Text("同意してダウンロード") } },
+        confirmButton = { TextButton(onClick = onAgree) { Text(if (downloading) "同意してダウンロード" else "同意する") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("やめる") } },
     )
     if (fullText) LicenseTextDialog(LicenseText.OPENRAIL) { fullText = false }

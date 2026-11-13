@@ -30,6 +30,14 @@ class SpeechPreferences(context: Context) {
         get() = prefs.getFloat("speed", 1f)
         set(value) = prefs.edit().putFloat("speed", value).apply()
 
+    /**
+     * Supertonic 3 の利用条件（BigScience Open RAIL-M の用途の制限）に同意したか。同意するまで Supertonic 3 では読まない
+     * （第5項が、使う人に守らせるよう求める。0.8.0 までにモデルを取った人も、ここで同意を取る）。
+     */
+    var supertonicAgreed: Boolean
+        get() = prefs.getBoolean("supertonic_agreed", false)
+        set(value) = prefs.edit().putBoolean("supertonic_agreed", value).apply()
+
     /** Supertonic 3の音を作る段数（設定の画面のスライダー）。 */
     var steps: Int
         get() = prefs.getInt("steps", SupertonicSpeaker.DEFAULT_STEPS)

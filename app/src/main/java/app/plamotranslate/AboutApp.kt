@@ -38,7 +38,7 @@ import kotlinx.coroutines.withContext
 
 /*
  * 配布のための表示（docs/判断/2026-11-13_ライセンスの表示を同梱した全文と明記にする.md）。
- * - モデルはアプリに同梱せず、端末が配布元から取る。名前・作者・ライセンス名・元のモデルを明記し、全文かその置き場を示す。
+ * - モデルはアプリに同梱せず、端末が取り先から取る。名前・作者・ライセンス名・元のモデルと取り先を明記し、全文かその置き場を示す。
  * - アプリに組み込んだソフトウェアは、ライセンス文の全文を assets/licenses/ に同梱し、ここから読めるようにする（MIT・BSD・Apache-2.0 の条件）。
  *   全文の作り方は docs/手順/開発環境.md「ライセンス文を集め直す」。
  * - PLaMo Community License 第4条の「Built with PLaMo」の明示と、契約の写し（条文へのリンク）。
@@ -53,17 +53,20 @@ const val PLAMO_LICENSE_URL = "https://plamo.preferredai.jp/info/plamo-community
 const val PRIVACY_URL = "https://github.com/kagerouttepaso/PlamoTranslate/blob/main/PRIVACY.md"
 
 /** 同梱したライセンス文（assets/licenses/ の中のファイル名）。 */
-enum class LicenseText(val title: String, val asset: String) {
-    APACHE("Apache License 2.0（全文）", "apache-2.0.txt"),
-    NATIVE("組み込んだネイティブのライブラリ", "native.txt"),
-    MAVEN("Android のライブラリの一覧", "maven.txt"),
-    GOOGLE("ML Kit・Google のライブラリが使う第三者のソフトウェア", "google-third-party.txt"),
-    ONNXRUNTIME("ONNX Runtime が使う第三者のソフトウェア", "onnxruntime-third-party-notices.txt"),
-    OPENRAIL("BigScience Open RAIL-M License（Supertonic 3）", "supertonic-openrail-m.txt"),
-    FUNASR("FunASR Model Open Source License Agreement 1.1（SenseVoice）", "funasr-model-license.txt"),
+enum class LicenseText(val title: String, val asset: String, val software: Boolean) {
+    APACHE("Apache License 2.0（全文）", "apache-2.0.txt", software = true),
+    NATIVE("組み込んだネイティブのライブラリ", "native.txt", software = true),
+    MAVEN("Android のライブラリの一覧", "maven.txt", software = true),
+    GOOGLE("ML Kit・Google のライブラリが使う第三者のソフトウェア", "google-third-party.txt", software = true),
+    ONNXRUNTIME("ONNX Runtime が使う第三者のソフトウェア", "onnxruntime-third-party-notices.txt", software = true),
+    OPENRAIL("BigScience Open RAIL-M License（Supertonic 3）", "supertonic-openrail-m.txt", software = false),
+    FUNASR("FunASR Model Open Source License Agreement 1.1（SenseVoice）", "funasr-model-license.txt", software = false),
 }
 
-/** 端末が配布元から取るモデル。 */
+/**
+ * 端末がダウンロードするモデル。[url] は元のモデル（作者のページ）、[source] は端末が実際に取る先（変換した版から取るもの。
+ * 元のモデルと同じなら null）。取る先の正本は models/ModelCatalog.kt。
+ */
 private data class ModelNotice(
     val name: String,
     val role: String,
@@ -71,24 +74,29 @@ private data class ModelNotice(
     val license: String,
     val url: String,
     val text: LicenseText? = null,
+    val source: String? = null,
 )
 
 private val MODELS = listOf(
     ModelNotice(
         "PLaMo 3 Translate 0.8B・2B（GGUF）", "翻訳", "Preferred Networks",
         "PLaMo Community License", PLAMO_LICENSE_URL,
+        source = "https://huggingface.co/pfnet/plamo-3-translate-0.8b-GGUF",
     ),
     ModelNotice(
         "SenseVoice Small（sherpa-onnx 用の int8 版）", "音声認識", "Alibaba Group（FunAudioLLM）",
         "FunASR Model Open Source License Agreement 1.1", "https://huggingface.co/FunAudioLLM/SenseVoiceSmall", LicenseText.FUNASR,
+        source = "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
     ),
     ModelNotice(
         "Silero VAD", "話しているかの判定", "Silero Team（Copyright (c) 2020-present Silero Team）",
         "MIT License", "https://github.com/snakers4/silero-vad/blob/master/LICENSE",
+        source = "https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models",
     ),
     ModelNotice(
         "Supertonic 3（sherpa-onnx 用の int8 版）", "読み上げ（選んだときだけ）", "Supertone Inc.（Copyright (c) 2026 Supertone Inc.）",
         "BigScience Open RAIL-M License", "https://huggingface.co/Supertone/supertonic-3", LicenseText.OPENRAIL,
+        source = "https://huggingface.co/csukuangfj2/sherpa-onnx-supertonic-3-tts-int8-2026-05-11",
     ),
     ModelNotice(
         "PP-OCRv6 manga", "漫画の文字の検出と認識", "Kellenok（元は PaddlePaddle の PaddleOCR。Manga109-s で学習）",
@@ -98,6 +106,7 @@ private val MODELS = listOf(
         "PP-OCRv5 korean（korean_PP-OCRv5_mobile_rec の ONNX 版）", "韓国語の文字の認識",
         "PaddlePaddle（PaddleOCR）。ONNX への変換は Wycliffe Associates（DocScanner）",
         "Apache License 2.0", "https://huggingface.co/PaddlePaddle/korean_PP-OCRv5_mobile_rec", LicenseText.APACHE,
+        source = "https://huggingface.co/wycliffeassociates/docscanner-ocr",
     ),
 )
 
@@ -200,7 +209,12 @@ fun LicensesCard() {
                     Text("ライセンス：${m.license}", style = MaterialTheme.typography.bodySmall)
                     Row {
                         TextButton(onClick = { openUrl(context, m.url) }, contentPadding = PaddingValues(0.dp)) {
-                            Text("配布元", style = MaterialTheme.typography.labelSmall)
+                            Text("元のモデル", style = MaterialTheme.typography.labelSmall)
+                        }
+                        m.source?.let { src ->
+                            TextButton(onClick = { openUrl(context, src) }, contentPadding = PaddingValues(start = 16.dp)) {
+                                Text("取り先", style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                         m.text?.let { t ->
                             TextButton(onClick = { shown = t }, contentPadding = PaddingValues(start = 16.dp)) {
@@ -219,7 +233,7 @@ fun LicensesCard() {
                 }
             }
             Text("ライセンスの全文", style = MaterialTheme.typography.titleSmall)
-            LicenseText.entries.filter { it != LicenseText.OPENRAIL && it != LicenseText.FUNASR }.forEach { t ->
+            LicenseText.entries.filter { it.software }.forEach { t ->
                 TextButton(onClick = { shown = t }, contentPadding = PaddingValues(0.dp)) {
                     Text(t.title, style = MaterialTheme.typography.labelMedium)
                 }

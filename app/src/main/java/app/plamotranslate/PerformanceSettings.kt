@@ -31,7 +31,7 @@ import kotlinx.coroutines.launch
 /*
  * パフォーマンスの設定（2026-11-08）。15T Pro（MediaTek Dimensity 9400+）で、アプリ内の翻訳の生成が
  * 0.3〜0.8トークン/秒しか出なかった（同じ端末のCLIでは52〜65トークン/秒）。原因の候補を切り替えて試せるようにし、
- * Snapdragon以外の端末の調整にも使えるよう、正式な設定として残す（作者の判断）。docs/設計/翻訳コア.md「パフォーマンスの設定」。
+ * Snapdragon以外の端末の調整にも使えるよう、正式な設定として残す（作者の判断）。docs/設計/翻訳コア.md「性能の設定」。
  */
 
 private val THREAD_CHOICES = listOf(0, 1, 2, 4, 6, 8)

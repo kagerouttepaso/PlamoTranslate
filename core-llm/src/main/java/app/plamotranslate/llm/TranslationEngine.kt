@@ -15,7 +15,7 @@ class TranslationException(message: String) : Exception(message)
 
 /**
  * CPUで動かすときの細かい設定（2026-11-08、15T Pro（MediaTek）でアプリ内の生成がCLIの約200分の1に落ちたため、
- * 原因の候補を設定の画面で切り替えて試せるようにした。docs/設計/翻訳コア.md「パフォーマンスの設定」）。既定は今までの動き。
+ * 原因の候補を設定の画面で切り替えて試せるようにした。docs/設計/翻訳コア.md「性能の設定」）。既定は今までの動き。
  */
 data class CpuOptions(
     /** 0なら自動（コア数−2、最大6）。 */
