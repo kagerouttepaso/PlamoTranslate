@@ -139,6 +139,7 @@ class SqlitePersistentCache private constructor(context: Context) : PersistentCa
     companion object {
         private const val DB_NAME = "translation_cache.db"
         /** 2：鍵からモデルを外し、モデルの確かさ（quality）の列を足した。3：鍵の範囲に form を足した（[CacheScope.id]）。 */
+        /** 訳の確かさ（TranslationModel.quality）の値を変えたら上げる（残った訳の確かさが食い違うため）。 */
         private const val DB_VERSION = 3
         private const val TABLE = "translations"
 

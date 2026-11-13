@@ -33,10 +33,11 @@ data class ModelFile(
  * （2026-11-06、作者の要望「2Bも選べるようにして、翻訳品質と速度の違いをチェックしたい」）。
  * 量子化はどちらもQ4_K_Mにそろえ、比べるときに大きさの違いだけが効くようにする。
  */
-enum class TranslationModel(val label: String, val note: String, val file: ModelFile) {
+enum class TranslationModel(val label: String, val note: String, val quality: Int, val file: ModelFile) {
     SMALL(
         "0.8B",
         "速い。慣用句や韓国語の口語で意味を取り違えやすい",
+        quality = 0,
         ModelFile(
             label = "翻訳モデル（PLaMo 3 Translate 0.8B）",
             url = "https://huggingface.co/pfnet/plamo-3-translate-0.8b-GGUF/resolve/e10c327b7a7ce84ffc427cb4b09360b781429fda/plamo-3-translate-0.8b-Q4_K_M.gguf",
@@ -48,6 +49,7 @@ enum class TranslationModel(val label: String, val note: String, val file: Model
     LARGE(
         "2B",
         "訳が正確。0.8Bの約2.5倍遅い（短い文で0.3〜1.4秒）",
+        quality = 1,
         ModelFile(
             label = "翻訳モデル（PLaMo 3 Translate 2B）",
             url = "https://huggingface.co/pfnet/plamo-3-translate-2b-GGUF/resolve/d44589ecd5287cd64452e9cd1e2cfdad904fe216/plamo-3-translate-2b-Q4_K_M.gguf",
@@ -62,10 +64,11 @@ enum class TranslationModel(val label: String, val note: String, val file: Model
 
     /**
      * 訳の控えで使う、訳したモデル（docs/設計/翻訳コア.md「控え」）。識別子は重みの SHA-256 の先頭、
-     * 訳の確かさ（[ModelOrigin.quality]、大きいほど確か）は並びの順で、控えは確かなモデルの訳を優先する。
-     * 並びは訳の確かさの低いもの（小さいモデル）から高いものの順にしておくこと。
+     * 訳の確かさ（[quality]、大きいほど確か）は端末のデータベースに残るので、並び順でなく値で持つ。控えは確かなモデルの訳を優先する。
+     * モデルを足すときは既存の値を変えずに値を割り当てる。既存の値を変えるなら、残った訳の確かさが食い違うので
+     * SqlitePersistentCache の DB_VERSION を上げて控えを作り直す。
      */
-    val origin: ModelOrigin get() = ModelOrigin(file.sha256.take(16), ordinal)
+    val origin: ModelOrigin get() = ModelOrigin(file.sha256.take(16), quality)
 }
 
 /**

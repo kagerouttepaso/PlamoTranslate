@@ -81,7 +81,7 @@ class ScreenTranslateService : Service() {
     private val preferences by lazy { ScreenPreferences(this) }
     private val ocr by lazy { MultiScriptOcr(ModelCatalog.ocrDir(this)) }
 
-    /** 翻訳のメモリの控え。1回の翻訳ごとに開く翻訳の流れで共有する（訳したモデルが変わったら捨てる）。 */
+    /** 翻訳のメモリの控え。1回の翻訳ごとに開く翻訳の流れで共有する（モデルを切り替えても捨てず、確かさで選ぶ。永続の控えを消したら捨てる）。 */
     private val memoryCache = MemoryCache()
     private var debugReceiver: BroadcastReceiver? = null
     private var orientation = Configuration.ORIENTATION_UNDEFINED
