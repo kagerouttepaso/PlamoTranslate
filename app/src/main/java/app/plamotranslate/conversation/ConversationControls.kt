@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -36,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -51,8 +53,11 @@ import app.plamotranslate.llm.Language
  */
 
 /**
- * 操作の欄：開始・停止、真ん中の区切るボタン（周りの輪がマイクの音量）、表示モード、自分と相手の言語、ログ、翻訳モデル、状態の表示。
- * 区切るボタンは対面の2人のどちらからも押しやすいよう、欄の真ん中に丸く置く。
+ * 操作の欄。3つの列に分け、真ん中に大きな丸い区切るボタン（周りの輪がマイクの音量）を置く。
+ * 区切るボタンは会話中にいちばん押すので、対面の2人のどちらからも押しやすいよう、欄の高さいっぱいに大きくする。
+ * - 左の列：話すこと（開始・停止、自分と相手の言語）
+ * - 右の列：見せ方とそのほか（対面・1画面、ログ、翻訳モデル）
+ * その下に状態を1行出す。
  */
 @Composable
 internal fun Controls(state: ConversationUiState, model: ModelState, actions: ConversationActions) {
@@ -65,28 +70,27 @@ internal fun Controls(state: ConversationUiState, model: ModelState, actions: Co
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 val ready = state.asr == AsrState.Ready && model is ModelState.Ready
                 if (state.listening) {
-                    OutlinedButton(onClick = actions.stop) { Text("停止") }
+                    OutlinedButton(onClick = actions.stop, modifier = Modifier.fillMaxWidth()) { Text("停止") }
                 } else {
-                    Button(onClick = actions.start, enabled = ready) { Text("開始") }
+                    Button(onClick = actions.start, enabled = ready, modifier = Modifier.fillMaxWidth()) { Text("開始") }
                 }
+                SelfMenu(state.self, actions.self)
+                PartnerMenu(state.mode, state.self, actions.partnerMode)
             }
             CutButton(state, actions.cut)
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End)) {
-                ViewMode.entries.forEach { mode ->
-                    FilterChip(selected = state.viewMode == mode, onClick = { actions.viewMode(mode) }, label = { Text(mode.label) })
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.End) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    ViewMode.entries.forEach { mode ->
+                        FilterChip(selected = state.viewMode == mode, onClick = { actions.viewMode(mode) }, label = { Text(mode.label) })
+                    }
                 }
+                LogMenu(enabled = state.turns.isNotEmpty(), actions)
+                // 翻訳モデルをその場で切り替える（2026-11-06、作者の要望）
+                ModelSwitch()
             }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            SelfMenu(state.self, actions.self)
-            PartnerMenu(state.mode, state.self, actions.partnerMode)
-            LogMenu(enabled = state.turns.isNotEmpty(), actions)
-            Spacer(Modifier.weight(1f))
-            // 翻訳モデルをその場で切り替える（2026-11-06、作者の要望）
-            ModelSwitch()
         }
         val status = when {
             state.asr is AsrState.Missing -> "音声認識のモデルがありません。トップ画面に戻ると出る「モデルの準備」でダウンロードしてください"
@@ -115,8 +119,10 @@ internal fun Controls(state: ConversationUiState, model: ModelState, actions: Co
 @Composable
 private fun SelfMenu(self: Language, onSelect: (Language) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    Box {
-        OutlinedButton(onClick = { open = true }, contentPadding = MenuButtonPadding) { Text("自分：${PartnerMode(self).short()} ▾") }
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = { open = true }, contentPadding = MenuButtonPadding, modifier = Modifier.fillMaxWidth()) {
+            Text("自分：${PartnerMode(self).short()} ▾", maxLines = 1)
+        }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             CONVERSATION_LANGUAGES.forEach { lang ->
                 DropdownMenuItem(
@@ -135,8 +141,10 @@ private fun SelfMenu(self: Language, onSelect: (Language) -> Unit) {
 @Composable
 private fun PartnerMenu(mode: PartnerMode, self: Language, onSelect: (PartnerMode) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    Box {
-        OutlinedButton(onClick = { open = true }, contentPadding = MenuButtonPadding) { Text("相手：${mode.short()} ▾") }
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = { open = true }, contentPadding = MenuButtonPadding, modifier = Modifier.fillMaxWidth()) {
+            Text("相手：${mode.short()} ▾", maxLines = 1)
+        }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             PartnerMode.choices(self).forEach { m ->
                 val label = m.label(self)
@@ -149,7 +157,7 @@ private fun PartnerMenu(mode: PartnerMode, self: Language, onSelect: (PartnerMod
     }
 }
 
-/** 自分・相手・ログ・翻訳モデルを1行に並べるので、ボタンの左右の余白を詰める。 */
+/** 自分・相手は左の列の幅に収めるので、ボタンの左右の余白を詰める。 */
 private val MenuButtonPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
 
 /** 会話ログの共有・保存と、画面の発話の消去。 */
@@ -169,6 +177,7 @@ private fun LogMenu(enabled: Boolean, actions: ConversationActions) {
 /**
  * 区切るボタン。押すと、今話している分を確定して次のカードにする（聞くのは続ける。docs/設計/会話翻訳.md「カードの区切り方」）。
  * 周りの輪はマイクの音量で、話していると判定している間は色を変える。聞いている間だけ押せる。
+ * 名前は自分と相手の両方の言語で出す。対面では相手の言語を上に逆さに、1画面では自分の言語の下に小さく出す。
  */
 @Composable
 private fun CutButton(state: ConversationUiState, onCut: () -> Unit) {
@@ -176,9 +185,9 @@ private fun CutButton(state: ConversationUiState, onCut: () -> Unit) {
     val c = MaterialTheme.colorScheme
     val ring = if (state.live != null) c.primary else c.outline
     val track = c.surfaceVariant
-    Box(Modifier.padding(horizontal = 8.dp).size(76.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.padding(horizontal = 10.dp).size(132.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
-            val stroke = 5.dp.toPx()
+            val stroke = 7.dp.toPx()
             val inset = stroke / 2
             val arc = Size(size.width - stroke, size.height - stroke)
             drawArc(track, 0f, 360f, false, Offset(inset, inset), arc, style = Stroke(stroke))
@@ -187,11 +196,35 @@ private fun CutButton(state: ConversationUiState, onCut: () -> Unit) {
         FilledIconButton(
             onClick = onCut,
             enabled = state.listening,
-            modifier = Modifier.size(62.dp),
+            modifier = Modifier.size(112.dp),
             shape = CircleShape,
             colors = IconButtonDefaults.filledIconButtonColors(containerColor = c.primary, contentColor = c.onPrimary),
         ) {
-            Text("区切る", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            val self = cutLabel(state.self)
+            val partner = cutLabel(state.partner)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (state.viewMode == ViewMode.FACE_TO_FACE) {
+                    // 対面では相手が向かいから読むので、相手の言語を上に逆さに出す
+                    Text(partner, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.rotate(180f))
+                    HorizontalDivider(Modifier.width(56.dp).padding(vertical = 4.dp), color = c.onPrimary.copy(alpha = 0.5f))
+                    Text(self, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                } else {
+                    Text(self, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(partner, style = MaterialTheme.typography.labelLarge)
+                }
+            }
         }
     }
+}
+
+/**
+ * 区切るボタンの、その言語での名前。相手も押すので、自分と相手の両方の言語で出す（作者の要望）。
+ * 「今話し終えたので次へ」が伝わる短い語にする。会話で選べる言語（[app.plamotranslate.pipeline.conversation.CONVERSATION_LANGUAGES]）だけを持つ。
+ */
+private fun cutLabel(language: Language): String = when (language) {
+    Language.KO -> "여기까지"
+    Language.EN -> "Done"
+    Language.ZH -> "说完了"
+    Language.ZH_HANT -> "說完了"
+    else -> "区切る"
 }
