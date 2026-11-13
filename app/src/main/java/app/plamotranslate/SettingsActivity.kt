@@ -52,6 +52,7 @@ import app.plamotranslate.models.DownloadState
 import app.plamotranslate.models.ModelBundle
 import app.plamotranslate.models.ModelDownloads
 import app.plamotranslate.models.TranslationModel
+import androidx.compose.ui.res.stringResource
 
 /**
  * 設定（docs/設計/アーキテクチャ.md「設定の画面」）。トップに項目のまとまりを並べ、押すとそのページへ進む階層にする
@@ -290,7 +291,7 @@ private fun OpaqueOverlayCard() {
                     // 有効なのにつながっていない：端末に止められて切り離された（REDMAGICのゲーム支援で確かめた。docs/資料/端末の能力.md）
                     Text(
                         "ユーザー補助は有効ですが、端末に止められて切れています（ゲームを開いたときなどに起きます）。" +
-                            "ユーザー補助の設定で「PLaMo翻訳（画面翻訳の訳の枠）」を一度オフにしてからオンにしてください。",
+                            "ユーザー補助の設定で「${stringResource(R.string.a11y_overlay_label)}」を一度オフにしてからオンにしてください。",
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -306,7 +307,7 @@ private fun OpaqueOverlayCard() {
                     Text(
                         "1. 「アプリ情報を開く」→ 右上の︙ →「制限付き設定を許可」（表示されない端末では飛ばす）\n" +
                             "2. 「ユーザー補助の設定を開く」→ ダウンロードしたアプリ（またはインストール済みのアプリ）→ " +
-                            "「PLaMo翻訳（画面翻訳の訳の枠）」をオン\n" +
+                            "「${stringResource(R.string.a11y_overlay_label)}」をオン\n" +
                             "3. 「デバイスのフル コントロール」の確認が出たら「許可」",
                         style = MaterialTheme.typography.bodySmall,
                     )

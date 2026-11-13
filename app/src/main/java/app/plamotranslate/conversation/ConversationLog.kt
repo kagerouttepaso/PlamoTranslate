@@ -27,7 +27,7 @@ object ConversationLog {
         append("- 言語：").append(mine.joinToString("・") { it.label }).append(" ⇄ ")
             .append(partners.joinToString("・") { it.label }.ifEmpty { "（なし）" }).append('\n')
         append("- 発話：").append(turns.size).append("件\n")
-        append("- PLaMo翻訳の端末内の音声認識と翻訳による。聞き違い・訳し違いを含むことがある\n")
+        append("- Mockingwordの端末内の音声認識と翻訳による。聞き違い・訳し違いを含むことがある\n")
         for (turn in turns) {
             val time = Instant.ofEpochMilli(turn.timeMillis).atZone(zone)
             val d = turn.direction

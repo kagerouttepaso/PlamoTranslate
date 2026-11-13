@@ -26,6 +26,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import app.plamotranslate.R
 
 /** GitHubのリリース1件。[apkSha256] はGitHubがアセットに付けるSHA-256（`digest`）。 */
 data class ReleaseInfo(
@@ -120,7 +121,7 @@ object AppUpdater {
                 if (apk.length() != release.apkSize) {
                     _state.value = UpdateState.Downloading(release, 0)
                     val file = ModelFile(
-                        label = "PLaMo翻訳 ${release.tag}",
+                        label = "${app.getString(R.string.app_name)} ${release.tag}",
                         url = release.apkUrl,
                         path = release.apkName,
                         size = release.apkSize,

@@ -57,6 +57,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
+import app.plamotranslate.R
 
 /**
  * 画面翻訳のフォアグラウンドサービス（docs/設計/画面翻訳.md、構成は docs/設計/画面翻訳.md）。
@@ -487,7 +488,7 @@ class ScreenTranslateService : Service() {
     private fun notifyIfDetached() {
         if (!preferences.opaqueOverlay || !OverlayAccessibilityService.isDetached(this)) return
         Log.w(TAG, "画面翻訳: ユーザー補助が有効なのにつながっていない")
-        val text = "ユーザー補助が切れています。ユーザー補助の設定で「PLaMo翻訳」を一度オフにしてからオンにしてください"
+        val text = "ユーザー補助が切れています。ユーザー補助の設定で「${getString(R.string.a11y_overlay_label)}」を一度オフにしてからオンにしてください"
         overlay?.showStatus(text)
         Toast.makeText(this, text, Toast.LENGTH_LONG).show()
     }

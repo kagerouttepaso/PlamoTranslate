@@ -52,6 +52,7 @@ import app.plamotranslate.models.ModelDownloads
 import app.plamotranslate.models.ModelBundle
 import app.plamotranslate.models.needsSetup
 import app.plamotranslate.screen.ScreenTranslateService
+import androidx.compose.ui.res.stringResource
 
 
 /**
@@ -142,7 +143,7 @@ private fun HomeScreen(onToggleScreenTranslate: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("PLaMo翻訳", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 AssistChip(
                     onClick = { context.startActivity(Intent(context, SettingsActivity::class.java)) },
                     label = { Text("${model.shortLabel()}　⚙") },
@@ -254,7 +255,7 @@ private fun SetupScreen(state: DownloadState, onCompleted: () -> Unit) {
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("PLaMo翻訳", style = MaterialTheme.typography.headlineMedium)
+            Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
             Text("最初にモデルを準備します", style = MaterialTheme.typography.titleMedium)
             when (state) {
                 is DownloadState.Idle, is DownloadState.Failed -> {
