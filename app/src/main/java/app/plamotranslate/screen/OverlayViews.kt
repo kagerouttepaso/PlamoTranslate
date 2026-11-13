@@ -16,6 +16,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowInsets
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -262,7 +263,9 @@ private fun absoluteParams(rect: Rect, flags: Int, type: Int = WindowManager.Lay
 
 /**
  * 訳を元の文字の位置に重ねる（docs/設計/画面翻訳.md「訳文の重ね表示」）。
- * 訳1つにつき小さな窓を1つ置く。全画面の窓にすると下のアプリを操作できなくなるため。
+ * 訳の枠は全部、画面全体を覆う1つの触れない窓（[layer]）の中に並べる。窓の数は枠の数に依らず1つにする
+ * （2026-11-13。それまでは枠1つに窓1つを置いていて、訳す単位の多い画面で REDMAGIC の「1つのアプリの窓が60を超えたら
+ * System.exit する」決まりに当たり、画面翻訳中にアプリが終わった。docs/資料/端末の能力.md）。
  *
  * 訳の枠は触れても反応せず、触れた操作は奥のアプリへそのまま届く（2026-11-12、作者の指摘「訳をタップすると1つだけ消える機能より、
  * 字幕の上をスワイプして奥のDiscordの投稿をスクロールできる方が嬉しい。消すのは浮遊ボタンで一括でよい」）。
@@ -276,8 +279,10 @@ class TranslationOverlay(private val context: Context, private val windowManager
     private val boxes = mutableListOf<View>()
     private val boxRects = mutableListOf<Rect>()
 
-    // 枠ごとに置いた先（ユーザー補助のサービスの WindowManager か、自分の WindowManager）。消すときに同じ先から外す
-    private val boxHosts = mutableListOf<WindowManager>()
+    // 訳の枠を並べる、画面全体を覆う1つの触れない窓と、それを置いた先（ユーザー補助のサービスの WindowManager か、自分の
+    // WindowManager）。枠を出している間だけ置き、消すときに同じ先から外す
+    private var layer: FrameLayout? = null
+    private var layerHost: WindowManager? = null
     private var statusView: TextView? = null
 
     /**
@@ -294,7 +299,7 @@ class TranslationOverlay(private val context: Context, private val windowManager
 
     /** 訳の枠を一時的に隠す・戻す（枠の下の画面をのぞくとき）。 */
     fun setBoxesVisible(visible: Boolean) {
-        boxes.forEach { it.visibility = if (visible) View.VISIBLE else View.INVISIBLE }
+        layer?.visibility = if (visible) View.VISIBLE else View.INVISIBLE
     }
 
     /** 通り抜ける操作が捨てられない、窓の不透明度の上限。 */
@@ -307,12 +312,17 @@ class TranslationOverlay(private val context: Context, private val windowManager
 
     /** [slots] の位置に空の訳の枠を並べる。[status] は画面上部の小さな表示。 */
     fun show(slots: List<OverlaySlot>, status: String) {
-        clear()
+        clearBoxes()
         // ユーザー補助の重ね表示なら不透明のまま操作を通せる。窓はそのサービスの WindowManager から置く
         val a11y = if (opaqueWithAccessibility()) OverlayAccessibilityService.instance else null
         val host = a11y?.getSystemService(WindowManager::class.java) ?: windowManager
         val viewContext: Context = a11y ?: context
         val type = if (a11y != null) WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY else WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        val layer = layerFor(host, viewContext, type, alpha = if (a11y != null) 1f else passThroughAlpha)
+        if (layer == null) {
+            showStatus(status)
+            return
+        }
         for (slot in slots) {
             // 吹き出しまで広げた枠の横書きは、行を真ん中に寄せる
             val box = if (slot.vertical) VerticalTextView(viewContext) else HorizontalTextView(viewContext, center = slot.bubble)
@@ -328,17 +338,38 @@ class TranslationOverlay(private val context: Context, private val windowManager
                     box.setHalo(slot.colors.background)
                 }
             }
+            // 窓は画面の左上に置くので、枠は画面の座標のまま並べる
             val rect = OverlayStyle.boxRect(context, slot)
-            val params = absoluteParams(rect, WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE, type).apply {
-                alpha = if (a11y != null) 1f else passThroughAlpha
-            }
-            runCatching { host.addView(box, params) }.onFailure { return@onFailure }.onSuccess {
-                boxes += box
-                boxRects += rect
-                boxHosts += host
-            }
+            layer.addView(box, FrameLayout.LayoutParams(rect.width(), rect.height()))
+            box.x = rect.left.toFloat()
+            box.y = rect.top.toFloat()
+            boxes += box
+            boxRects += rect
         }
         showStatus(status)
+    }
+
+    /**
+     * 枠を並べる窓。前の窓が同じ先・同じ Context にあれば、大きさ（画面の向きが変わったとき）と不透明度を合わせて使い回し、
+     * 無ければ置き直す。置けなければ null（枠は出さない）。
+     */
+    private fun layerFor(host: WindowManager, viewContext: Context, type: Int, alpha: Float): FrameLayout? {
+        val screen = windowManager.currentWindowMetrics.bounds
+        val params = absoluteParams(Rect(0, 0, screen.width(), screen.height()), WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE, type)
+            .apply { this.alpha = alpha }
+        val current = layer
+        if (current != null && layerHost === host && current.context === viewContext) {
+            if (runCatching { host.updateViewLayout(current, params) }.isSuccess) return current
+        }
+        removeLayer()
+        val created = FrameLayout(viewContext)
+        return runCatching { host.addView(created, params) }
+            .onFailure { Logs.w("画面翻訳: 訳の枠の窓を置けませんでした", it) }
+            .map {
+                layer = created
+                layerHost = host
+                created
+            }.getOrNull()
     }
 
     /** 自分が画面に出している範囲（訳の枠と上部の小さな表示）。画面が変わったかを見るとき、ここは比べない。 */
@@ -397,15 +428,26 @@ class TranslationOverlay(private val context: Context, private val windowManager
         view.text = "$text　（タップで消す）"
     }
 
+    /** 訳の枠と上部の小さな表示を消し、枠の窓も外す。 */
     fun clear() {
-        // 外せなかった枠は画面に残るので、記録する（2026-11-12、消したはずの訳の枠が撮影に写ったことがあった）
-        boxes.forEachIndexed { i, box ->
-            runCatching { boxHosts[i].removeView(box) }.onFailure { Logs.w("画面翻訳: 訳の枠を外せませんでした", it) }
-        }
-        boxes.clear()
-        boxRects.clear()
-        boxHosts.clear()
+        clearBoxes()
+        removeLayer()
         statusView?.let { runCatching { windowManager.removeView(it) } }
         statusView = null
+    }
+
+    /** 枠だけを消す（窓は次の枠に使い回す）。 */
+    private fun clearBoxes() {
+        layer?.removeAllViews()
+        layer?.visibility = View.VISIBLE
+        boxes.clear()
+        boxRects.clear()
+    }
+
+    private fun removeLayer() {
+        // 外せなかった窓は画面に残るので、記録する（2026-11-12、消したはずの訳の枠が撮影に写ったことがあった）
+        layer?.let { v -> runCatching { layerHost?.removeView(v) }.onFailure { Logs.w("画面翻訳: 訳の枠の窓を外せませんでした", it) } }
+        layer = null
+        layerHost = null
     }
 }
