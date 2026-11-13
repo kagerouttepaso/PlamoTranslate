@@ -263,9 +263,11 @@ private fun absoluteParams(rect: Rect, flags: Int, type: Int = WindowManager.Lay
 
 /**
  * 訳を元の文字の位置に重ねる（docs/設計/画面翻訳.md「訳文の重ね表示」）。
- * 訳の枠は全部、画面全体を覆う1つの触れない窓（[layer]）の中に並べる。窓の数は枠の数に依らず1つにする
+ * 訳の枠は全部、枠全体を囲む長方形の1つの触れない窓（[layer]）の中に並べる。窓の数は枠の数に依らず1つにする
  * （2026-11-13。それまでは枠1つに窓1つを置いていて、訳す単位の多い画面で REDMAGIC の「1つのアプリの窓が60を超えたら
  * System.exit する」決まりに当たり、画面翻訳中にアプリが終わった。docs/資料/端末の能力.md）。
+ * 窓を画面全体にしないのは、ほかのアプリから見て覆われる範囲（触れた操作に「覆われている」印が付く範囲）を、枠のある所までに
+ * とどめるため。
  *
  * 訳の枠は触れても反応せず、触れた操作は奥のアプリへそのまま届く（2026-11-12、作者の指摘「訳をタップすると1つだけ消える機能より、
  * 字幕の上をスワイプして奥のDiscordの投稿をスクロールできる方が嬉しい。消すのは浮遊ボタンで一括でよい」）。
@@ -279,8 +281,8 @@ class TranslationOverlay(private val context: Context, private val windowManager
     private val boxes = mutableListOf<View>()
     private val boxRects = mutableListOf<Rect>()
 
-    // 訳の枠を並べる、画面全体を覆う1つの触れない窓と、それを置いた先（ユーザー補助のサービスの WindowManager か、自分の
-    // WindowManager）。枠を出している間だけ置き、消すときに同じ先から外す
+    // 訳の枠を並べる、枠全体を囲む1つの触れない窓と、それを置いた先（ユーザー補助のサービスの WindowManager か、自分の
+    // WindowManager）。枠を出すときに置き、消すとき（撮る前・取り消し）に同じ先から外す
     private var layer: FrameLayout? = null
     private var layerHost: WindowManager? = null
     private var statusView: TextView? = null
@@ -312,63 +314,56 @@ class TranslationOverlay(private val context: Context, private val windowManager
 
     /** [slots] の位置に空の訳の枠を並べる。[status] は画面上部の小さな表示。 */
     fun show(slots: List<OverlaySlot>, status: String) {
-        clearBoxes()
+        clear()
         // ユーザー補助の重ね表示なら不透明のまま操作を通せる。窓はそのサービスの WindowManager から置く
         val a11y = if (opaqueWithAccessibility()) OverlayAccessibilityService.instance else null
         val host = a11y?.getSystemService(WindowManager::class.java) ?: windowManager
         val viewContext: Context = a11y ?: context
         val type = if (a11y != null) WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY else WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        val layer = layerFor(host, viewContext, type, alpha = if (a11y != null) 1f else passThroughAlpha)
-        if (layer == null) {
-            showStatus(status)
-            return
-        }
-        for (slot in slots) {
-            // 吹き出しまで広げた枠の横書きは、行を真ん中に寄せる
-            val box = if (slot.vertical) VerticalTextView(viewContext) else HorizontalTextView(viewContext, center = slot.bubble)
-            // 元の画面の背景色と文字色にそろえる（2026-11-05、作者の要望）。太字と背景色の縁取りで読みやすくする（OverlayStyle）
-            box.setBackgroundColor(slot.colors.background)
-            when (box) {
-                is VerticalTextView -> {
-                    box.textColor = slot.colors.text
-                    box.setHalo(slot.colors.background)
+        val rects = slots.map { OverlayStyle.boxRect(context, it) }
+        val layer = placeLayer(rects, host, viewContext, type, alpha = if (a11y != null) 1f else passThroughAlpha)
+        if (layer != null) {
+            val origin = layer.second
+            for ((slot, rect) in slots.zip(rects)) {
+                // 吹き出しまで広げた枠の横書きは、行を真ん中に寄せる
+                val box = if (slot.vertical) VerticalTextView(viewContext) else HorizontalTextView(viewContext, center = slot.bubble)
+                // 元の画面の背景色と文字色にそろえる（2026-11-05、作者の要望）。太字と背景色の縁取りで読みやすくする（OverlayStyle）
+                box.setBackgroundColor(slot.colors.background)
+                when (box) {
+                    is VerticalTextView -> {
+                        box.textColor = slot.colors.text
+                        box.setHalo(slot.colors.background)
+                    }
+                    is HorizontalTextView -> {
+                        box.textColor = slot.colors.text
+                        box.setHalo(slot.colors.background)
+                    }
                 }
-                is HorizontalTextView -> {
-                    box.textColor = slot.colors.text
-                    box.setHalo(slot.colors.background)
-                }
+                // 窓は枠全体を囲む長方形に置くので、枠はその左上からの位置に並べる
+                layer.first.addView(box, FrameLayout.LayoutParams(rect.width(), rect.height()))
+                box.x = (rect.left - origin.left).toFloat()
+                box.y = (rect.top - origin.top).toFloat()
+                boxes += box
+                boxRects += rect
             }
-            // 窓は画面の左上に置くので、枠は画面の座標のまま並べる
-            val rect = OverlayStyle.boxRect(context, slot)
-            layer.addView(box, FrameLayout.LayoutParams(rect.width(), rect.height()))
-            box.x = rect.left.toFloat()
-            box.y = rect.top.toFloat()
-            boxes += box
-            boxRects += rect
         }
         showStatus(status)
     }
 
     /**
-     * 枠を並べる窓。前の窓が同じ先・同じ Context にあれば、大きさ（画面の向きが変わったとき）と不透明度を合わせて使い回し、
-     * 無ければ置き直す。置けなければ null（枠は出さない）。
+     * 枠全体を囲む長方形に、枠を並べる窓を置く。窓と、その画面での範囲を返す。枠が無いか、置けなければ null（枠は出さない）。
      */
-    private fun layerFor(host: WindowManager, viewContext: Context, type: Int, alpha: Float): FrameLayout? {
-        val screen = windowManager.currentWindowMetrics.bounds
-        val params = absoluteParams(Rect(0, 0, screen.width(), screen.height()), WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE, type)
-            .apply { this.alpha = alpha }
-        val current = layer
-        if (current != null && layerHost === host && current.context === viewContext) {
-            if (runCatching { host.updateViewLayout(current, params) }.isSuccess) return current
-        }
-        removeLayer()
+    private fun placeLayer(rects: List<Rect>, host: WindowManager, viewContext: Context, type: Int, alpha: Float): Pair<FrameLayout, Rect>? {
+        if (rects.isEmpty()) return null
+        val bounds = Rect(rects.first()).apply { rects.drop(1).forEach { union(it) } }
+        val params = absoluteParams(bounds, WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE, type).apply { this.alpha = alpha }
         val created = FrameLayout(viewContext)
         return runCatching { host.addView(created, params) }
             .onFailure { Logs.w("画面翻訳: 訳の枠の窓を置けませんでした", it) }
             .map {
                 layer = created
                 layerHost = host
-                created
+                created to bounds
             }.getOrNull()
     }
 
@@ -430,24 +425,13 @@ class TranslationOverlay(private val context: Context, private val windowManager
 
     /** 訳の枠と上部の小さな表示を消し、枠の窓も外す。 */
     fun clear() {
-        clearBoxes()
-        removeLayer()
-        statusView?.let { runCatching { windowManager.removeView(it) } }
-        statusView = null
-    }
-
-    /** 枠だけを消す（窓は次の枠に使い回す）。 */
-    private fun clearBoxes() {
-        layer?.removeAllViews()
-        layer?.visibility = View.VISIBLE
-        boxes.clear()
-        boxRects.clear()
-    }
-
-    private fun removeLayer() {
         // 外せなかった窓は画面に残るので、記録する（2026-11-12、消したはずの訳の枠が撮影に写ったことがあった）
         layer?.let { v -> runCatching { layerHost?.removeView(v) }.onFailure { Logs.w("画面翻訳: 訳の枠の窓を外せませんでした", it) } }
         layer = null
         layerHost = null
+        boxes.clear()
+        boxRects.clear()
+        statusView?.let { runCatching { windowManager.removeView(it) } }
+        statusView = null
     }
 }
