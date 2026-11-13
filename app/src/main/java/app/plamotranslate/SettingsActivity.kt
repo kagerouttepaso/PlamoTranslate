@@ -41,6 +41,8 @@ import app.plamotranslate.models.DownloadState
 import app.plamotranslate.models.ModelBundle
 import app.plamotranslate.models.ModelDownloads
 import app.plamotranslate.models.TranslationModel
+import app.plamotranslate.diagnostics.DiagnosticsSettings
+import app.plamotranslate.diagnostics.diagnosticsSummary
 import app.plamotranslate.screen.ScreenTranslateSettings
 import app.plamotranslate.screen.screenTranslateSummary
 
@@ -93,6 +95,7 @@ private enum class SettingsPage(
     PERFORMANCE("性能", SettingsGroup.DETAIL, { "同時に訳す数、スレッド、速さを測る" }, {
         PerformanceCard(EngineHolder.state.collectAsStateWithLifecycle().value)
     }),
+    DIAGNOSTICS("不具合の記録", SettingsGroup.DETAIL, { diagnosticsSummary() }, { DiagnosticsSettings() }),
     ABOUT("このアプリについて", SettingsGroup.APP, { "版と更新、通信とプライバシー" }, { AboutPage() }),
     LICENSES("ライセンス", SettingsGroup.APP, { "使っているモデルとソフトウェア" }, { LicensesCard() }),
 }

@@ -12,19 +12,25 @@ import org.junit.Test
 class GpuGuardTest {
     @Test
     fun abnormalExitDisablesGpuAtOnce() {
-        assertEquals(Decision.Disable("落ちた"), GpuGuard.decide(pending = true, interruptions = 0, abnormal = true, exitLabel = "落ちた"))
+        assertEquals(Decision.Disable("落ちた"), GpuGuard.decide(pending = true, interruptions = 0, abnormal = true, intended = false, exitLabel = "落ちた"))
     }
 
     @Test
     fun otherStopsDisableGpuOnlyWhenRepeated() {
-        assertEquals(Decision.Retry(1), GpuGuard.decide(pending = true, interruptions = 0, abnormal = false, exitLabel = "強制停止"))
-        assertEquals(Decision.Retry(1), GpuGuard.decide(pending = true, interruptions = 0, abnormal = false, exitLabel = "記録なし"))
-        val second = GpuGuard.decide(pending = true, interruptions = 1, abnormal = false, exitLabel = "強制停止")
+        assertEquals(Decision.Retry(1), GpuGuard.decide(pending = true, interruptions = 0, abnormal = false, intended = false, exitLabel = "強制停止"))
+        assertEquals(Decision.Retry(1), GpuGuard.decide(pending = true, interruptions = 0, abnormal = false, intended = false, exitLabel = "記録なし"))
+        val second = GpuGuard.decide(pending = true, interruptions = 1, abnormal = false, intended = false, exitLabel = "強制停止")
         assertEquals(true, second is Decision.Disable)
     }
 
     @Test
+    fun intendedRestartKeepsGpu() {
+        // 設定を変えて起動し直したとき（killProcess）は、読み込み中でも GPU で落ちたとみなさない
+        assertEquals(Decision.Normal, GpuGuard.decide(pending = true, interruptions = 1, abnormal = false, intended = true, exitLabel = "シグナル9"))
+    }
+
+    @Test
     fun nothingPendingKeepsGpu() {
-        assertEquals(Decision.Normal, GpuGuard.decide(pending = false, interruptions = 1, abnormal = true, exitLabel = ""))
+        assertEquals(Decision.Normal, GpuGuard.decide(pending = false, interruptions = 1, abnormal = true, intended = false, exitLabel = ""))
     }
 }

@@ -4,8 +4,10 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import app.plamotranslate.diagnostics.ProcessExits
+import app.plamotranslate.diagnostics.ProcessMarks
 import app.plamotranslate.diagnostics.toProcessExit
 import app.plamotranslate.pipeline.diagnostics.ExitJudge
+import app.plamotranslate.pipeline.diagnostics.ExitTexts
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -41,11 +43,12 @@ internal object GpuGuard {
     }
 
     /**
-     * 前回の終わり方から決める。[abnormal] は印を書いたプロセスが異常終了したか（記録が見つからなければ false）。
+     * 前回の終わり方から決める。[abnormal] は印を書いたプロセスが異常終了したか（記録が見つからなければ false）、
+     * [intended] はアプリが意図して終えたか（設定を変えて起動し直したとき。[ProcessMarks.markIntendedExit]）。
      * [interruptions] はこれまでに続いた、異常終了でない中断の回数。
      */
-    fun decide(pending: Boolean, interruptions: Int, abnormal: Boolean, exitLabel: String): Decision = when {
-        !pending -> Decision.Normal
+    fun decide(pending: Boolean, interruptions: Int, abnormal: Boolean, intended: Boolean, exitLabel: String): Decision = when {
+        !pending || intended -> Decision.Normal
         abnormal -> Decision.Disable(exitLabel)
         interruptions + 1 >= MAX_INTERRUPTIONS -> Decision.Disable("GPUでの読み込みが${MAX_INTERRUPTIONS}回続けて終わりませんでした")
         else -> Decision.Retry(interruptions + 1)
@@ -66,10 +69,15 @@ internal object GpuGuard {
         }
         val pendingPid = preferences.gpuLoadingPid
         val exit = if (pendingPid != 0) ProcessExits.history(context, pendingPid, 1).firstOrNull()?.toProcessExit() else null
-        val exitLabel = exit?.let(ExitJudge::label) ?: "終わり方の記録なし"
+        val exitLabel = exit?.let(ExitTexts::label) ?: "終わり方の記録なし"
         val abnormal = exit?.let(ExitJudge::abnormal) ?: false
-        return when (val decision = decide(pendingPid != 0, preferences.gpuInterruptions, abnormal, exitLabel)) {
-            Decision.Normal -> true
+        val intended = exit?.let(ExitJudge::intended) ?: false
+        return when (val decision = decide(pendingPid != 0, preferences.gpuInterruptions, abnormal, intended, exitLabel)) {
+            Decision.Normal -> {
+                // 意図して起動し直したときは、読み込み中の印を片付ける
+                if (pendingPid != 0) preferences.gpuLoadingPid = 0
+                true
+            }
             is Decision.Retry -> {
                 Log.w(TAG, "GPU: 前回はGPUでの読み込み中に止まりました（$exitLabel）。もう一度GPUで試します")
                 preferences.gpuInterruptions = decision.interruptions
@@ -96,11 +104,6 @@ internal object GpuGuard {
         val preferences = TranslationPreferences(context)
         preferences.gpuLoadingPid = 0
         preferences.gpuInterruptions = 0
-    }
-
-    /** 自分でアプリを起動し直す前に呼ぶ。読み込み中に起動し直しても、GPUの失敗とみなさない。 */
-    fun forgetPending(context: Context) {
-        TranslationPreferences(context).gpuLoadingPid = 0
     }
 
     /** 設定の画面の「GPUをもう一度試す」。次の起動でGPUを使う。 */

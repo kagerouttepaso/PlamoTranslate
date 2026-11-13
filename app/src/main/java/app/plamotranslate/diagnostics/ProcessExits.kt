@@ -1,14 +1,17 @@
 package app.plamotranslate.diagnostics
 
 import android.app.ActivityManager
+import android.app.ActivityManager.RunningAppProcessInfo
 import android.app.ApplicationExitInfo
 import android.content.Context
 import app.plamotranslate.pipeline.diagnostics.ExitCause
 import app.plamotranslate.pipeline.diagnostics.ProcessExit
+import app.plamotranslate.pipeline.diagnostics.ProcessImportance
+import app.plamotranslate.pipeline.diagnostics.ProcessMark
 
 /**
  * OS が残す前回までの終わり方（[ApplicationExitInfo]）を読み、中核の [ProcessExit] に読み替える（外とつなぐ部品）。
- * 異常終了かどうかの判定は中核の `ExitJudge` が行う。
+ * 読み替えだけを行い、異常終了か・記録するかの判定は中核の `ExitJudge` が行う。
  */
 object ProcessExits {
     /** このアプリの終わり方の記録（新しい順）。[pid] が0なら全部、そうでなければそのプロセスの分だけ。 */
@@ -30,10 +33,14 @@ object ProcessExits {
         else -> ExitCause.OTHER
     }
 
-    /**
-     * 終わったとき本人が使っていたか。前面の画面・フォアグラウンドサービス（画面翻訳）・本人が気づく処理の重要度なら、使っていた。
-     */
-    fun inUse(importance: Int): Boolean = importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_PERCEPTIBLE
+    /** OS の重要度の値を読み替える。 */
+    fun importanceOf(importance: Int): ProcessImportance = when {
+        importance <= RunningAppProcessInfo.IMPORTANCE_FOREGROUND -> ProcessImportance.FOREGROUND
+        importance <= RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE -> ProcessImportance.FOREGROUND_SERVICE
+        importance <= RunningAppProcessInfo.IMPORTANCE_VISIBLE -> ProcessImportance.VISIBLE
+        importance <= RunningAppProcessInfo.IMPORTANCE_PERCEPTIBLE -> ProcessImportance.PERCEPTIBLE
+        else -> ProcessImportance.BACKGROUND
+    }
 }
 
 /** 中核の [ProcessExit] に読み替える。 */
@@ -42,7 +49,8 @@ fun ApplicationExitInfo.toProcessExit(): ProcessExit = ProcessExit(
     pid = pid,
     cause = ProcessExits.causeOf(reason),
     status = status,
-    inUse = ProcessExits.inUse(importance),
+    importance = ProcessExits.importanceOf(importance),
+    mark = ProcessMark.decode(processStateSummary),
     rawReason = reason,
     description = description.orEmpty(),
 )

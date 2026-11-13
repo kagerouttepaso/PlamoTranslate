@@ -3,9 +3,8 @@ package app.plamotranslate.diagnostics
 import android.app.ActivityManager.RunningAppProcessInfo
 import android.app.ApplicationExitInfo
 import app.plamotranslate.pipeline.diagnostics.ExitCause
+import app.plamotranslate.pipeline.diagnostics.ProcessImportance
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** OS の終わり方の値の読み替え（[ProcessExits]）。 */
@@ -23,9 +22,10 @@ class ProcessExitsTest {
     }
 
     @Test
-    fun 前面とフォアグラウンドサービスは使っている最中() {
-        assertTrue(ProcessExits.inUse(RunningAppProcessInfo.IMPORTANCE_FOREGROUND))
-        assertTrue(ProcessExits.inUse(RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE))
-        assertFalse(ProcessExits.inUse(RunningAppProcessInfo.IMPORTANCE_CACHED))
+    fun osの重要度を読み替える() {
+        assertEquals(ProcessImportance.FOREGROUND, ProcessExits.importanceOf(RunningAppProcessInfo.IMPORTANCE_FOREGROUND))
+        assertEquals(ProcessImportance.FOREGROUND_SERVICE, ProcessExits.importanceOf(RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE))
+        assertEquals(ProcessImportance.PERCEPTIBLE, ProcessExits.importanceOf(RunningAppProcessInfo.IMPORTANCE_PERCEPTIBLE))
+        assertEquals(ProcessImportance.BACKGROUND, ProcessExits.importanceOf(RunningAppProcessInfo.IMPORTANCE_CACHED))
     }
 }

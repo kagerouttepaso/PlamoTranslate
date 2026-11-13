@@ -248,8 +248,8 @@ private fun SettingSwitch(title: String, note: String, checked: Boolean, enabled
 
 /** トップ画面を開き直してからプロセスを終える。計算部分のライブラリは起動ごとに1回だけ読み込むため。 */
 private fun restartApp(context: android.content.Context) {
-    // 読み込みの途中で起動し直しても、GPUで落ちたとみなさない
-    GpuGuard.forgetPending(context)
+    // 意図して終えたことをOSの記録に残す。GPUの読み込み中でもGPUで落ちたとみなさず、不具合としても記録しない
+    app.plamotranslate.diagnostics.ProcessMarks.markIntendedExit(context)
     val intent = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return
     intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
     context.startActivity(intent)
