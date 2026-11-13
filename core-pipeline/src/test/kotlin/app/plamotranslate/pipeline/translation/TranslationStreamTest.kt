@@ -388,8 +388,8 @@ class TranslationStreamTest {
         val engine = FakeEngine(parallel = 2)
         val s = stream(engine)
         engine.onRequest = { n -> if (n == 1) s.cancel(listOf(2L)) }
-        s.submit(listOf(Segment(1, "One")))
-        s.submit(listOf(Segment(2, "Two"), Segment(3, "Three")))
+        // 1回で頼む（2回に分けると、2回目が1件目を訳し始めた後に届いたときに、やめる命令が空振りする）
+        s.submit(listOf(Segment(1, "One"), Segment(2, "Two"), Segment(3, "Three")))
         val updates = s.collectUntilDone(setOf(1, 3))
         assertEquals(setOf(1L, 3L), finals(updates).keys)
         assertTrue(engine.requests.none { it.contains("Two") })
