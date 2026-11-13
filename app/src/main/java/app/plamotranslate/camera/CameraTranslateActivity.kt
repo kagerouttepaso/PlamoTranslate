@@ -187,11 +187,10 @@ class CameraTranslateActivity : ComponentActivity() {
         }
     }
 
-    /** 一時停止したら、そのコマに映っている文を全部訳す。 */
+    /** 一時停止したら、読むのを止めてそのコマを固定する（見えている文は訳し続ける）。 */
     private fun togglePause() {
         paused = !paused
         translator.paused = paused
-        if (paused) translator.translateAll()
     }
 
     private fun chooseTableMode(table: Boolean) {

@@ -1,4 +1,4 @@
-package app.plamotranslate.camera
+package app.plamotranslate.pipeline.camera
 
 import app.plamotranslate.pipeline.layout.TextGrouper
 import org.junit.Assert.assertEquals
@@ -6,7 +6,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** カメラ翻訳の、文字列だけで決まる判定（docs/設計/カメラ翻訳.md）。枠の位置を使う判定は Rect が要るので実機で確かめる。 */
+/** カメラ翻訳の、文字列だけで決まる判定（docs/設計/カメラ翻訳.md）。枠の位置を使う判定は CameraSessionTest。 */
 class CameraTextTest {
     @Test
     fun keyKeepsOnlyLettersAndDigits() {
@@ -42,8 +42,8 @@ class CameraTextTest {
 
     @Test
     fun joinUsesSpacesOnlyForKoreanAndLatin() {
-        assertEquals("바람 세기", Paragraphs.join(listOf("바람", " 세기 ")))
-        assertEquals("Do not use near fire", Paragraphs.join(listOf("Do not use", "near fire")))
-        assertEquals("製品の上に登らないでください", Paragraphs.join(listOf("製品の上に登らないで", "ください")))
+        assertEquals("바람 세기", CameraText.join(listOf("바람", " 세기 ")))
+        assertEquals("Do not use near fire", CameraText.join(listOf("Do not use", "near fire")))
+        assertEquals("製品の上に登らないでください", CameraText.join(listOf("製品の上に登らないで", "ください")))
     }
 }

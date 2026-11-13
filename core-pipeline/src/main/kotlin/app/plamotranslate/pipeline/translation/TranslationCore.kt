@@ -85,3 +85,10 @@ class ParallelCore(override val slots: Int) : TranslationCore {
 
 /** 「同時に訳す数」の設定に合うコア。 */
 fun coreFor(parallel: Int): TranslationCore = if (parallel <= 1) SequentialCore() else ParallelCore(parallel)
+
+/**
+ * 流れに一度に渡しておくと、エンジンを無駄なく使える文の数（[coreFor] と同じ設定から決める）。1件ずつのコアは
+ * 最大 [SequentialCore.MAX_LINES] 行をつないで1回で訳すので、その数まで。同時に訳すコアは、同時に訳す数まで。
+ * 渡しておく数を絞って、その時点で選ぶ呼び出し（カメラ翻訳）が使う。コアの訳し方を呼ぶ側に漏らさないため、ここで決める。
+ */
+fun intakeFor(parallel: Int): Int = if (parallel <= 1) SequentialCore.MAX_LINES else parallel

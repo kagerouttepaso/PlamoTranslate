@@ -1,10 +1,10 @@
-package app.plamotranslate.camera
+package app.plamotranslate.pipeline.camera
 
 /**
  * カメラのコマごとに揺れる読み取りを、同じ文として扱うための比べ方（docs/設計/カメラ翻訳.md「追跡と多数決」）。
- * 行の多数決（[LineTracker]）と訳の控え（[LiveTranslator]）で共通に使う。
+ * 行の多数決（[LineTracker]）と訳の対応表（[CameraSession]）で共通に使う。
  */
-internal object TextSimilarity {
+object TextSimilarity {
     /** 控えや比較のキー。文字と数字だけを残して小文字にする（コマごとの空白・記号の読み揺れを吸収する）。 */
     fun key(text: String): String = text.filter { it.isLetterOrDigit() }.lowercase()
 
