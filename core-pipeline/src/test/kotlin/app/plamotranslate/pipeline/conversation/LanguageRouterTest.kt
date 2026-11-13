@@ -3,6 +3,7 @@ package app.plamotranslate.pipeline.conversation
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.isChinese
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LanguageRouterTest {
@@ -86,5 +87,15 @@ class LanguageRouterTest {
         assertEquals(Direction(Language.ZH, Language.KO, mine = true), router.route("你好", "zh"))
         assertEquals(Direction(Language.ZH_HANT, Language.KO, mine = true), router.route("多謝", "yue"))
         assertEquals(Direction(Language.KO, Language.ZH, mine = false), router.route("안녕", "ko"))
+    }
+
+    @Test
+    fun 音声認識に渡す会話の言語は自分と相手の言語() {
+        assertEquals(setOf("ja", "ko", "en"), LanguageRouter().speechLanguages.groups)
+        val fixed = LanguageRouter(PartnerMode.KOREAN)
+        assertEquals(setOf("ja", "ko"), fixed.speechLanguages.groups)
+        val chinese = LanguageRouter(PartnerMode.CHINESE_TRADITIONAL)
+        assertEquals(setOf("ja", "zh"), chinese.speechLanguages.groups)
+        assertTrue(chinese.speechLanguages.separateChinese)
     }
 }

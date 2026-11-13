@@ -33,11 +33,10 @@ sealed interface SpeechEvent {
  */
 interface SpeechEngine : AutoCloseable {
     /**
-     * 中国語・広東語を、日本語と別の話し手の言語として区別するか。会話の自分か相手が中国語のときだけ true にする
-     * （false なら漢字の多い日本語の聞き違いとして日本語と同じに扱い、話し手の交代とみなさない）。
-     * 聞いている最中に別のスレッドから変えてよい。
+     * 会話の言語（[SpeechLanguages]）。話し手の交代は、この言語の間で変わったときだけ見る。中国語・広東語は、
+     * 自分か相手が中国語のときだけ日本語と別の言語として扱う。聞いている最中に別のスレッドから変えてよい。
      */
-    var separateChinese: Boolean
+    var languages: SpeechLanguages
 
     /** 16kHz・モノラル・-1〜1のfloat。 */
     fun accept(samples: FloatArray): List<SpeechEvent>

@@ -2,6 +2,7 @@ package app.plamotranslate.pipeline.conversation
 
 import app.plamotranslate.llm.Language
 import app.plamotranslate.pipeline.speech.SpeechEvent
+import app.plamotranslate.pipeline.speech.SpeechLanguages
 import app.plamotranslate.pipeline.speech.Utterance
 
 /**
@@ -89,8 +90,8 @@ class ConversationSession(
     /** 今、自分の発話を訳す先の言語。 */
     val partner: Language get() = router.partner
 
-    /** 中国語を日本語と別の話し手の言語として扱うか（音声認識の区切りに渡す）。 */
-    val chinese: Boolean get() = router.chinese
+    /** 会話の言語（音声認識の区切りに渡す。話し手の交代は、この言語の間でだけ見る）。 */
+    val speechLanguages: SpeechLanguages get() = router.speechLanguages
 
     var turns: List<Turn> = emptyList()
         private set

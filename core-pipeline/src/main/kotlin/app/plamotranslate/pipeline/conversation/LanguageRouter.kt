@@ -3,6 +3,7 @@ package app.plamotranslate.pipeline.conversation
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.isChinese
 import app.plamotranslate.llm.sameAs
+import app.plamotranslate.pipeline.speech.SpeechLanguages
 
 /**
  * 会話で使える言語。音声認識（SenseVoice）が聞き分けられる日本語・韓国語・英語・中国語・広東語で決まる
@@ -85,6 +86,16 @@ class LanguageRouter(mode: PartnerMode = PartnerMode.AUTO, self: Language = Lang
      */
     val chinese: Boolean get() = self.isChinese || mode.fixed?.isChinese == true
 
+    /**
+     * 会話の言語（音声認識の区切りが、話し手の交代の根拠に使う言語）。自分の言語と、相手の言語（固定ならその言語、
+     * 自動なら候補と覚えた相手の言語）。
+     */
+    val speechLanguages: SpeechLanguages
+        get() {
+            val partners = mode.fixed?.let { listOf(it) } ?: (mode.autoCandidates(self) + listOfNotNull(lastPartner))
+            return SpeechLanguages((partners + self).mapTo(HashSet()) { speechGroup(it) }, separateChinese = chinese)
+        }
+
     /** 確定した発話の方向を決め、自動なら相手の言語を覚える。 */
     fun route(text: String, langCode: String?): Direction = preview(text, langCode).also {
         if (mode.auto && !it.mine) lastPartner = it.source
@@ -101,6 +112,9 @@ class LanguageRouter(mode: PartnerMode = PartnerMode.AUTO, self: Language = Lang
     }
 
     companion object {
+        /** 音声認識の言語の組（`LanguageEvidence.group`）での言語。中国語は字体によらず1つの組。 */
+        private fun speechGroup(language: Language): String = if (language.isChinese) "zh" else language.code
+
         /**
          * 認識器の言語判定を、会話で扱う言語に絞る。
          * 中国語・広東語の判定は、自分か相手が中国語のとき（[chinese]）だけ中国語とみなす。仮名を含めば日本語の聞き違いとする。

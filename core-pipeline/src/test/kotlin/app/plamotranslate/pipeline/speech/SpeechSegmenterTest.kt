@@ -16,6 +16,12 @@ class SpeechSegmenterTest {
         KO(0.2f, "가", "ko"),
         ZH(0.3f, "中", "zh"),
 
+        /** 英語。1区間ごとに1語。 */
+        EN(0.5f, " word", "en"),
+
+        /** 小さい声の日本語。VAD は話していないとみなすが、認識器は聞き取る。 */
+        SOFT(0.05f, "ぁ", "ja"),
+
         /** 雑音。認識器が「Yeah.」と聞き違える。 */
         NOISE(0.4f, null, "en"),
     }
@@ -30,18 +36,18 @@ class SpeechSegmenterTest {
             if (speech.isEmpty()) return Recognition("", null)
             if (speech.all { it == Sound.NOISE }) return Recognition("Yeah.", "en")
             val lang = speech.filter { it != Sound.NOISE }.groupingBy { it }.eachCount().maxBy { it.value }.key
-            return Recognition(speech.mapNotNull { it.char }.joinToString(""), lang.lang)
+            return Recognition(speech.mapNotNull { it.char }.joinToString("").trim(), lang.lang)
         }
 
         override fun close() = Unit
     }
 
-    /** 音があれば話している、無音が文の区切りの長さ続いたら文の終わり、とする偽の VAD（検出の遅れは無い）。 */
+    /** 小さい声より大きい音があれば話している、無音が文の区切りの長さ続いたら文の終わり、とする偽の VAD（検出の遅れは無い）。 */
     private class FakeVad(private val phraseSilenceChunks: Int) : VoiceActivity {
         private var inSpeech = false
         private var silent = 0
         override fun accept(samples: FloatArray): VoiceSignal {
-            val speaking = samples.any { it != 0f }
+            val speaking = samples.any { it >= 0.08f }
             var ended = false
             if (speaking) {
                 inSpeech = true
@@ -64,11 +70,11 @@ class SpeechSegmenterTest {
 
     private val profile = SegmentationProfile.CONVERSATION
 
-    private fun segmenter() = SpeechSegmenter(
+    private fun segmenter(languages: SpeechLanguages = SpeechLanguages(setOf("ja", "ko"))) = SpeechSegmenter(
         FakeVad((profile.phraseSilenceSeconds * 10).toInt()),
         FakeRecognizer(::soundOf),
         profile,
-    )
+    ).apply { this.languages = languages }
 
     /** [parts] の音を0.1秒ずつ流し、出来事を集める。 */
     private fun SpeechSegmenter.feed(vararg parts: Pair<Sound, Double>): List<SpeechEvent> =
@@ -116,7 +122,9 @@ class SpeechSegmenterTest {
     fun 長く話し続けたら区切り後ろは次のカードの頭に残す() {
         val cards = finals(segmenter().feed(Sound.JA to 20.0, Sound.SILENCE to 3.0))
         assertEquals(2, cards.size)
-        assertTrue(cards[0].durationMs <= (profile.splitAfterSeconds * 1000).toLong())
+        // 長さは話し始めから数える（前に足した音声は含めない）
+        assertTrue(cards[0].durationMs <= ((profile.splitAfterSeconds + profile.prerollSeconds) * 1000).toLong())
+        assertTrue(cards[0].durationMs > ((profile.splitAfterSeconds - 4) * 1000).toLong())
         // 区切っても音声は欠けない（合わせて20秒分の文字。区切りが0.1秒の途中に入ると、偽の認識は両側で1文字ずつ数える）
         assertTrue(cards.sumOf { it.text.length } in 200..201)
     }
@@ -135,9 +143,28 @@ class SpeechSegmenterTest {
     fun 中国語の相手でなければ中国語の判定は日本語と同じ話し手とみなす() {
         val sameSpeaker = finals(segmenter().feed(Sound.JA to 1.5, Sound.SILENCE to 1.0, Sound.ZH to 1.5, Sound.SILENCE to 3.0))
         assertEquals(1, sameSpeaker.size)
-        val chinese = segmenter().apply { separateChinese = true }
+        val chinese = segmenter(SpeechLanguages(setOf("ja", "zh"), separateChinese = true))
         val cards = finals(chinese.feed(Sound.JA to 1.5, Sound.SILENCE to 1.0, Sound.ZH to 1.5, Sound.SILENCE to 3.0))
         assertEquals(listOf("ja", "zh"), cards.map { it.lang })
+    }
+
+    @Test
+    fun 会話の言語でない言語が混ざっても区切らない() {
+        val cards = finals(segmenter().feed(Sound.JA to 4.0, Sound.EN to 3.0, Sound.JA to 2.0, Sound.SILENCE to 3.0))
+        assertEquals(1, cards.size)
+    }
+
+    @Test
+    fun 話している最中の交代は続けて違ったときだけ区切る() {
+        // 直近の窓が2回だけ違う言語（約1秒）なら区切らない
+        val cards = finals(segmenter().feed(Sound.JA to 4.0, Sound.KO to 1.0, Sound.JA to 3.0, Sound.SILENCE to 3.0))
+        assertEquals(1, cards.size)
+    }
+
+    @Test
+    fun 話し終わりの確定は話していないとみなした小さい声の語尾も入れる() {
+        val card = finals(segmenter().feed(Sound.JA to 1.5, Sound.SOFT to 0.5, Sound.SILENCE to 3.0)).single()
+        assertTrue(card.text, card.text.endsWith("ぁ"))
     }
 
     @Test

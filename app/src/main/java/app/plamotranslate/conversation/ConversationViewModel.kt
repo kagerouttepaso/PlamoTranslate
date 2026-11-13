@@ -114,7 +114,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         _state.update { it.copy(asr = AsrState.Loading) }
         viewModelScope.launch {
             val result = withContext(asrDispatcher) { runCatching { SenseVoiceAsr.load(dir, PROFILE) } }
-            result.onSuccess { asr = it.also { engine -> engine.separateChinese = session.chinese } }
+            result.onSuccess { asr = it.also { engine -> engine.languages = session.speechLanguages } }
             _state.update {
                 it.copy(asr = result.fold({ AsrState.Ready }, { e -> AsrState.Failed(e.message ?: e.toString()) }))
             }
@@ -263,8 +263,8 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     private fun sync() {
-        // 自分か相手が中国語のときだけ、音声認識が中国語と日本語を別の話し手として区切る
-        asr?.separateChinese = session.chinese
+        // 音声認識が話し手の交代を見る言語は、会話の言語（自分か相手が中国語のときだけ、中国語と日本語を分ける）
+        asr?.languages = session.speechLanguages
         _state.update {
             it.copy(turns = session.turns, live = session.live, self = session.self, mode = session.mode, partner = session.partner)
         }

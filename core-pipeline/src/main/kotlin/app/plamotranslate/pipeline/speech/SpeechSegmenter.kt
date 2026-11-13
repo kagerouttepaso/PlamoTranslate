@@ -38,12 +38,12 @@ class SpeechSegmenter(
     /** 文の終わりから、カードを確定させるまでに待つ無音。文の区切りと合わせて話し終わりの無音になる。 */
     private val cardEndGapSamples = ((profile.endSilenceSeconds - profile.phraseSilenceSeconds) * SAMPLE_RATE).toInt()
 
-    /** ためる音声の上限（念のため）。区切りより長くしておく。 */
-    private val buffer = SpeechBuffer(prerollSamples, splitAfterSamples + SAMPLE_RATE * 6)
+    /** ためる音声の上限（念のため）。前に足す音声と区切りより長くしておく。 */
+    private val buffer = SpeechBuffer(prerollSamples, prerollSamples + splitAfterSamples + SAMPLE_RATE * 6)
 
-    @Volatile override var separateChinese = false
+    @Volatile override var languages = SpeechLanguages.ANY
 
-    private fun evidence(r: Recognition?): String? = r?.let { LanguageEvidence.of(it, separateChinese) }
+    private fun evidence(r: Recognition?): String? = r?.let { LanguageEvidence.of(it, languages) }
 
     /** 前の途中結果を出してから、話している音声がどれだけ増えたか。 */
     private var sinceLastPartial = 0
@@ -56,6 +56,9 @@ class SpeechSegmenter(
 
     /** ためている音声の先頭が、聞き始めから何サンプル目か。 */
     private var bufferStart = 0L
+
+    /** ためた音声のうち、話し始めの前に足した分の長さ。カードの言語の窓と途中結果は、ここから後ろで測る。 */
+    private var speechStart = 0
 
     // 文（VADが区切る単位）の位置。どれも buffer の中の位置（サンプル）
     /** 今の文の始まり。 */
@@ -103,9 +106,11 @@ class SpeechSegmenter(
             }
             // 話し始め。VADの検出の遅れを補うため、直前の音声も頭に足す
             bufferStart = received - samples.size - buffer.prerollSize
+            val preroll = buffer.prerollSize
             buffer.speaking(samples)
             out += SpeechEvent.Speaking(true)
             startCard()
+            speechStart = preroll
         } else {
             buffer.speaking(samples)
         }
@@ -130,8 +135,9 @@ class SpeechSegmenter(
             } else {
                 gapSamples += samples.size
                 if (gapSamples >= cardEndGapSamples) {
-                    // 話し終わり：最後の文の終わりまでを確定させる
-                    finalOf(buffer.take(lastPhraseEnd), "話し終わり")?.let(out::add)
+                    // 話し終わり：ためた音声の全体を確定させる。後ろは無音なので文の終わりで切る理由が無く、
+                    // VADが話していないとみなした小さい声の語尾も入る（最後の途中結果と同じ音声になる）
+                    finalOf(buffer.snapshot(), "話し終わり")?.let(out::add)
                     buffer.clear()
                     out += SpeechEvent.Speaking(false)
                     return out
@@ -149,13 +155,14 @@ class SpeechSegmenter(
             }
         }
 
-        if (buffer.size >= splitAfterSamples) {
+        // 長さは話し始めから数える（前に足した音声の分だけ早く区切らない）
+        if (buffer.size - speechStart >= splitAfterSamples) {
             // 長く話し続けている：直近の静かなところで区切り、後ろの音声は次のカードの頭として残す
             val at = CutPoint.longUtterance(buffer, buffer.size - SPLIT_SEARCH_SAMPLES, buffer.size - MIN_TAIL_SAMPLES)
             cut(at, "長い発話")?.let(out::add)
         } else {
             sinceLastPartial += samples.size
-            if (sinceLastPartial >= partialInterval && buffer.size >= MIN_PARTIAL_SAMPLES) {
+            if (sinceLastPartial >= partialInterval && buffer.size - speechStart >= MIN_PARTIAL_SAMPLES) {
                 sinceLastPartial = 0
                 watchLanguage()?.let(out::add)
                 partial()?.let(out::add)
@@ -166,21 +173,23 @@ class SpeechSegmenter(
 
     /**
      * 間を空けずに話し手が代わったときのため、話している最中も言語を見張る。
-     * 直近1.5秒の言語が2回続けてカードの言語と違えば、話し手が代わったとみなし、言語の継ぎ目で区切る。
-     * 1回だけで区切らないのは、外来語や固有名詞で言語の判定が一瞬揺れるため。
+     * 直近1.5秒の言語が [SegmentationProfile.liveSwitchChecks] 回続けてカードの言語と違えば、話し手が代わったとみなし、
+     * 言語の継ぎ目で区切る。1回だけで区切らないのは、外来語や固有名詞で言語の判定が一瞬揺れるため。
      */
     private fun watchLanguage(): SpeechEvent.Final? {
         if (cardLang == null) {
-            if (buffer.size >= CARD_LANG_SAMPLES) cardLang = evidence(recognizeRange(0, CARD_LANG_SAMPLES, "カードの頭"))
+            if (buffer.size >= speechStart + CARD_LANG_SAMPLES) {
+                cardLang = evidence(recognizeRange(speechStart, speechStart + CARD_LANG_SAMPLES, "カードの頭"))
+            }
             return null
         }
-        if (buffer.size < CARD_LANG_SAMPLES + LANG_WINDOW_SAMPLES) return null
+        if (buffer.size < speechStart + CARD_LANG_SAMPLES + LANG_WINDOW_SAMPLES) return null
         val recent = evidence(recognizeRange(buffer.size - LANG_WINDOW_SAMPLES, buffer.size, "直近（カード $cardLang）"))
         if (recent == null || recent == cardLang) {
             mismatches = 0
             return null
         }
-        if (++mismatches < 2) return null
+        if (++mismatches < profile.liveSwitchChecks) return null
         val at = switchPoint(buffer.size - SWITCH_SEARCH_SAMPLES, buffer.size - SWITCH_SEARCH_END_SAMPLES, recent)
         val final = cut(at, "言語の交代（話し中：$cardLang→$recent）")
         cardLang = recent
@@ -199,7 +208,7 @@ class SpeechSegmenter(
         var s = start
         while (s <= to) {
             val probe = recognizeRange(s, s + LANG_PROBE_SAMPLES, "継ぎ目探し")
-            if (LanguageEvidence.group(probe?.lang, separateChinese) == newLang) {
+            if (LanguageEvidence.group(probe?.lang, languages.separateChinese) == newLang) {
                 return CutPoint.languageSeam(buffer, s - CutPoint.FRAME_SAMPLES * 2, s + CutPoint.FRAME_SAMPLES * 6)
             }
             s += LANG_PROBE_STEP_SAMPLES
@@ -226,6 +235,7 @@ class SpeechSegmenter(
     private fun cut(at: Int, reason: String): SpeechEvent.Final? {
         val final = finalOf(buffer.take(at), reason)
         mismatches = 0
+        speechStart = (speechStart - at).coerceAtLeast(0)
         // 区切った後ろは別の話し手の可能性があるので、カードの言語は決め直す（呼び出し側が分かっていれば上書きする）
         cardLang = null
         phraseStart = (phraseStart - at).coerceAtLeast(0)
@@ -272,6 +282,7 @@ class SpeechSegmenter(
         partialInterval = MIN_PARTIAL_INTERVAL
         received = 0
         startCard()
+        speechStart = 0
     }
 
     /** ためた音声の先頭 [samples] を確定した発話として認識する。[reason] はログに出す区切りの理由。 */

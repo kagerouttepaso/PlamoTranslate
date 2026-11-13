@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import app.plamotranslate.asr.SenseVoiceAsr
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechEvent
+import app.plamotranslate.pipeline.speech.SpeechLanguages
 import app.plamotranslate.audio.MicRecorder
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.isChinese
@@ -94,7 +95,7 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
             var heard: String? = null
             try {
                 withContext(asrDispatcher) {
-                    engine.separateChinese = _state.value.source?.isChinese == true
+                    engine.languages = SpeechLanguages(separateChinese = _state.value.source?.isChinese == true)
                     engine.reset()
                     var silentChunks = 0
                     var spoke = false
