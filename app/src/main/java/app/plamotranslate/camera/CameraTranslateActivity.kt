@@ -65,6 +65,7 @@ import app.plamotranslate.EngineHolder
 import app.plamotranslate.ModelState
 import app.plamotranslate.ModelSwitch
 import app.plamotranslate.llm.Language
+import app.plamotranslate.llm.sameAs
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -209,6 +210,8 @@ class CameraTranslateActivity : ComponentActivity() {
         target = lang
         preferences.target = lang
         translator.target = lang
+        // 原文と訳す先が同じ言語になったら、原文は自動に戻す
+        if (source?.sameAs(lang) == true) chooseSource(null)
     }
 
     private fun switchTorch(on: Boolean) {
@@ -315,11 +318,12 @@ class CameraTranslateActivity : ComponentActivity() {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             FilterChip(selected = source == null, onClick = { chooseSource(null) }, label = { Text("自動") }, colors = chipColors)
-            CAMERA_QUICK_SOURCES.forEach { lang ->
+            val quick = cameraQuickSources(target)
+            quick.forEach { lang ->
                 FilterChip(selected = source == lang, onClick = { chooseSource(lang) }, label = { Text(lang.chipName) }, colors = chipColors)
             }
             var open by remember { mutableStateOf(false) }
-            val other = source?.takeIf { it !in CAMERA_QUICK_SOURCES }
+            val other = source?.takeIf { it !in quick }
             Box {
                 FilterChip(
                     selected = other != null,
@@ -328,7 +332,7 @@ class CameraTranslateActivity : ComponentActivity() {
                     colors = chipColors,
                 )
                 DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                    CAMERA_SOURCES.filter { it !in CAMERA_QUICK_SOURCES }.forEach { lang ->
+                    cameraSources(target).filter { it !in quick }.forEach { lang ->
                         DropdownMenuItem(
                             text = { Text(lang.label) },
                             onClick = { open = false; chooseSource(lang) },

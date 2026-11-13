@@ -22,7 +22,7 @@ data class OcrLine(
  * LATIN は英語に加え、フランス語・ベトナム語などラテン文字で書く言語（2026-11-08、カメラ翻訳の言語を広げたときに ENGLISH から改名）。
  */
 enum class OcrLanguage {
-    AUTO, CHINESE, KOREAN, LATIN;
+    AUTO, CHINESE, KOREAN, LATIN, JAPANESE;
 
     companion object {
         /** 保存した名前から戻す。改名前の ENGLISH も読む。読めなければ自動。 */

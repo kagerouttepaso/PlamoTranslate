@@ -41,7 +41,8 @@ internal class ScreenMenuEntries(
         } + listOfNotNull(
             if (preset == null) Option("カスタム", checked = true, enabled = false, disabledHint = "上の場面を選ぶと、下の行がまとめて変わります") {} else null,
         )))
-        add(MenuEntry.Choice("原文の言語", OcrLanguage.entries.map { lang ->
+        // 画面翻訳は日本語へ訳すので、日本語は原文の候補に出さない
+        add(MenuEntry.Choice("原文の言語", OcrLanguage.entries.filter { it.sourceLanguage != SCREEN_TARGET }.map { lang ->
             Option(lang.menuName, checked = lang == preferences.language) {
                 preferences.language = lang
                 actions.labelChanged()

@@ -13,15 +13,27 @@ class CameraLanguageTest {
         assertEquals(OcrLanguage.KOREAN, Language.KO.ocrLanguage)
         assertEquals(OcrLanguage.CHINESE, Language.ZH_HANT.ocrLanguage)
         assertEquals(OcrLanguage.LATIN, Language.VI.ocrLanguage)
-        // キリル文字・タイ文字は読める認識器が無い。訳先の日本語は原文に選ばない
+        assertEquals(OcrLanguage.JAPANESE, Language.JA.ocrLanguage)
+        // キリル文字・タイ文字は読める認識器が無い
         assertFalse(Language.RU in CAMERA_SOURCES)
         assertFalse(Language.TH in CAMERA_SOURCES)
-        assertFalse(Language.JA in CAMERA_SOURCES)
-        assertEquals(28, CAMERA_SOURCES.size)
+        assertEquals(29, CAMERA_SOURCES.size)
+    }
+
+    @Test
+    fun 訳す先と同じ言語は原文に選ばない() {
+        // 日本語へ訳すときは日本語を出さず、英語へ訳すときは日本語を選べる
+        assertFalse(Language.JA in cameraSources(Language.JA))
+        assertTrue(Language.JA in cameraSources(Language.EN))
+        assertFalse(Language.EN in cameraSources(Language.EN))
+        assertEquals(listOf(Language.KO, Language.EN, Language.ZH), cameraQuickSources(Language.JA))
+        assertEquals(listOf(Language.JA, Language.KO, Language.ZH), cameraQuickSources(Language.EN))
+        // 繁体字へ訳すときは中国語（簡体字）も出さない
+        assertFalse(Language.ZH in cameraQuickSources(Language.ZH_HANT))
     }
 
     @Test
     fun チップの言語は選べる言語に含まれる() {
-        assertTrue(CAMERA_SOURCES.containsAll(CAMERA_QUICK_SOURCES))
+        Language.entries.forEach { target -> assertTrue(cameraSources(target).containsAll(cameraQuickSources(target))) }
     }
 }

@@ -77,6 +77,7 @@ class MultiScriptOcr(paddleDir: File? = null) : OcrEngine {
  * - 中国語：PP-OCR 漫画用（縦書き）＋ML Kit 中国語（横書き・ラテン文字）。
  * - 韓国語：PP-OCR 韓国語＋ML Kit 韓国語（PP-OCR 漫画用は韓国語を読めない）。PP-OCR 韓国語は飾り文字に強く、ML Kit は字の間の空白を保つ。
  *   PP-OCR 韓国語は自動には入れない（中国語・日本語の行の選び方に効くので、評価の画面で前後を比べてから）。
+ * - 日本語（カメラ翻訳で訳す先を日本語以外にしたとき）：PP-OCR 漫画用（縦書き）＋ML Kit 日本語（横書き・英数字）。
  * - ラテン文字（英語・フランス語・ベトナム語など）：ML Kit 英字だけ（英語の漫画の手書き風の大文字を、中国語の認識器は読み違えた。2026-11-06評価）。
  * - 自動：PP-OCR 漫画用と ML Kit の4つ。日本語の認識器は、日本語の行を見分けて訳さないために使う。
  */
@@ -86,5 +87,6 @@ internal object Recognizers {
         OcrLanguage.CHINESE -> setOf(Source.PADDLE_ZH_JA, Source.MLKIT_ZH)
         OcrLanguage.KOREAN -> setOf(Source.MLKIT_KO, Source.PADDLE_KO)
         OcrLanguage.LATIN -> setOf(Source.MLKIT_LATIN)
+        OcrLanguage.JAPANESE -> setOf(Source.PADDLE_ZH_JA, Source.MLKIT_JA)
     }
 }

@@ -37,6 +37,7 @@ internal class CameraPreferences(context: Context) {
         OcrLanguage.CHINESE -> Language.ZH
         OcrLanguage.KOREAN -> Language.KO
         OcrLanguage.LATIN -> Language.EN
+        OcrLanguage.JAPANESE -> Language.JA
     }
 
     private companion object {

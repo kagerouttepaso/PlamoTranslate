@@ -18,6 +18,7 @@ internal val OcrLanguage.menuName: String
         OcrLanguage.CHINESE -> "中国語"
         OcrLanguage.KOREAN -> "韓国語"
         OcrLanguage.LATIN -> "英語"
+        OcrLanguage.JAPANESE -> "日本語"
     }
 
 /**
@@ -30,6 +31,7 @@ internal fun buttonLabel(language: OcrLanguage, trigger: ScreenTrigger): String 
         OcrLanguage.CHINESE -> "$head\n中"
         OcrLanguage.KOREAN -> "$head\n韓"
         OcrLanguage.LATIN -> "$head\n英"
+        OcrLanguage.JAPANESE -> "$head\n日"
     }
 }
 
@@ -40,4 +42,5 @@ internal val OcrLanguage.sourceLanguage: Language?
         OcrLanguage.CHINESE -> Language.ZH
         OcrLanguage.KOREAN -> Language.KO
         OcrLanguage.LATIN -> Language.EN
+        OcrLanguage.JAPANESE -> Language.JA
     }
