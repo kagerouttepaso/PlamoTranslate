@@ -24,19 +24,14 @@ import android.util.Log
 import android.view.WindowManager
 import android.widget.Toast
 import app.plamotranslate.EngineHolder
-import app.plamotranslate.ModelState
 import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.ocr.MultiScriptOcr
-import app.plamotranslate.ocr.OcrLanguage
 import app.plamotranslate.translation.SqlitePersistentCache
 import app.plamotranslate.overlay.selectTargets
 import app.plamotranslate.overlay.toBox
 import app.plamotranslate.overlay.groupLines
-import app.plamotranslate.pipeline.layout.Grouping
 import app.plamotranslate.pipeline.screen.SceneProfile
-import app.plamotranslate.pipeline.screen.ScreenPreset
-import app.plamotranslate.pipeline.screen.ScreenSettings
 import app.plamotranslate.pipeline.screen.ScreenChange
 import app.plamotranslate.pipeline.screen.ScreenSession
 import app.plamotranslate.pipeline.screen.ScreenSession.Effect
@@ -513,68 +508,28 @@ class ScreenTranslateService : Service() {
     private fun showMenu() {
         val (x, y) = button?.position ?: return
         dispatch(SessionEvent.MenuOpened)
-        menu?.show(x, y, ::menuEntries)
+        menu?.show(x, y, menuEntries::build)
         // 翻訳モデルの読み込みが進んだら、選べるモデルの印を描き直す（メニューは選んでも閉じないため）
         menuJob?.cancel()
         menuJob = scope.launch { EngineHolder.state.drop(1).collect { menu?.refresh() } }
     }
 
-    /** メニューの行。選択肢を押すたびに作り直すので、今の設定を読んで作る。 */
-    private fun menuEntries(): List<MenuEntry> = buildList {
-        val settings = preferences.settings
-        val preset = ScreenPreset.matching(settings)
-        // 場面を選ぶと、下の工程の中身の行がまとめて変わる。行を個別に変えて組と合わなくなったら「カスタム」
-        add(MenuEntry.Choice("場面", ScreenPreset.entries.map { p ->
-            Option(p.menuName, checked = p == preset) { changeSettings(p.settings) }
-        } + listOfNotNull(
-            if (preset == null) Option("カスタム", checked = true, enabled = false, disabledHint = "上の場面を選ぶと、下の行がまとめて変わります") {} else null,
-        )))
-        add(MenuEntry.Choice("原文の言語", OcrLanguage.entries.map { lang ->
-            Option(lang.menuName, checked = lang == preferences.language) {
-                preferences.language = lang
-                button?.setLabel(buttonLabel(lang, preferences.trigger))
+    /** メニューの行の組み立て。設定を変えたら、ここで状態遷移と判定器へ伝える。 */
+    private val menuEntries by lazy {
+        ScreenMenuEntries(this, preferences, object : ScreenMenuEntries.Actions {
+            override fun labelChanged() {
+                button?.setLabel(buttonLabel(preferences.language, preferences.trigger))
             }
-        }))
-        add(MenuEntry.Choice("始め方", ScreenTrigger.entries.map { t ->
-            Option(t.menuName, checked = t == preferences.trigger) {
-                preferences.trigger = t
-                button?.setLabel(buttonLabel(preferences.language, t))
-                dispatch(SessionEvent.TriggerChanged(t.toTrigger()))
-            }
-        }))
-        add(MenuEntry.Choice("認識モード", ScreenRecognition.entries.map { mode ->
-            val motion = mode == ScreenRecognition.MOTION
-            Option(mode.menuName, checked = settings.motion == motion) { changeSettings(settings.copy(motion = motion)) }
-        }))
-        add(MenuEntry.Choice("まとめ方", Grouping.entries.map { g ->
-            Option(g.menuName, checked = settings.grouping == g) { changeSettings(settings.copy(grouping = g)) }
-        }))
-        add(MenuEntry.Choice("訳の枠", listOf(
-            Option("文字に合わせる", checked = !settings.fit) { changeSettings(settings.copy(fit = false)) },
-            Option("広げる", checked = settings.fit) { changeSettings(settings.copy(fit = true)) },
-        )))
-        add(MenuEntry.Choice("訳の消え方", ScreenDismissal.entries.map { d ->
-            val untilTouched = d == ScreenDismissal.ON_TOUCH
-            Option(d.menuName, checked = settings.untilTouched == untilTouched) { changeSettings(settings.copy(untilTouched = untilTouched)) }
-        }))
-        val engineState = EngineHolder.state.value
-        val current = (engineState as? ModelState.Ready)?.model ?: EngineHolder.selected(this@ScreenTranslateService)
-        add(MenuEntry.Choice("翻訳モデル", TranslationModel.entries.map { m ->
-            val present = m.isPresent(this@ScreenTranslateService)
-            Option(
-                m.label,
-                checked = m == current,
-                enabled = present && engineState !is ModelState.Loading,
-                disabledHint = if (present) "翻訳モデルを読み込んでいます" else "${m.label}は設定の画面からダウンロードしてください",
-            ) { if (m != current) switchModel(m) }
-        }))
-        add(MenuEntry.Action("画面翻訳を終了") { stopSelf() })
-    }
 
-    /** 工程の中身の組を変え、判定器を作り直す。次の翻訳から効く（メニューを開いた時点で今の翻訳は取り消してある）。 */
-    private fun changeSettings(settings: ScreenSettings) {
-        preferences.settings = settings
-        applyProfile()
+            override fun triggerChanged(trigger: ScreenTrigger) = dispatch(SessionEvent.TriggerChanged(trigger.toTrigger()))
+
+            /** 工程の中身の組を変えたら判定器を作り直す。次の翻訳から効く（メニューを開いた時点で今の翻訳は取り消してある）。 */
+            override fun settingsChanged() = applyProfile()
+
+            override fun switchModel(model: TranslationModel) = this@ScreenTranslateService.switchModel(model)
+
+            override fun stop() = stopSelf()
+        })
     }
 
     /** 翻訳モデルを切り替え、読み込みの進み具合を上部の小さな表示に出す。訳している途中なら取り消す（古いエンジンは閉じられる）。 */
