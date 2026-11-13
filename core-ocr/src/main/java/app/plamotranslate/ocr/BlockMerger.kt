@@ -25,7 +25,7 @@ internal data class Candidate(
  * 段落ごとに選ぶと、日本語の解説に韓国語の引用が混ざった段落で、片方の言語が崩れた文字列になった
  * （2026-11-05実機）。そのため行ごとに選び、まとまりは後から組み直す。
  *
- * 読み手ごとの事情（読める文字種・確信度）は [Source] が持ち、ここでは読み手の名前で分岐しない。
+ * 読み手の能力は [Source]、採る方針（確信度の下限・優先順）は [ChoicePolicy] が持ち、ここでは読み手の名前で分岐しない。
  */
 internal object BlockMerger {
     private const val SAME_LINE_IOU = 0.4f
@@ -38,35 +38,33 @@ internal object BlockMerger {
         val versions = mutableMapOf<Source, Candidate>()
 
         fun pick(): Candidate {
-            val readings = versions.values.sortedBy { it.source!!.ordinal }
-                .map { Reading(it.source!!, it.text, it.confidence) }
+            val readings = versions.map { (source, c) -> c.reading(source) }
             return versions.getValue(LineChoice.choose(readings).source)
         }
     }
 
     /**
-     * [lines] は読み手ごとの行（読み手が採ってよい行だけ。[Source.accepts]）。動かさなかった読み手は入れない。
-     * [glyphs] は ML Kit 中国語の1文字ずつの位置で、縦書きを読める読み手が無いときに列を組み直すのに使う。
+     * [read] は読み手ごとの行。動かさなかった読み手は入れない。採ってよい行（[ChoicePolicy.accepts]）だけをここで残す。
+     * [glyphs] は1文字ずつの位置（[Source.buildsColumns] の読み手のもの）で、縦書きを読める読み手が無いときに列を組み直すのに使う。
      */
     fun merge(
-        lines: Map<Source, List<Candidate>>,
+        read: Map<Source, List<Candidate>>,
         glyphs: List<Glyph> = emptyList(),
         groupLines: Boolean = true,
     ): List<OcrBlock> {
-        // 縦書きを読める読み手の行を先に採る。確信度が低く、韓国語の読み手がハングルを読めた範囲は韓国語の行に譲る
-        val koreanLines = lines.filterKeys { it.korean }.values.flatten().filter { c ->
-            c.text.count { ScriptDetector.hasHangul(it.toString()) } >= 2 && !TextQuality.looksGarbled(c.text)
-        }
+        val lines = read.mapValues { (source, list) -> list.filter { ChoicePolicy.accepts(source, it.text, it.confidence) } }
+        // 縦書きを読める読み手の行を先に採る。確信度が低く、韓国語の行と重なる範囲は韓国語の行に譲る
+        val koreanLines = lines.flatMap { (source, list) -> list.filter { ChoicePolicy.isKoreanLine(it.reading(source)) } }
         val verticalSources = lines.keys.filter { it.readsVertical }
         val claimed = verticalSources.associateWith { source ->
             lines.getValue(source).filter { v ->
-                val below = source.yieldsToKoreanBelow
-                below == null || (v.confidence ?: 0f) >= below || koreanLines.none { overlaps(it.bounds, v.bounds) }
+                !ChoicePolicy.yieldsToKorean(v.reading(source)) || koreanLines.none { overlaps(it.bounds, v.bounds) }
             }
         }
-        // 縦書きを読める読み手が無いときだけ、ML Kit中国語の1文字ずつの位置から縦書きの列を組み直す
-        val columns = if (verticalSources.isEmpty()) {
-            VerticalColumns.build(glyphs).map { it.copy(source = Source.MLKIT_ZH) }
+        // 縦書きを読める読み手が無いときだけ、1文字ずつの位置から縦書きの列を組み直す
+        val columnSource = Source.entries.firstOrNull { it.buildsColumns && it in lines }
+        val columns = if (verticalSources.isEmpty() && columnSource != null) {
+            VerticalColumns.build(glyphs).map { it.copy(source = columnSource) }
         } else {
             emptyList()
         }
@@ -78,7 +76,7 @@ internal object BlockMerger {
         for (source in Source.entries) {
             val list = when {
                 source in claimed -> claimed.getValue(source)
-                source == Source.MLKIT_ZH -> columns + outside(lines[source].orEmpty())
+                source == columnSource -> columns + outside(lines[source].orEmpty())
                 else -> outside(lines[source].orEmpty())
             }
             for (c in list) {
@@ -110,6 +108,8 @@ internal object BlockMerger {
             .filter { it.text.isNotBlank() }
             .sortedWith(readingOrder { it.bounds })
     }
+
+    private fun Candidate.reading(source: Source) = Reading(source, text, confidence)
 
     /** どちらかの面積の3割以上が重なるか。 */
     private fun overlaps(a: Rect, b: Rect): Boolean = Geometry.overlaps(a, b, 0.3f)

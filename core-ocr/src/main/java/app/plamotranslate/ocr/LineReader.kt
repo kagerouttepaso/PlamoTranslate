@@ -4,9 +4,12 @@ import android.graphics.Bitmap
 
 /**
  * 読み手（docs/設計/画面翻訳.md「読む流れ」）。画像を読み、読み手ごとの1行ずつの読みを返す。
- * 返す行は、読み手が採ってよい行（[Source.accepts]）だけにする。
+ * どの行を採るかは決めない（[ChoicePolicy]）。
  */
 internal interface LineReader : AutoCloseable {
+    /** 重い読み手か（1枚に1秒近くかかる）。白縁の読み比べの2回目には使わない。 */
+    val heavy: Boolean
+
     /** この読み手が返せる行の読み手の名前。PP-OCR は1回の検出から複数の認識器の行を返す。 */
     val sources: Set<Source>
 

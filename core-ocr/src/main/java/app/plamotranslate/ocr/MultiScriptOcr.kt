@@ -40,7 +40,7 @@ class MultiScriptOcr(paddleDir: File? = null, private val groupLines: Boolean = 
 
     /**
      * 白縁取り・白抜きの文字にも強く読む（画面翻訳の動く画面のモード。[OutlinedText]）。元の画像と、RGBの最小値を取った画像を
-     * 並べて読み、行ごとに崩れの少ない方を採る。文字認識が1回分多くかかる。最小値の画像には PP-OCR の読み手を使わない（遅い）。
+     * 並べて読み、行ごとに崩れの少ない方を採る。文字認識が1回分多くかかる。最小値の画像には重い読み手（PP-OCR）を使わない。
      */
     suspend fun recognizeOutlined(bitmap: Bitmap, language: OcrLanguage): List<OcrBlock> = coroutineScope {
         val use = Recognizers.of(language)
@@ -50,7 +50,7 @@ class MultiScriptOcr(paddleDir: File? = null, private val groupLines: Boolean = 
         val variant = async(Dispatchers.Default) {
             val white = OutlinedText.whiteness(bitmap)
             try {
-                read(white, use.filterNot { it.paddle }.toSet(), group = false)
+                read(white, use, group = false, light = true)
             } finally {
                 white.recycle()
             }
@@ -58,12 +58,13 @@ class MultiScriptOcr(paddleDir: File? = null, private val groupLines: Boolean = 
         BlockMerger.group(OutlinedText.pick(primary.await(), variant.await()), groupLines)
     }
 
-    private suspend fun read(bitmap: Bitmap, use: Set<Source>, group: Boolean = groupLines): List<OcrBlock> = coroutineScope {
-        val readings = readers.filter { r -> r.sources.any { it in use } }
+    /** [light] なら重い読み手（[LineReader.heavy]）を使わない。 */
+    private suspend fun read(bitmap: Bitmap, use: Set<Source>, group: Boolean = groupLines, light: Boolean = false): List<OcrBlock> = coroutineScope {
+        val readings = readers.filter { r -> r.sources.any { it in use } && !(light && r.heavy) }
             .map { r -> async { r.read(bitmap, use) } }
             .awaitAll()
         BlockMerger.merge(
-            lines = readings.fold(mapOf()) { acc, r -> acc + r.lines },
+            read = readings.fold(mapOf()) { acc, r -> acc + r.lines },
             glyphs = readings.flatMap { it.glyphs },
             groupLines = group,
         )

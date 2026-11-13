@@ -5,61 +5,68 @@ internal data class Reading(val source: Source, val text: String, val confidence
 
 /**
  * 同じ行の読みの一覧から1つを選ぶ（docs/設計/画面翻訳.md「行の選び方とまとめ方」の手順3）。
- * 読み手が自分の文字をいくつ読めたかで行の文字種を決め、文字種ごとの優先順で採る。崩れた読み（[TextQuality]）は飛ばす。
- *
- * Android に依存しないので、選び方は単体テストで確かめる。
+ * 読み手が得意な文字種の字をいくつ読めたかで行の文字種を決め、[ChoicePolicy.priority] の順で採る。崩れた読み（[TextQuality]）は飛ばす。
+ * 読み手の名前では分岐しない。
  */
 internal object LineChoice {
     fun choose(readings: List<Reading>): Reading {
-        val by = readings.associateBy { it.source }
         // 縦書きを読める読み手の行は、手順1で先に採ってある
         readings.firstOrNull { it.source.readsVertical }?.let { return it }
-
-        fun ok(r: Reading?) = r != null && !TextQuality.looksGarbled(r.text)
-        fun firstOk(vararg sources: Source): Reading? = sources.firstNotNullOfOrNull { s -> by[s]?.takeIf { ok(it) } }
-
-        val ja = by[Source.MLKIT_JA]
-        val zh = by[Source.MLKIT_ZH]
-        val koreans = readings.filter { it.source.korean }
-        // 各読み手が自分の文字をいくつ読めたかで、その行の言語を決める。
-        // 日本語の文に韓国語の引用が混ざる行は、仮名の数がハングル以上なら日本語の行とみなす。
-        // 縦書きの中国語は韓国語の認識器がハングルに読み違える（「째요또터」）ので、
-        // 中国語の認識器が読んだ漢字の数がハングル以上なら中国語の行とみなす（2026-11-05評価）。
-        val kana = ja?.text?.count { ScriptDetector.hasKana(it.toString()) } ?: 0
-        val hangul = koreans.maxOfOrNull { r -> r.text.count { ScriptDetector.hasHangul(it.toString()) } } ?: 0
-        val han = zh?.text?.count { ScriptDetector.hasHan(it.toString()) } ?: 0
+        val ordered = readings.sortedBy { it.source.ordinal }
+        val counts = Script.entries.associateWith { script -> count(ordered, script) }
+        val kana = counts.getValue(Script.KANA)
+        val hangul = counts.getValue(Script.HANGUL)
+        val han = counts.getValue(Script.HAN)
 
         // 英語（ラテン文字だけの行）：英字専用の読み手を優先し、読めていなければ、崩れずラテン文字を最も多く読めたもの
         if (kana == 0 && hangul == 0 && han == 0) {
-            by[Source.MLKIT_LATIN]?.takeIf { ok(it) && ScriptDetector.hasLatin(it.text) }?.let { return it }
-            readings.filter { ok(it) && ScriptDetector.hasLatin(it.text) }
+            pick(ordered, Script.LATIN) { ScriptDetector.hasLatin(it.text) }?.let { return it }
+            ordered.filter { ok(it) && ScriptDetector.hasLatin(it.text) }
                 .maxByOrNull { r -> r.text.count { it in 'A'..'Z' || it in 'a'..'z' } }
                 ?.let { return it }
         }
-        if (kana >= 2 && kana >= hangul && ok(ja)) return ja!!
-        if (hangul > 0 && hangul > han) korean(koreans.filter(::ok))?.let { return it }
-        if (han > 0 && ok(zh)) return zh!!
-        if (kana > 0 && ok(ja)) return ja!!
-        firstOk(Source.MLKIT_ZH, Source.MLKIT_JA)?.let { return it }
-        korean(koreans.filter(::ok))?.let { return it }
+        // 日本語の文に韓国語の引用が混ざる行は、仮名の数がハングル以上なら日本語の行とみなす。
+        // 縦書きの中国語は韓国語の認識器がハングルに読み違える（「째요또터」）ので、
+        // 中国語の認識器が読んだ漢字の数がハングル以上なら中国語の行とみなす（2026-11-05評価）。
+        val order = buildList {
+            if (kana >= 2 && kana >= hangul) add(Script.KANA)
+            if (hangul > 0 && hangul > han) add(Script.HANGUL)
+            if (han > 0) add(Script.HAN)
+            if (kana > 0) add(Script.KANA)
+            addAll(ChoicePolicy.fallback)
+        }
+        for (script in order) pick(ordered, script)?.let { return it }
         // どれも崩れている場合は、後段（訳す対象の判定）で落とす
         // 英字専用の読み手だけが読んだ行（崩れた英字など）もここに来る（2026-11-06、カメラで落ちた）
-        return zh ?: ja ?: koreans.firstOrNull() ?: readings.first()
+        return ChoicePolicy.fallback.firstNotNullOfOrNull { script -> inOrder(ordered, script).firstOrNull() } ?: ordered.first()
     }
 
-    /**
-     * 崩れていない韓国語の読みから1つ選ぶ。PP-OCR 韓国語を先に採る（飾り文字を ML Kit より読める）。
-     * ただし空白を除いて同じ文字なら、空白を保つ ML Kit 韓国語を採る（PP-OCR は字の間の空白を落とすことがある）。
-     */
-    private fun korean(readings: List<Reading>): Reading? {
-        val paddle = readings.firstOrNull { it.source == Source.PADDLE_KO }
-        val mlkit = readings.firstOrNull { it.source == Source.MLKIT_KO }
-        return when {
-            paddle == null -> mlkit
-            mlkit != null && compact(mlkit.text) == compact(paddle.text) -> mlkit
-            else -> paddle
-        }
+    /** [script] の優先順で、崩れていない最初の読み。空白を除いて同じ文字なら、空白を多く保つ読みを採る。 */
+    private fun pick(readings: List<Reading>, script: Script, also: (Reading) -> Boolean = { true }): Reading? {
+        val candidates = inOrder(readings, script).filter { ok(it) && also(it) }
+        val first = candidates.firstOrNull() ?: return null
+        return candidates.filter { compact(it.text) == compact(first.text) }.maxByOrNull { spaces(it.text) }
+            ?.takeIf { spaces(it.text) > spaces(first.text) } ?: first
     }
 
+    private fun inOrder(readings: List<Reading>, script: Script): List<Reading> {
+        val sources = ChoicePolicy.priority[script].orEmpty()
+        return sources.mapNotNull { s -> readings.firstOrNull { it.source == s } }
+    }
+
+    /** 得意な文字種が [script] の読み手が、その文字種の字をいくつ読めたか（読み手が複数なら多い方）。 */
+    private fun count(readings: List<Reading>, script: Script): Int =
+        readings.filter { it.source.specialty == script }.maxOfOrNull { r -> r.text.count { matches(script, it) } } ?: 0
+
+    private fun matches(script: Script, c: Char): Boolean = when (script) {
+        Script.KANA -> ScriptDetector.hasKana(c.toString())
+        Script.HANGUL -> ScriptDetector.hasHangul(c.toString())
+        Script.HAN -> ScriptDetector.hasHan(c.toString())
+        Script.LATIN -> c in 'A'..'Z' || c in 'a'..'z'
+        Script.OTHER -> false
+    }
+
+    private fun ok(r: Reading) = !TextQuality.looksGarbled(r.text)
     private fun compact(text: String) = text.filterNot { it.isWhitespace() }
+    private fun spaces(text: String) = text.count { it.isWhitespace() }
 }

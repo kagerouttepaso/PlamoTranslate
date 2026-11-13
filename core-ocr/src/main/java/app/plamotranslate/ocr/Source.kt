@@ -1,44 +1,28 @@
 package app.plamotranslate.ocr
 
 /**
- * 行を読んだ読み手（docs/設計/画面翻訳.md「読み手」）。読み手ごとの事情（読める文字種、採ってよい行、縦書きを読めるか）は
- * ここに置き、行を選ぶ側（[BlockMerger]・[LineChoice]）は読み手の名前でなくこの性質で扱う。
+ * 行を読んだ読み手の名前と、読み手の能力（docs/設計/画面翻訳.md「読み手」）。
+ * 行をどう採るかの方針（確信度の下限・優先順）はここに置かず、[ChoicePolicy] が持つ。
  *
  * 並びの順は、同じ行の読みを並べる順（位置の基準になる行の順）でもある。
  */
 internal enum class Source(
-    /** PP-OCR のモデルで読むか（重いので、白縁の読み比べの2回目には使わない）。 */
-    val paddle: Boolean = false,
+    /** 得意な文字種。行の文字種を決めるとき、この読み手が読めたその文字種の字を数える。 */
+    val specialty: Script,
     /** 縦書きを読めるか。読める読み手の行は先に採り、重なるほかの行（縦書きを横に読み違えた行）を捨てる。 */
     val readsVertical: Boolean = false,
-    /** 縦書きの行を先に採るとき、確信度がこれ未満なら、韓国語の読み手が読めた範囲を韓国語の行に譲る。 */
-    val yieldsToKoreanBelow: Float? = null,
-    /** 韓国語の読み手か（縦書きの行が譲る相手、行の文字種を決めるハングルの数）。 */
-    val korean: Boolean = false,
+    /** 1文字ずつの位置を返し、縦書きを読める読み手が無いときに縦書きの列を組み直す元になるか（[VerticalColumns]）。 */
+    val buildsColumns: Boolean = false,
 ) {
     /** PP-OCRv6 manga。中国語・日本語を読み、縦書きも読める。韓国語は読めない。 */
-    PADDLE_ZH_JA(paddle = true, readsVertical = true, yieldsToKoreanBelow = 0.8f) {
-        override fun accepts(line: Candidate) = ScriptDetector.hasHan(line.text) || ScriptDetector.hasKana(line.text)
-    },
-    MLKIT_ZH,
-    MLKIT_JA,
-    MLKIT_KO(korean = true),
+    PADDLE_ZH_JA(Script.HAN, readsVertical = true),
+    MLKIT_ZH(Script.HAN, buildsColumns = true),
+    MLKIT_JA(Script.KANA),
+    MLKIT_KO(Script.HANGUL),
 
-    /**
-     * PP-OCRv5 の韓国語の認識（`korean_PP-OCRv5_mobile_rec`。検出は PP-OCR 漫画用と同じ）。
-     * ゲームの飾り文字のハングルを ML Kit より読める（2026-11-13、トリッカルの画面で「업적」「전투」「모집」）。
-     * 画素画の飾りなどを読み違えた行は確信度が低い（0.16）ので、0.8未満は採らない。
-     */
-    PADDLE_KO(paddle = true, korean = true) {
-        override fun accepts(line: Candidate) = ScriptDetector.hasHangul(line.text) && (line.confidence ?: 0f) >= 0.8f
-    },
+    /** PP-OCRv5 の韓国語の認識（`korean_PP-OCRv5_mobile_rec`。検出は PP-OCR 漫画用と同じ）。 */
+    PADDLE_KO(Script.HANGUL),
 
-    /** 英字専用。漢字・仮名・ハングルを読めないので、英字だけの行を採る。 */
-    MLKIT_LATIN {
-        override fun accepts(line: Candidate) = ScriptDetector.detect(line.text) == Script.LATIN
-    },
-    ;
-
-    /** この読み手の行として採ってよいか。読み手が読めない文字種の行（読み違い）を落とす。 */
-    open fun accepts(line: Candidate): Boolean = true
+    /** 英字専用。漢字・仮名・ハングルを読めない。 */
+    MLKIT_LATIN(Script.LATIN),
 }

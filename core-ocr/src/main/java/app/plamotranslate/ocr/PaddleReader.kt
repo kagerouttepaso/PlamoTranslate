@@ -17,6 +17,7 @@ internal class PaddleReader(
     private val recognizers: Map<Source, PaddleRecognizer>,
 ) : LineReader {
     override val sources: Set<Source> = recognizers.keys
+    override val heavy = true
 
     override suspend fun read(bitmap: Bitmap, wanted: Set<Source>): LineReading = withContext(Dispatchers.Default) {
         val use = recognizers.filterKeys { it in wanted }
@@ -27,8 +28,7 @@ internal class PaddleReader(
             for ((source, recognizer) in use) {
                 coroutineContext.ensureActive()
                 val (text, confidence) = recognizer.recognize(bitmap, box) ?: continue
-                val line = Candidate(text, box, source, confidence)
-                if (source.accepts(line)) lines.getValue(source) += line
+                lines.getValue(source) += Candidate(text, box, source, confidence)
             }
         }
         LineReading(lines)
@@ -41,18 +41,16 @@ internal class PaddleReader(
 
     companion object {
         /**
-         * [dir]（端末の `files/models/ocr/`）にあるモデルから作る。検出は漫画用の `manga/det.onnx` を使う。
-         * 検出か認識器が1つも無ければ null（ML Kit だけで動く）。置き場は docs/手順/開発環境.md。
+         * [dir]（端末の `files/models/ocr/`）にあるモデルから作る。ファイルの並びは [PaddleModels]。
+         * 読めない認識器だけを外し（壊れたモデルが、ほかの認識器を道連れにしない）、検出か認識器が1つも無ければ null（ML Kit だけで動く）。
          */
         fun load(dir: File, threads: Int = 4): PaddleReader? {
             val options = OrtSession.SessionOptions().apply { setIntraOpNumThreads(threads) }
-            val detector = PaddleDetector.load(File(dir, "manga/det.onnx"), options) ?: return null
-            val recognizers = buildMap {
-                PaddleRecognizer.load(File(dir, "manga/rec.onnx"), File(dir, "manga/dict.txt"), options)
-                    ?.let { put(Source.PADDLE_ZH_JA, it) }
-                PaddleRecognizer.load(File(dir, "korean/rec.onnx"), File(dir, "korean/dict.json"), options)
-                    ?.let { put(Source.PADDLE_KO, it) }
-            }
+            val detector = runCatching { PaddleDetector.load(File(dir, PaddleModels.DETECTOR), options) }.getOrNull() ?: return null
+            val recognizers = PaddleModels.recognizers.mapNotNull { (source, files) ->
+                runCatching { PaddleRecognizer.load(File(dir, files.model), File(dir, files.dict), options) }.getOrNull()
+                    ?.let { source to it }
+            }.toMap()
             if (recognizers.isEmpty()) {
                 detector.close()
                 return null

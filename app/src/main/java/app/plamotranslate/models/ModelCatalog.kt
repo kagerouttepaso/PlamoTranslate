@@ -1,6 +1,7 @@
 package app.plamotranslate.models
 
 import android.content.Context
+import app.plamotranslate.ocr.PaddleModels
 import app.plamotranslate.pipeline.translation.ModelOrigin
 import java.io.File
 
@@ -98,6 +99,9 @@ enum class ModelBundle {
 
 object ModelCatalog {
     private const val HF = "https://huggingface.co"
+
+    /** PP-OCR のモデルの置き場。中のファイルの並びの正本は core-ocr の [PaddleModels]。 */
+    private const val OCR = "ocr"
     private const val SENSE_VOICE = "$HF/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07"
     private const val MANGA = "$HF/Kellenok/PP-OCRv6_manga/resolve/de0e793da4e213f4b13c738204fe2a832f16d57c"
 
@@ -135,35 +139,35 @@ object ModelCatalog {
         ModelFile(
             label = "漫画の文字の検出（PP-OCRv6 manga）",
             url = "$MANGA/det/manga_det_v0.2.onnx",
-            path = "ocr/manga/det.onnx",
+            path = "$OCR/${PaddleModels.DETECTOR}",
             size = 1_816_954,
             sha256 = "d132078c46e292b226fb5a2ca52a7612ad319262dfdf493e7d8e3be435295978",
         ),
         ModelFile(
             label = "漫画の文字の認識（PP-OCRv6 manga）",
             url = "$MANGA/rec/manga_rec_v0.2.onnx",
-            path = "ocr/manga/rec.onnx",
+            path = "$OCR/${PaddleModels.MANGA_REC}",
             size = 21_167_540,
             sha256 = "de12c84c63e62c80339e882e675983d886670dcb6f0147e1ed041afd6fa81888",
         ),
         ModelFile(
             label = "漫画の文字の表",
             url = "$MANGA/ppocrv6_dict.txt",
-            path = "ocr/manga/dict.txt",
+            path = "$OCR/${PaddleModels.MANGA_DICT}",
             size = 74_947,
             sha256 = "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d",
         ),
         ModelFile(
             label = "韓国語の文字の認識（PP-OCRv5 korean）",
             url = "$KOREAN_OCR/rec_model.onnx",
-            path = "ocr/korean/rec.onnx",
+            path = "$OCR/${PaddleModels.KOREAN_REC}",
             size = 13_441_299,
             sha256 = "03525a1dcf74ceff88c9cbe89f100c2a7c7f9567afffb0ee2cdea8303ec5c238",
         ),
         ModelFile(
             label = "韓国語の文字の表",
             url = "$KOREAN_OCR/charset.json",
-            path = "ocr/korean/dict.json",
+            path = "$OCR/${PaddleModels.KOREAN_DICT}",
             size = 83_288,
             sha256 = "e600744eabcf1db6513518f7e09105cdb746ee0504ef110b25478147d9f0aa81",
         ),
@@ -202,7 +206,7 @@ object ModelCatalog {
     fun asrDir(context: Context): File = File(modelsDir(context), "asr")
 
     /** PP-OCR のモデルの置き場（`manga/`・`korean/`）。無ければML Kitだけで動く。 */
-    fun ocrDir(context: Context): File = File(modelsDir(context), "ocr")
+    fun ocrDir(context: Context): File = File(modelsDir(context), OCR)
 
     val totalSize: Long get() = files.sumOf { it.size }
 }

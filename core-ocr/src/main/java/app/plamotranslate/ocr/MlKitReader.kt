@@ -20,13 +20,14 @@ internal class MlKitReader(
     private val keepGlyphs: Boolean = false,
 ) : LineReader {
     override val sources = setOf(source)
+    override val heavy = false
 
     override suspend fun read(bitmap: Bitmap, wanted: Set<Source>): LineReading {
         if (source !in wanted) return LineReading(emptyMap())
         val text = recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
         val lines = text.textBlocks.flatMap { block ->
             block.lines.mapNotNull { line -> line.boundingBox?.let { Candidate(line.text, Rect(it), source) } }
-        }.filter(source::accepts)
+        }
         return LineReading(mapOf(source to lines), if (keepGlyphs) text.toGlyphs() else emptyList())
     }
 
