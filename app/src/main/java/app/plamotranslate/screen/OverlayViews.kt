@@ -7,7 +7,9 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.Typeface
+import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.os.SystemClock
 import android.util.TypedValue
 import android.view.Gravity
@@ -17,9 +19,11 @@ import android.view.ViewConfiguration
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import app.plamotranslate.R
 import app.plamotranslate.log.Logs
 import app.plamotranslate.overlay.OverlaySlot
 import app.plamotranslate.overlay.OverlayPalette
@@ -156,23 +160,57 @@ class FloatingButton(
         x = screen.width() - size - context.dp(8)
         y = screen.height() / 3
     }
-    private val view = TextView(context).apply {
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
-        gravity = Gravity.CENTER
-        elevation = context.dp(6).toFloat()
-    }
 
     /**
-     * 今のテーマの色で塗り直す（作ったときと、テーマや端末の明暗が変わったとき）。面の丸に主の色の縁を付け、
+     * アプリの印（単色のアイコン。アプリのアイコンを変えれば、ここも変わる）を主の色で描く。
+     * 文字の「訳」は使わない（docs/設計/デザイン言語.md「アイコン」）。
+     */
+    private val mark = ImageView(context).apply {
+        setImageResource(R.drawable.ic_launcher_monochrome)
+        scaleType = ImageView.ScaleType.FIT_CENTER
+    }
+
+    /** 原文の言語を決めているときだけ出す、右下の小さな札（中・韓・英・日）。 */
+    private val badge = TextView(context).apply {
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        includeFontPadding = false
+        visibility = View.GONE
+    }
+    private val view = FrameLayout(context).apply {
+        elevation = context.dp(6).toFloat()
+        contentDescription = "画面翻訳"
+        addView(mark, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
+        addView(badge, FrameLayout.LayoutParams(context.dp(18), context.dp(18), Gravity.BOTTOM or Gravity.END))
+    }
+
+    /** 自動で訳すか。自動なら、丸の外にもう1本の輪を出す。 */
+    private var auto = false
+
+    /**
+     * 今のテーマの色で塗り直す（作ったとき、テーマや端末の明暗が変わったとき、訳し方を変えたとき）。面の丸に主の色の縁を付け、
      * どんな画面の上でも見分けられるようにする（docs/設計/デザイン言語.md「色」）。
      */
     fun applyPalette() {
         val palette = OverlayPalette.current(context)
-        view.setTextColor(palette.onSurface)
-        view.background = GradientDrawable().apply {
+        mark.imageTintList = ColorStateList.valueOf(palette.primary)
+        badge.setTextColor(palette.onPrimary)
+        badge.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(palette.primary)
+        }
+        val face = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(palette.surfaceRaised)
             setStroke(context.dp(2), palette.primary)
+        }
+        view.background = if (!auto) face else {
+            val ring = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setStroke(context.dp(2), palette.primary)
+            }
+            LayerDrawable(arrayOf(ring, face)).apply { setLayerInset(1, context.dp(5), context.dp(5), context.dp(5), context.dp(5)) }
         }
     }
 
@@ -218,10 +256,12 @@ class FloatingButton(
         }
     }
 
-    /** ボタンの文字。自動なら「訳」、言語を決めたら「訳」の下に言語を小さく出す。 */
-    fun setLabel(label: String) {
-        view.text = label
-        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, if (label.length > 1) 13f else 20f)
+    /** 訳し方を出す。[language] は原文の言語の札（自動なら null）、[auto] は自動で訳すか。 */
+    fun setMode(language: String?, auto: Boolean) {
+        badge.text = language.orEmpty()
+        badge.visibility = if (language == null) View.GONE else View.VISIBLE
+        this.auto = auto
+        applyPalette()
     }
 
     /**

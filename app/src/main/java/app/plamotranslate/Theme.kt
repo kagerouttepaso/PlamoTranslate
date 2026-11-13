@@ -25,21 +25,24 @@ import kotlinx.coroutines.flow.asStateFlow
  * - secondary：相手と訳（夜の鳥はミント、さえずりの紙は緑）
  * - tertiary：画面を読む機能（夜の鳥は空色、さえずりの紙は藍）
  * - surface：地と、その上の面の段
+ * 夜の鳥は色を「光」として使う。広い面（*Container を含む）は紺の段に役割の色を少し差したものにし、
+ * コーラル・ミント・空色は明るいまま、アイコン・縁・文字と、画面の主役の1つだけに使う。
+ * 色を暗くしただけの面（茶・くすんだ緑）は濁って見えるので作らない（docs/設計/デザイン言語.md「色」）。
  */
 
 /** 夜の鳥（ダーク）。 */
 private val NightBird: ColorScheme = darkColorScheme(
     primary = Color(0xFFFF8A65),
     onPrimary = Color(0xFF3B1408),
-    primaryContainer = Color(0xFF7A3420),
-    onPrimaryContainer = Color(0xFFFFDBD0),
+    primaryContainer = Color(0xFF6A2F42),
+    onPrimaryContainer = Color(0xFFFFDCD0),
     secondary = Color(0xFF7FE0C8),
     onSecondary = Color(0xFF003829),
-    secondaryContainer = Color(0xFF1F5547),
-    onSecondaryContainer = Color(0xFFA6F3DE),
+    secondaryContainer = Color(0xFF185867),
+    onSecondaryContainer = Color(0xFFC6F6EA),
     tertiary = Color(0xFFA9B8FF),
     onTertiary = Color(0xFF15226A),
-    tertiaryContainer = Color(0xFF2E3B80),
+    tertiaryContainer = Color(0xFF2F3B7E),
     onTertiaryContainer = Color(0xFFDDE1FF),
     background = Color(0xFF141A30),
     onBackground = Color(0xFFE8EAF6),

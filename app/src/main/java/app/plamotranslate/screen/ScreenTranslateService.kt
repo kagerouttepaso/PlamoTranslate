@@ -163,7 +163,7 @@ class ScreenTranslateService : Service() {
             }
         }
         button = FloatingButton(this, wm, onTap = ::onButtonTap, onLongPress = ::showMenu).also {
-            it.setLabel(buttonLabel(preferences.language, preferences.trigger))
+            it.setMode(preferences.language.buttonBadge(), preferences.trigger == ScreenTrigger.AUTO)
             it.setActive(true)
             it.show()
         }
@@ -521,7 +521,7 @@ class ScreenTranslateService : Service() {
     private val menuEntries by lazy {
         ScreenMenuEntries(this, preferences, object : ScreenMenuEntries.Actions {
             override fun labelChanged() {
-                button?.setLabel(buttonLabel(preferences.language, preferences.trigger))
+                button?.setMode(preferences.language.buttonBadge(), preferences.trigger == ScreenTrigger.AUTO)
             }
 
             override fun triggerChanged(trigger: ScreenTrigger) = dispatch(SessionEvent.TriggerChanged(trigger.toTrigger()))

@@ -127,7 +127,7 @@ fun openUrl(context: Context, url: String) {
     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
 }
 
-/** トップ画面などの下に小さく出す表示。 */
+/** 初回のモデルの準備の画面などに小さく出す表示（PLaMo Community License 第4条）。 */
 @Composable
 fun BuiltWithPlamoLabel(modifier: Modifier = Modifier) {
     Text(

@@ -21,18 +21,13 @@ internal val OcrLanguage.menuName: String
         OcrLanguage.JAPANESE -> "日本語"
     }
 
-/**
- * 浮遊ボタンの文字。タップで訳すなら「訳」、自動で訳すなら「自」。言語を決めたら、その下に言語を出す（「訳\n中」）。
- */
-internal fun buttonLabel(language: OcrLanguage, trigger: ScreenTrigger): String {
-    val head = if (trigger == ScreenTrigger.AUTO) "自" else "訳"
-    return when (language) {
-        OcrLanguage.AUTO -> head
-        OcrLanguage.CHINESE -> "$head\n中"
-        OcrLanguage.KOREAN -> "$head\n韓"
-        OcrLanguage.LATIN -> "$head\n英"
-        OcrLanguage.JAPANESE -> "$head\n日"
-    }
+/** 浮遊ボタンの右下の札。原文の言語を決めたときだけ、その言語を1文字で出す（自動なら null）。 */
+internal fun OcrLanguage.buttonBadge(): String? = when (this) {
+    OcrLanguage.AUTO -> null
+    OcrLanguage.CHINESE -> "中"
+    OcrLanguage.KOREAN -> "韓"
+    OcrLanguage.LATIN -> "英"
+    OcrLanguage.JAPANESE -> "日"
 }
 
 /** 翻訳に渡す原文の言語。自動なら null で、PLaMoが原文から判定する（docs/設計/翻訳コア.md）。 */
