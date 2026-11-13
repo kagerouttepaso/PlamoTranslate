@@ -137,9 +137,6 @@ class LineTracker<L> {
             if (r == null) 1.0 else (r / SHARP_ENOUGH).coerceIn(MIN_WEIGHT, 1.0)
         }.also { weighted = it }
 
-        /** 直近の読み取りの鋭さの割合（ログに分布を出す）。測れなければ null。 */
-        fun lastRatio(): Double? = ratios().lastOrNull()
-
         /** 直近の読み取りの重みが [BLURRED] 未満か（ぶれたコマとして軽くした。ログに数を出す）。 */
         fun lastBlurred(): Boolean = weights().lastOrNull()?.let { it < BLURRED } ?: false
 
