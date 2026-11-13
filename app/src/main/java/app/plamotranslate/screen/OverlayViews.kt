@@ -22,6 +22,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import app.plamotranslate.log.Logs
 import app.plamotranslate.overlay.OverlaySlot
+import app.plamotranslate.overlay.OverlayPalette
 import app.plamotranslate.overlay.dp
 import app.plamotranslate.overlay.toBox
 import app.plamotranslate.overlay.toRect
@@ -156,17 +157,27 @@ class FloatingButton(
         y = screen.height() / 3
     }
     private val view = TextView(context).apply {
-        setTextColor(Color.WHITE)
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
         gravity = Gravity.CENTER
-        background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(Color.argb(220, 98, 0, 238))
-        }
         elevation = context.dp(6).toFloat()
     }
 
+    /**
+     * 今のテーマの色で塗り直す（作ったときと、テーマや端末の明暗が変わったとき）。面の丸に主の色の縁を付け、
+     * どんな画面の上でも見分けられるようにする（docs/設計/デザイン言語.md「色」）。
+     */
+    fun applyPalette() {
+        val palette = OverlayPalette.current(context)
+        view.setTextColor(palette.onSurface)
+        view.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(palette.surfaceRaised)
+            setStroke(context.dp(2), palette.primary)
+        }
+    }
+
     init {
+        applyPalette()
         val slop = ViewConfiguration.get(context).scaledTouchSlop
         var downX = 0f
         var downY = 0f
@@ -394,12 +405,14 @@ class TranslationOverlay(private val context: Context, private val windowManager
     /** 画面上部の中央に、件数・所要時間などを小さく出す。訳以外に触れると全体を消す合図にも使う。 */
     @SuppressLint("ClickableViewAccessibility")
     fun showStatus(text: String) {
+        val palette = OverlayPalette.current(context)
         val view = statusView ?: TextView(context).apply {
-            setTextColor(Color.WHITE)
+            setTextColor(palette.onSurface)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             setPadding(context.dp(10), context.dp(4), context.dp(10), context.dp(4))
             background = GradientDrawable().apply {
-                setColor(Color.argb(200, 98, 0, 238))
+                setColor(palette.surfaceRaised)
+                setStroke(context.dp(1), palette.outline)
                 cornerRadius = context.dp(12).toFloat()
             }
             // ほかの場所に触れたときの扱いは、サービスが TouchWatcher で受けて決める

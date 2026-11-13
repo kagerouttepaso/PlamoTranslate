@@ -23,6 +23,7 @@ import android.os.SystemClock
 import android.view.WindowManager
 import android.widget.Toast
 import app.plamotranslate.EngineHolder
+import app.plamotranslate.ThemePreferences
 import app.plamotranslate.R
 import app.plamotranslate.log.Logs
 import app.plamotranslate.models.ModelCatalog
@@ -110,6 +111,8 @@ class ScreenTranslateService : Service() {
     /** 画面を回したら、前の向きで置いた訳の枠は位置が合わないので消す。浮遊ボタンは今の画面の同じ割合の位置へ移す。 */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        // 端末の明暗が変わったら、浮遊ボタンを今のテーマの色で塗り直す（メニューは開くたびに読み直す）
+        button?.applyPalette()
         if (newConfig.orientation == orientation) return
         orientation = newConfig.orientation
         menu?.dismiss()
@@ -170,6 +173,8 @@ class ScreenTranslateService : Service() {
         if (state.phase == Phase.Watching) startJudge.reset(SystemClock.uptimeMillis())
         scope.launch { watch() }
         scope.launch { watchAccessibility() }
+        // 設定の「画面の色」を変えたら、浮遊ボタンを塗り直す
+        scope.launch { ThemePreferences.mode.collect { button?.applyPalette() } }
         registerDebugReceiver()
         _running.value = true
         return START_NOT_STICKY

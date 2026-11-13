@@ -13,6 +13,7 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import app.plamotranslate.overlay.OverlayPalette
 import app.plamotranslate.overlay.dp
 
 /** 浮遊ボタンのメニューの1行。[Choice] は設定1つ（横に並べた選択肢から1つ選ぶ）、[Action] は押すと閉じて行う操作。 */
@@ -43,6 +44,9 @@ internal class ScreenMenu(private val context: Context, private val windowManage
     private var params: WindowManager.LayoutParams? = null
     private var anchor = 0 to 0
     private var build: () -> List<MenuEntry> = { emptyList() }
+
+    /** 今のテーマの色（開くたび・描き直すたびに読み直す。docs/設計/デザイン言語.md「色」）。 */
+    private var palette = OverlayPalette.current(context)
 
     /** メニューを閉じたとき（外に触れた・操作の行を選んだ）。操作の行を選んだときは、行の処理より先に呼ぶ。 */
     var onDismiss: (() -> Unit)? = null
@@ -84,11 +88,13 @@ internal class ScreenMenu(private val context: Context, private val windowManage
 
     /** 行を作って [view] に入れ、大きさと位置を [p] に書く。 */
     private fun fill(view: ScrollView, p: WindowManager.LayoutParams) {
+        palette = OverlayPalette.current(context)
         val list = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(context.dp(10), context.dp(8), context.dp(10), context.dp(8))
             background = GradientDrawable().apply {
-                setColor(Color.argb(240, 32, 32, 40))
+                setColor(palette.surface)
+                setStroke(context.dp(1), palette.outline)
                 cornerRadius = context.dp(12).toFloat()
             }
         }
@@ -123,7 +129,7 @@ internal class ScreenMenu(private val context: Context, private val windowManage
         setPadding(0, context.dp(4), 0, context.dp(4))
         addView(TextView(context).apply {
             text = entry.label
-            setTextColor(Color.argb(170, 255, 255, 255))
+            setTextColor(palette.onSurfaceMuted)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             minWidth = context.dp(68)
             // 選択肢の1行目と高さをそろえる
@@ -139,14 +145,14 @@ internal class ScreenMenu(private val context: Context, private val windowManage
     private fun chip(option: Option): View = TextView(context).apply {
         text = option.label
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-        setTextColor(Color.WHITE)
+        setTextColor(if (option.checked) palette.onPrimary else palette.onSurface)
         gravity = Gravity.CENTER
         // 選択肢の名前は1行で出す（縦に潰さない）
         maxLines = 1
         setPadding(context.dp(12), context.dp(7), context.dp(12), context.dp(7))
         background = GradientDrawable().apply {
             cornerRadius = context.dp(16).toFloat()
-            if (option.checked) setColor(Color.rgb(98, 0, 238)) else setStroke(context.dp(1), Color.argb(110, 255, 255, 255))
+            if (option.checked) setColor(palette.primary) else setStroke(context.dp(1), palette.outline)
         }
         if (!option.enabled) alpha = 0.4f
         setOnClickListener {
@@ -164,7 +170,7 @@ internal class ScreenMenu(private val context: Context, private val windowManage
     /** 押すとメニューを閉じて行う操作の行（終了）。 */
     private fun actionRow(entry: MenuEntry.Action): View = TextView(context).apply {
         text = entry.label
-        setTextColor(Color.WHITE)
+        setTextColor(palette.primary)
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
         gravity = Gravity.END
         setPadding(context.dp(12), context.dp(10), context.dp(4), context.dp(4))

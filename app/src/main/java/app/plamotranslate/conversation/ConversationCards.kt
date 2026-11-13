@@ -53,11 +53,14 @@ private object ConversationType {
     val faceSub = TextStyle(fontSize = 14.sp, lineHeight = 19.sp)
 }
 
-/** 誰の発話かで色を決める。対面の上下どちらの半分でも、同じ人の発話は同じ色にする。 */
+/**
+ * 誰の発話かで色を決める。対面の上下どちらの半分でも、同じ人の発話は同じ色にする。
+ * 自分は primary（夜の鳥はコーラル、さえずりの紙は朱）、相手は secondary（ミント・緑）の面（docs/設計/デザイン言語.md「色」）。
+ */
 @Composable
 private fun speakerColors(mine: Boolean): Pair<Color, Color> {
     val c = MaterialTheme.colorScheme
-    return if (mine) c.primaryContainer to c.onPrimaryContainer else c.tertiaryContainer to c.onTertiaryContainer
+    return if (mine) c.primaryContainer to c.onPrimaryContainer else c.secondaryContainer to c.onSecondaryContainer
 }
 
 /** 1画面のカードの見出し（誰が・何語から何語へ）。 */

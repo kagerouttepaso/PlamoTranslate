@@ -11,5 +11,6 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         Diagnostics.install(this)
+        ThemePreferences.load(this)
     }
 }

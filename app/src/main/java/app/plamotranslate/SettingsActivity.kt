@@ -96,6 +96,7 @@ private enum class SettingsPage(
         PerformanceCard(EngineHolder.state.collectAsStateWithLifecycle().value)
     }),
     DIAGNOSTICS("不具合の記録", SettingsGroup.DETAIL, { diagnosticsSummary() }, { DiagnosticsSettings() }),
+    APPEARANCE("画面の色", SettingsGroup.APP, { ThemePreferences.mode.collectAsStateWithLifecycle().value.label }, { AppearancePage() }),
     ABOUT("このアプリについて", SettingsGroup.APP, { "版と更新、通信とプライバシー" }, { AboutPage() }),
     LICENSES("ライセンス", SettingsGroup.APP, { "使っているモデルとソフトウェア" }, { LicensesCard() }),
 }
@@ -167,6 +168,24 @@ private fun ModelPage() {
 }
 
 /** 「このアプリについて」のページ。 */
+/** 画面の色：端末に合わせる・ライト（さえずりの紙）・ダーク（夜の鳥）。選ぶとすぐ変わる。 */
+@Composable
+private fun AppearancePage() {
+    val context = LocalContext.current
+    val mode by ThemePreferences.mode.collectAsStateWithLifecycle()
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ThemeMode.entries.forEach { m ->
+            FilterChip(selected = mode == m, onClick = { ThemePreferences.set(context, m) }, label = { Text(m.label) })
+        }
+        Text(
+            "ライトは生成りの紙と墨の「さえずりの紙」、ダークは紺の地にコーラルとミントの「夜の鳥」。" +
+                "画面翻訳の浮遊ボタンとメニューも同じ色になる。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 private fun AboutPage() {
     val context = LocalContext.current
