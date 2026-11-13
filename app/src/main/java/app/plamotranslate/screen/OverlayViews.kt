@@ -7,7 +7,6 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.Typeface
-import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
 import android.util.TypedValue
@@ -165,13 +164,11 @@ class FloatingButton(
     }
 
     /**
-     * アプリの印（単色のアイコン。アプリのアイコンを変えれば、ここも変わる）を主の色で描く。
-     * 文字の「訳」は使わない（docs/設計/デザイン言語.md「アイコン」）。
+     * アプリの印。アプリのアイコンの背景と前景を、アイコンの色のまま重ねて描く（印はテーマで色を変えない。
+     * アプリのアイコンを変えれば、ここも変わる）。文字の「訳」は使わない（docs/設計/デザイン言語.md「アイコン」）。
      */
-    private val mark = ImageView(context).apply {
-        setImageResource(R.drawable.ic_launcher_monochrome)
-        scaleType = ImageView.ScaleType.FIT_CENTER
-    }
+    private val markBackground = ImageView(context).apply { setImageResource(R.drawable.ic_launcher_background) }
+    private val mark = ImageView(context).apply { setImageResource(R.drawable.ic_launcher_foreground) }
 
     /** 原文の言語を決めているときだけ出す、右下の小さな札（中・韓・英・日）。 */
     private val badge = TextView(context).apply {
@@ -189,6 +186,7 @@ class FloatingButton(
         // アイコンの格子108のうち、真ん中の72（アダプティブアイコンの見える範囲）を丸いっぱいに描く。
         // 108全体を丸に収めると図柄が小さくなる。はみ出した外周は丸で切れる
         val full = faceSize * 108 / 72
+        addView(markBackground, FrameLayout.LayoutParams(full, full, Gravity.CENTER))
         addView(mark, FrameLayout.LayoutParams(full, full, Gravity.CENTER))
     }
     private val view = FrameLayout(context).apply {
@@ -202,22 +200,19 @@ class FloatingButton(
     private var auto = false
 
     /**
-     * 今のテーマの色で塗り直す（作ったとき、テーマや端末の明暗が変わったとき、訳し方を変えたとき）。面の丸に主の色の縁を付け、
-     * どんな画面の上でも見分けられるようにする（docs/設計/デザイン言語.md「色」）。
+     * 今のテーマの色で塗り直す（作ったとき、テーマや端末の明暗が変わったとき、訳し方を変えたとき）。印はアイコンの色のままで、
+     * その周りの縁・輪・札をテーマの主の色にする。縁は、暗い画面の上でも紺の印が埋もれないようにする（docs/設計/デザイン言語.md「色」）。
      */
     fun applyPalette() {
         val palette = OverlayPalette.current(context)
-        mark.imageTintList = ColorStateList.valueOf(palette.primary)
         badge.setTextColor(palette.onPrimary)
         badge.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(palette.primary)
         }
-        face.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(palette.surfaceRaised)
-            setStroke(context.dp(2), palette.primary)
-        }
+        // 丸の形（切り抜きの形）と、印の上に重ねる縁
+        face.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(palette.surfaceRaised) }
+        face.foreground = GradientDrawable().apply { shape = GradientDrawable.OVAL; setStroke(context.dp(2), palette.primary) }
         view.background = if (!auto) null else GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setStroke(context.dp(2), palette.primary)
