@@ -35,7 +35,7 @@ object OutlinedText {
      * - 重なるまとまりがあれば、[score] がはっきり高い方を採る（元の読み取りを優先し、同じくらいなら元を残す）。
      * - 片方にしかないまとまりは、崩れていなければ足す（白縁の字は元の画像では見つからないことがある）。
      */
-    fun pick(primary: List<OcrBlock>, alternate: List<OcrBlock>): List<OcrBlock> {
+    fun pick(primary: List<OcrLine>, alternate: List<OcrLine>): List<OcrLine> {
         val result = primary.toMutableList()
         for (alt in alternate) {
             val overlapping = result.filter { overlaps(it.bounds, alt.bounds) }
@@ -54,14 +54,14 @@ object OutlinedText {
                 result += alt
             }
         }
-        return result.sortedWith(compareBy<OcrBlock> { it.bounds.top }.thenBy { it.bounds.left })
+        return result.sortedWith(compareBy<OcrLine> { it.bounds.top }.thenBy { it.bounds.left })
     }
 
     /**
      * 読み取りのもっともらしさ。まとまりの文字種の字を1点とし、ほかの文字種の字（ラテン文字の行に混じった漢字など）、
      * 崩れた文字列、空白の抜けた長すぎるラテン文字の語（「OuRateckipoeRincreased」）を減点する。
      */
-    fun score(block: OcrBlock): Int {
+    fun score(block: OcrLine): Int {
         val text = block.text
         var own = 0
         var foreign = 0

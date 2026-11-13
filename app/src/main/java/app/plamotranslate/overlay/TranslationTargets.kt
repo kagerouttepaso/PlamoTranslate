@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.graphics.Rect
 import app.plamotranslate.llm.Language
 import app.plamotranslate.ocr.EnglishText
-import app.plamotranslate.ocr.OcrBlock
 import app.plamotranslate.ocr.Script
 import app.plamotranslate.ocr.TextQuality
 
@@ -15,7 +14,7 @@ import app.plamotranslate.ocr.TextQuality
 data class OverlaySlot(val rect: Rect, val vertical: Boolean, val colors: BoxColors = BoxColors.DEFAULT, val bubble: Boolean = false)
 
 /** 訳す1件：認識したまとまり、訳の枠（位置・縦書き・色）、翻訳に渡す原文。 */
-internal class TranslationTarget(val block: OcrBlock, val slot: OverlaySlot) {
+internal class TranslationTarget(val block: TextBlock, val slot: OverlaySlot) {
     val sourceText: String = block.joinedText()
 }
 
@@ -28,7 +27,7 @@ internal class TranslationTarget(val block: OcrBlock, val slot: OverlaySlot) {
  * 色を読み取るので、撮影画像を捨てる前に呼ぶ。
  */
 internal fun selectTargets(
-    blocks: List<OcrBlock>,
+    blocks: List<TextBlock>,
     bitmap: Bitmap,
     statusBarHeight: Int,
     target: Language,
@@ -56,7 +55,7 @@ internal fun selectTargets(
  * 漢字・ハングルは1文字でも意味を持つので訳す（漫画の「咦」「嘟」、2026-11-05評価）。
  * 崩れた認識結果（[TextQuality]）も訳さない。訳しても意味がなく、生成の時間だけを使う。
  */
-internal fun OcrBlock.needsTranslation(target: Language): Boolean {
+internal fun TextBlock.needsTranslation(target: Language): Boolean {
     val letters = text.count { it.isLetter() }
     val minLetters = if (script == Script.HAN || script == Script.HANGUL) 1 else 2
     if (letters < minLetters) return false
@@ -73,7 +72,7 @@ internal fun OcrBlock.needsTranslation(target: Language): Boolean {
  * 翻訳に渡す原文。行の折り返しをつなぐ。韓国語・欧文は単語の間で折り返すので空白、
  * 日本語・中国語は詰めてつなぐ。英文は大文字だけの文やハイフンの折り返しを整える（[EnglishText]）。
  */
-internal fun OcrBlock.joinedText(): String {
+internal fun TextBlock.joinedText(): String {
     if (script == Script.LATIN) return EnglishText.normalize(text.lines())
     val separator = if (script == Script.KANA || script == Script.HAN) "" else " "
     return text.lines().map { it.trim() }.filter { it.isNotEmpty() }.joinToString(separator)

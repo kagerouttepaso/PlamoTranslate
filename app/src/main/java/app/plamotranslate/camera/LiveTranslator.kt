@@ -13,6 +13,7 @@ import app.plamotranslate.llm.Language
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.ocr.OcrLanguage
 import app.plamotranslate.overlay.BoxColors
+import app.plamotranslate.overlay.TextBlock
 import app.plamotranslate.overlay.selectTargets
 import app.plamotranslate.pipeline.translation.Segment
 import app.plamotranslate.pipeline.translation.SegmentUpdate
@@ -64,7 +65,7 @@ class LiveFrame(
 /**
  * カメラ翻訳の中身（2026-11-06、docs/設計/カメラ翻訳.md）。部品を組み合わせて、コマごとの読み取りと翻訳の順番を回す。
  *
- * 1. 文字認識：コマを正立させて1行ずつ読む（[MultiScriptOcr] の groupLines=false）。
+ * 1. 文字認識：コマを正立させて1行ずつ読む（[MultiScriptOcr]）。
  * 2. 追跡と多数決：行をコマをまたいで追い、読み取りを安定させる（[LineTracker]）。
  * 3. 段落：安定した行を、文章／表・メニューのモードに合わせてまとめる（[Paragraphs]）。表示と翻訳はこの単位。
  * 4. 翻訳：読み取りがそろった段落を、画面に見えているもの・中央に近いものから訳す（[translateLoop]）。
@@ -75,7 +76,7 @@ class LiveFrame(
  */
 class LiveTranslator(private val context: Context, private val scope: CoroutineScope) {
     // 1行ずつ読む（段落にまとめると読み揺れで揃わない）。漫画モデルは縦書きの漫画用で遅いので使わない
-    private val ocr = MultiScriptOcr(paddleDir = null, groupLines = false)
+    private val ocr = MultiScriptOcr(paddleDir = null)
     private val tracker = LineTracker()
     private val _frame = MutableStateFlow<LiveFrame?>(null)
     val frame: StateFlow<LiveFrame?> = _frame.asStateFlow()
@@ -176,7 +177,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
         val t0 = SystemClock.uptimeMillis()
         val readings = try {
             // カメラでは1文字だけの読み取りを捨てる（韓国語のラベルを中国語の認識器が読み違えた「太」「我」などの雑音が多い）
-            selectTargets(ocr.recognize(upright, recognizers), upright, statusBarHeight = 0, target = target)
+            selectTargets(ocr.recognize(upright, recognizers).map(TextBlock::of), upright, statusBarHeight = 0, target = target)
                 .filter { t -> t.sourceText.count { it.isLetter() } >= 2 }
                 .map { Reading(it.block.bounds, it.sourceText, it.slot.colors) }
         } catch (e: Exception) {

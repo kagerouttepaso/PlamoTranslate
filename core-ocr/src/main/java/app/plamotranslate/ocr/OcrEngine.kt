@@ -6,12 +6,14 @@ import android.graphics.Rect
 /** 文字の種類。どの認識器の結果を採るかと、訳す必要があるかの判断に使う。 */
 enum class Script { HANGUL, KANA, HAN, LATIN, OTHER }
 
-/** 画面上の文字のまとまり（段落・吹き出しなど）。[bounds] は撮影画像の座標。[vertical] は縦書き。 */
-data class OcrBlock(
+/**
+ * 読み取った1行（縦書きなら1列）。[bounds] は撮影画像の座標。行を吹き出し・段落にまとめるのは読む工程の後
+ * （中核の `LineGrouper`。docs/設計/画面翻訳.md「まとめる」）。
+ */
+data class OcrLine(
     val text: String,
     val bounds: Rect,
     val script: Script,
-    val vertical: Boolean = false,
 )
 
 /**
@@ -30,7 +32,7 @@ enum class OcrLanguage {
 
 /** 文字認識の差し替え口（CLAUDE.md「差し替え可能に作る」）。 */
 interface OcrEngine {
-    /** 読み順（上から下、左から右）に並べて返す。[language] を決めると、その言語に要る認識器だけを動かす。 */
-    suspend fun recognize(bitmap: Bitmap, language: OcrLanguage = OcrLanguage.AUTO): List<OcrBlock>
+    /** 行を読み順（上から下、左から右）に並べて返す。[language] を決めると、その言語に要る認識器だけを動かす。 */
+    suspend fun recognize(bitmap: Bitmap, language: OcrLanguage = OcrLanguage.AUTO): List<OcrLine>
     fun close()
 }

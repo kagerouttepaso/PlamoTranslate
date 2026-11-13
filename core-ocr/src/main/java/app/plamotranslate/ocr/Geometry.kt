@@ -5,7 +5,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * 認識した行・文字の枠どうしの重なりを測る。行の突き合わせ（[BlockMerger]）、まとまり（[LineClusterer]）、列（[VerticalColumns]）、
+ * 認識した行・文字の枠どうしの重なりを測る。行の突き合わせ（[BlockMerger]）、列（[VerticalColumns]）、
  * カメラ翻訳の行の追跡（app の LineTracker）で共通に使う。
  */
 object Geometry {

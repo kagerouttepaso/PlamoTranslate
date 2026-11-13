@@ -5,7 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OutlinedTextTest {
-    private fun block(text: String, script: Script) = OcrBlock(text, Rect(), script)
+    private fun block(text: String, script: Script) = OcrLine(text, Rect(), script)
 
     @Test
     fun 崩れた英語より正しい英語の点が高い() {

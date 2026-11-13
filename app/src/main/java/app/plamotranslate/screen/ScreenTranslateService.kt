@@ -32,6 +32,9 @@ import app.plamotranslate.ocr.OcrLanguage
 import app.plamotranslate.translation.SqlitePersistentCache
 import app.plamotranslate.overlay.TranslationTarget
 import app.plamotranslate.overlay.selectTargets
+import app.plamotranslate.overlay.toBox
+import app.plamotranslate.overlay.groupLines
+import app.plamotranslate.pipeline.layout.Grouping
 import app.plamotranslate.pipeline.screen.SceneProfile
 import app.plamotranslate.pipeline.screen.ScreenChange
 import app.plamotranslate.pipeline.screen.ScreenSession
@@ -291,7 +294,7 @@ class ScreenTranslateService : Service() {
         scope.launch(w.job) {
             overlay?.showStatus("文字を読んでいます…")
             val t0 = SystemClock.uptimeMillis()
-            val blocks = try {
+            val lines = try {
                 // 白縁取り・白抜きの文字にも強い読み方（OutlinedText）は、場面の設定で選ぶ
                 if (outlined) ocr.recognizeOutlined(bitmap, language) else ocr.recognize(bitmap, language)
             } catch (e: Exception) {
@@ -300,6 +303,7 @@ class ScreenTranslateService : Service() {
                 emptyList()
             }
             w.ocrMillis = SystemClock.uptimeMillis() - t0
+            val blocks = groupLines(lines, Grouping.BUBBLE)
             w.blocks = blocks.size
             w.statusBar = statusBarHeight()
             w.targets = if (blocks.isEmpty()) emptyList() else selectTargets(blocks, bitmap, w.statusBar, SCREEN_TARGET, fitBubbles = preferences.fitBubbles)

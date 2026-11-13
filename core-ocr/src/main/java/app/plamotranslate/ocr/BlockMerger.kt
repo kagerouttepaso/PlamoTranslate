@@ -14,16 +14,16 @@ internal data class Candidate(
 )
 
 /**
- * 読み手ごとの行を、行ごとに文字種に合うものを選んでまとめる（docs/設計/画面翻訳.md「行の選び方とまとめ方」）。
+ * 読み手ごとの行を、行ごとに文字種に合うものを選んで1つにする（docs/設計/画面翻訳.md「行の選び方とまとめ方」）。
  *
  * 処理の順番：
  * 1. 縦書きの行を先に採る。縦書きを読める読み手（[Source.readsVertical]）があればその行を採り、無ければ ML Kit 中国語の
  *    1文字ずつの位置から列を組み直す（[VerticalColumns]）。その範囲に重なるほかの行（縦書きを横に読み違えた行）は捨てる。
  * 2. 残りの行を、位置が重なるものどうしで突き合わせ（[LineGroup]）、[LineChoice] に1つ選ばせる。
- * 3. 選んだ行を、位置関係から吹き出し・段落のまとまりに束ね（[LineClusterer]）、読み順に並べる。
+ * 3. 選んだ行を読み順に並べる。吹き出し・段落にまとめるのは、読む工程の後（中核の `LineGrouper`）。
  *
  * 段落ごとに選ぶと、日本語の解説に韓国語の引用が混ざった段落で、片方の言語が崩れた文字列になった
- * （2026-11-05実機）。そのため行ごとに選び、まとまりは後から組み直す。
+ * （2026-11-05実機）。そのため行ごとに選ぶ。
  *
  * 読み手の能力は [Source]、採る方針（確信度の下限・優先順）は [ChoicePolicy] が持ち、ここでは読み手の名前で分岐しない。
  */
@@ -50,8 +50,7 @@ internal object BlockMerger {
     fun merge(
         read: Map<Source, List<Candidate>>,
         glyphs: List<Glyph> = emptyList(),
-        groupLines: Boolean = true,
-    ): List<OcrBlock> {
+    ): List<OcrLine> {
         val lines = read.mapValues { (source, list) -> list.filter { ChoicePolicy.accepts(source, it.text, it.confidence) } }
         // 縦書きを読める読み手の行を先に採る。確信度が低く、韓国語の行と重なる範囲は韓国語の行に譲る
         val koreanLines = lines.flatMap { (source, list) -> list.filter { ChoicePolicy.isKoreanLine(it.reading(source)) } }
@@ -90,60 +89,14 @@ internal object BlockMerger {
             }
         }
 
-        val picked = groups.map { it.pick() }
-        return (if (groupLines) LineClusterer.cluster(picked) else picked.map { listOf(it) })
-            .map(::toBlock)
+        return groups.map { it.pick() }
             .filter { it.text.isNotBlank() }
-            .sortedWith(readingOrder { it.bounds })
-    }
-
-    /**
-     * 1行ずつの読み取り（[merge] の groupLines = false の結果）を、まとまりに束ねる。
-     * 白縁の文字の読み比べ（[OutlinedText]）で、2つの画像の行を1行ずつ選んでから束ねるのに使う。
-     */
-    fun group(lines: List<OcrBlock>, groupLines: Boolean = true): List<OcrBlock> {
-        val candidates = lines.map { Candidate(it.text, Rect(it.bounds)) }
-        return (if (groupLines) LineClusterer.cluster(candidates) else candidates.map { listOf(it) })
-            .map(::toBlock)
-            .filter { it.text.isNotBlank() }
-            .sortedWith(readingOrder { it.bounds })
+            .map { OcrLine(it.text, it.bounds, ScriptDetector.detect(it.text)) }
+            .sortedWith(compareBy({ it.bounds.top / ROW_TOLERANCE_PX }, { it.bounds.left }))
     }
 
     private fun Candidate.reading(source: Source) = Reading(source, text, confidence)
 
     /** どちらかの面積の3割以上が重なるか。 */
     private fun overlaps(a: Rect, b: Rect): Boolean = Geometry.overlaps(a, b, 0.3f)
-
-    private fun toBlock(lines: List<Candidate>): OcrBlock {
-        val bounds = Rect(lines.first().bounds)
-        lines.drop(1).forEach { bounds.union(it.bounds) }
-        val vertical = lines.any { LineClusterer.isVerticalLine(it) } &&
-            lines.none { LineClusterer.isHorizontal(it.bounds) }
-        // 縦書きは右の列から、横書きは上の行から読む
-        val ordered = if (vertical) {
-            lines.sortedByDescending { it.bounds.right }
-        } else {
-            rowOrder(lines)
-        }
-        val text = ordered.joinToString("\n") { it.text }
-        return OcrBlock(text, bounds, ScriptDetector.detect(text), vertical)
-    }
-
-    /**
-     * 横書きの行を上から、同じ高さの行は左から並べる。上端の数ピクセルの差で左右が逆転しないよう、
-     * 行の高さの半分以上重なる行を同じ段とみなす（2026-11-06、英語の吹き出しで「HAVE FUN / I STILL」と逆転した）。
-     */
-    private fun rowOrder(lines: List<Candidate>): List<Candidate> {
-        val rows = mutableListOf<MutableList<Candidate>>()
-        for (line in lines.sortedBy { it.bounds.centerY() }) {
-            val row = rows.lastOrNull()
-            val ref = row?.first()?.bounds
-            val overlap = if (ref == null) 0 else minOf(ref.bottom, line.bounds.bottom) - maxOf(ref.top, line.bounds.top)
-            if (ref != null && overlap > minOf(ref.height(), line.bounds.height()) / 2) row.add(line) else rows += mutableListOf(line)
-        }
-        return rows.flatMap { row -> row.sortedBy { it.bounds.left } }
-    }
-
-    private fun <T> readingOrder(rect: (T) -> Rect): Comparator<T> =
-        compareBy({ rect(it).top / ROW_TOLERANCE_PX }, { rect(it).left })
 }

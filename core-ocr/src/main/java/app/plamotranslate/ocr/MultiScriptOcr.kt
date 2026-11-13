@@ -19,10 +19,9 @@ import java.io.File
  * - ML Kitの中国語・日本語・韓国語・英字の認識器（横書き）。
  * - [paddleDir]（`files/models/ocr/`）に PP-OCR のモデルがあれば、その読み手も動かす（[PaddleReader]）。
  *
- * [groupLines] が false なら、行を段落・吹き出しにまとめずに1行ずつ返す（カメラ翻訳。2026-11-06）。
- * カメラはコマごとに読み揺れるので、大きなまとまりにすると同じ文として揃わず、訳が出ないため。
+ * 返すのは1行ずつの読み取り（[OcrLine]）。吹き出し・段落にまとめるのは呼ぶ側（中核の `LineGrouper`）。
  */
-class MultiScriptOcr(paddleDir: File? = null, private val groupLines: Boolean = true) : OcrEngine {
+class MultiScriptOcr(paddleDir: File? = null) : OcrEngine {
     private val paddle: PaddleReader? = paddleDir?.let { runCatching { PaddleReader.load(it) }.getOrNull() }
 
     private val readers: List<LineReader> = listOfNotNull(
@@ -36,37 +35,35 @@ class MultiScriptOcr(paddleDir: File? = null, private val groupLines: Boolean = 
     /** PP-OCR で読める読み手の一覧（評価・ログ用）。 */
     val paddleSources: Set<String> get() = paddle?.sources.orEmpty().map { it.name }.toSet()
 
-    override suspend fun recognize(bitmap: Bitmap, language: OcrLanguage): List<OcrBlock> = read(bitmap, Recognizers.of(language))
+    override suspend fun recognize(bitmap: Bitmap, language: OcrLanguage): List<OcrLine> = read(bitmap, Recognizers.of(language))
 
     /**
      * 白縁取り・白抜きの文字にも強く読む（画面翻訳の動く画面のモード。[OutlinedText]）。元の画像と、RGBの最小値を取った画像を
      * 並べて読み、行ごとに崩れの少ない方を採る。文字認識が1回分多くかかる。最小値の画像には重い読み手（PP-OCR）を使わない。
      */
-    suspend fun recognizeOutlined(bitmap: Bitmap, language: OcrLanguage): List<OcrBlock> = coroutineScope {
+    suspend fun recognizeOutlined(bitmap: Bitmap, language: OcrLanguage): List<OcrLine> = coroutineScope {
         val use = Recognizers.of(language)
-        // 束ねた後のまとまりで比べると、言語の違う行が一緒に束ねられて比べられなかった（2026-11-12）ので、
-        // 1行ずつ読んで行ごとに選び、選んだ行を束ねる
-        val primary = async { read(bitmap, use, group = false) }
+        // 束ねた後のまとまりで比べると、言語の違う行が一緒に束ねられて比べられなかった（2026-11-12）ので、行ごとに比べる
+        val primary = async { read(bitmap, use) }
         val variant = async(Dispatchers.Default) {
             val white = OutlinedText.whiteness(bitmap)
             try {
-                read(white, use, group = false, light = true)
+                read(white, use, light = true)
             } finally {
                 white.recycle()
             }
         }
-        BlockMerger.group(OutlinedText.pick(primary.await(), variant.await()), groupLines)
+        OutlinedText.pick(primary.await(), variant.await())
     }
 
     /** [light] なら重い読み手（[LineReader.heavy]）を使わない。 */
-    private suspend fun read(bitmap: Bitmap, use: Set<Source>, group: Boolean = groupLines, light: Boolean = false): List<OcrBlock> = coroutineScope {
+    private suspend fun read(bitmap: Bitmap, use: Set<Source>, light: Boolean = false): List<OcrLine> = coroutineScope {
         val readings = readers.filter { r -> r.sources.any { it in use } && !(light && r.heavy) }
             .map { r -> async { r.read(bitmap, use) } }
             .awaitAll()
         BlockMerger.merge(
             read = readings.fold(mapOf()) { acc, r -> acc + r.lines },
             glyphs = readings.flatMap { it.glyphs },
-            groupLines = group,
         )
     }
 

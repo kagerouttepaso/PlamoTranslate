@@ -1,5 +1,6 @@
 package app.plamotranslate.camera
 
+import app.plamotranslate.pipeline.layout.TextGrouper
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -31,11 +32,11 @@ class CameraTextTest {
     @Test
     fun itemStartsNewParagraph() {
         listOf("1. 제품의 임의 분해", "2) 제품 위로", "3 모서리에 부딪쳐", "① 주의", "・注意", "※ 안내", "- item").forEach {
-            assertTrue(it, Paragraphs.ITEM_START.containsMatchIn(it))
+            assertTrue(it, TextGrouper.ITEM_START.containsMatchIn(it))
         }
         // 数字のすぐ後に文字が続くのは項目の番号ではない
         listOf("2인분부터 주문 가능해요", "500ml 80kcal", "이 제품은", "COLD BREW").forEach {
-            assertFalse(it, Paragraphs.ITEM_START.containsMatchIn(it))
+            assertFalse(it, TextGrouper.ITEM_START.containsMatchIn(it))
         }
     }
 

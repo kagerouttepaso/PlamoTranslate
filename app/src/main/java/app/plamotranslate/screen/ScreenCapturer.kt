@@ -181,6 +181,3 @@ class ScreenCapturer(context: Context, projection: MediaProjection) {
 
 /** 撮った画像を、画面の変化の計算に使う格子（中核の [Thumb]）に縮める。 */
 internal fun Bitmap.toThumb(): Thumb = ScreenChange.thumb(width, height) { x, y -> ScreenChange.luminanceOf(getPixel(x, y)) }
-
-/** 端末の長方形を、中核の長方形にする。 */
-internal fun android.graphics.Rect.toBox() = app.plamotranslate.pipeline.screen.Box(left, top, right, bottom)

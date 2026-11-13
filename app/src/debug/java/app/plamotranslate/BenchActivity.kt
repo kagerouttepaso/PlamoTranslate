@@ -19,6 +19,8 @@ import app.plamotranslate.ocr.OcrLanguage
 import app.plamotranslate.overlay.OverlaySlot
 import app.plamotranslate.overlay.dp
 import app.plamotranslate.overlay.selectTargets
+import app.plamotranslate.overlay.groupLines
+import app.plamotranslate.pipeline.layout.Grouping
 import app.plamotranslate.overlay.spToPx
 import app.plamotranslate.pipeline.translation.Segment
 import app.plamotranslate.pipeline.translation.SegmentUpdate
@@ -92,7 +94,7 @@ class BenchActivity : ComponentActivity() {
                 })
             } ?: continue
             val t0 = SystemClock.uptimeMillis()
-            val blocks = ocr.recognize(bitmap, language)
+            val blocks = groupLines(ocr.recognize(bitmap, language), Grouping.BUBBLE)
             val ocrMillis = SystemClock.uptimeMillis() - t0
             val targets = selectTargets(blocks, bitmap, statusBar, SCREEN_TARGET)
 

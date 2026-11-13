@@ -2,7 +2,6 @@ package app.plamotranslate.overlay
 
 import android.graphics.Rect
 import app.plamotranslate.llm.Language
-import app.plamotranslate.ocr.OcrBlock
 import app.plamotranslate.ocr.Script
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -13,7 +12,7 @@ import org.junit.Test
  * （2026-11-09、カメラ翻訳が画面翻訳の訳す先「日本語」で判定し、訳す先を日本語以外にすると日本語の看板を訳さなかった）。
  */
 class TranslationTargetsTest {
-    private fun block(text: String, script: Script) = OcrBlock(text, Rect(), script)
+    private fun block(text: String, script: Script) = TextBlock(text, Rect(), script)
 
     @Test
     fun japaneseIsSkippedOnlyWhenTargetIsJapanese() {
