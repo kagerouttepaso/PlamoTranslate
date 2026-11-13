@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
@@ -14,6 +15,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -53,6 +55,7 @@ fun SpeechCard() {
     var speed by remember { mutableStateOf(preferences.speed) }
     var steps by remember { mutableStateOf(preferences.steps) }
     var refresh by remember { mutableStateOf(0) }
+    var askConsent by remember { mutableStateOf(false) }
     val present = remember(refresh, download) { ModelCatalog.speechPresent(context) }
     // 声の数はモデルを読み込むと分かる。Supertonic 3を選んでいてモデルがあれば、開いたときに読み込む
     var voices by remember { mutableStateOf(0) }
@@ -104,10 +107,17 @@ fun SpeechCard() {
                     )
                     // 一度に取るのは1組だけ。2Bを取っている間は押せなくし、理由を出す
                     val busy = state is DownloadState.Running
-                    OutlinedButton(enabled = !busy, onClick = {
-                        ModelDownloads.start(context, ModelBundle.SPEECH, onCompleted = { refresh++ })
-                    }) { Text("Supertonic 3をダウンロード") }
+                    OutlinedButton(enabled = !busy, onClick = { askConsent = true }) { Text("Supertonic 3をダウンロード") }
                     if (busy) Text("ほかのモデルのダウンロードが終わると押せます", style = MaterialTheme.typography.bodySmall)
+                }
+                if (askConsent) {
+                    SupertonicConsentDialog(
+                        onAgree = {
+                            askConsent = false
+                            ModelDownloads.start(context, ModelBundle.SPEECH, onCompleted = { refresh++ })
+                        },
+                        onDismiss = { askConsent = false },
+                    )
                 }
                 failure?.takeIf { it.bundle == ModelBundle.SPEECH }?.let {
                     Text(it.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -173,4 +183,45 @@ fun SpeechCard() {
             }
         }
     }
+}
+
+/**
+ * Supertonic 3 をダウンロードする前の同意（docs/判断/2026-11-13_ライセンスの表示を同梱した全文と明記にする.md）。
+ * BigScience Open RAIL-M License 第5項は、アプリの作者に、使う人へ用途の制限（Attachment A）を守らせるよう求める。
+ */
+@Composable
+private fun SupertonicConsentDialog(onAgree: () -> Unit, onDismiss: () -> Unit) {
+    var fullText by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Supertonic 3 の利用条件") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "Supertonic 3（Supertone Inc.）は BigScience Open RAIL-M License のもとで使えます。" +
+                        "ダウンロードする前に、次の使い方をしないことに同意してください（ライセンスの Attachment A の要旨。正本は全文）。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    "・法令に反すること\n" +
+                        "・未成年を搾取し、害すること\n" +
+                        "・人を害する目的で偽りの情報を作り、広めること\n" +
+                        "・人を害し得る個人を特定する情報を作り、広めること\n" +
+                        "・機械が作ったと明示せずに、作った音声などを広めること\n" +
+                        "・他人を中傷し、嫌がらせをすること\n" +
+                        "・同意なく他人になりすますこと\n" +
+                        "・人の法的な権利に不利な決定を、完全に自動で行うこと\n" +
+                        "・社会的な振る舞いや属性、法で守られた特徴による差別や害\n" +
+                        "・年齢や障害などの弱みにつけこみ、害を与えるように行動をゆがめること\n" +
+                        "・医療の助言や検査結果の解釈\n" +
+                        "・司法・法執行・入国審査などで、個人を予測し判断するための情報を作ること",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { fullText = true }) { Text("ライセンスの全文") }
+            }
+        },
+        confirmButton = { TextButton(onClick = onAgree) { Text("同意してダウンロード") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("やめる") } },
+    )
+    if (fullText) LicenseTextDialog(LicenseText.OPENRAIL) { fullText = false }
 }

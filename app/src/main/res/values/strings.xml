@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="app_name">PLaMo翻訳</string>
     <string name="shortcut_conversation">会話翻訳</string>
     <string name="shortcut_camera">カメラ翻訳</string>
     <string name="shortcut_screen">画面翻訳</string>

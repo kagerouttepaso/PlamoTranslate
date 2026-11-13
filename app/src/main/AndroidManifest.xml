@@ -23,7 +23,7 @@
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
-        android:label="PLaMo翻訳"
+        android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
         <!-- GPU（Adreno）で翻訳するため、端末のOpenCLドライバーを使う（/vendor/etc/public.libraries.txt で公開済み） -->
