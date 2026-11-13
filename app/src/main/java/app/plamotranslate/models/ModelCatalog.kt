@@ -110,10 +110,10 @@ object ModelCatalog {
 
     /**
      * 韓国語の文字の認識（`PaddlePaddle/korean_PP-OCRv5_mobile_rec` を ONNX にしたもの、Apache-2.0）。
-     * 公式は Paddle の形式だけなので、公式から変換して公開されている版を使う。PCで公式の重み（コミット c02ecaf1）を
+     * 公式は Paddle の形式だけなので、公式から変換して公開されている版（Wycliffe Associates の DocScanner。旧 mxaln/docscanner-ocr から移った）を使う。PCで公式の重み（コミット c02ecaf1）を
      * 変換したものと出力が一致することを確かめた（2026-11-13、docs/判断/2026-11-13_韓国語の飾り文字にPP-OCRの韓国語の認識を足す.md）。
      */
-    private const val KOREAN_OCR = "$HF/mxaln/docscanner-ocr/resolve/354549cf968c1d8883482a1dc74dde9c762ebf53/korean"
+    private const val KOREAN_OCR = "$HF/wycliffeassociates/docscanner-ocr/resolve/354549cf968c1d8883482a1dc74dde9c762ebf53/korean"
 
     /** 初回起動時にそろえるファイル。翻訳モデルは0.8Bだけで、2Bは選んだときに足す。 */
     val files = listOf(
