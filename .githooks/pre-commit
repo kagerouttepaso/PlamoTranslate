@@ -21,7 +21,8 @@ if ! pwsh -NoProfile -File "$root/tools/check-design.ps1"; then
 fi
 
 # コードを変えて docs/ を変えていないときの念押し（止めない。設計に関わらない修正もあるため）
-staged=$(git diff --cached --name-only)
+# 日本語の名前は引用符付きの8進数で出て "docs/ で始まる" に当たらないので、そのまま出させる
+staged=$(git -c core.quotepath=false diff --cached --name-only)
 if printf '%s\n' "$staged" | grep -qE '^(app|core-[a-z]+|featurelab)/' && ! printf '%s\n' "$staged" | grep -q '^docs/'; then
   echo "pre-commit 注意：コードを変えたが docs/ を変えていない。設計や振る舞いを変えたなら、同じコミットで docs/設計/ を直す（docs/README.md「出来事を文書に反映する流れ」）" >&2
 fi
