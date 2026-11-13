@@ -2,6 +2,7 @@ package app.plamotranslate.conversation
 
 import android.Manifest
 import android.app.Application
+import android.content.pm.ApplicationInfo
 import androidx.annotation.RequiresPermission
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -22,6 +23,9 @@ import app.plamotranslate.pipeline.translation.TranslationStream
 import app.plamotranslate.pipeline.translation.translateOne
 import app.plamotranslate.translation.Translations
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -191,7 +195,27 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start() = listen { engine ->
-        MicRecorder.stream().collect { chunk -> feed(engine, chunk) }
+        val recording = recorder()
+        try {
+            MicRecorder.stream().collect { chunk ->
+                val fed = feed(engine, chunk)
+                recording?.write(fed)
+            }
+        } finally {
+            recording?.close()
+        }
+    }
+
+    /**
+     * デバッグ版だけ、音声認識へ渡した音声を WAV に書く（docs/設計/会話翻訳.md「動作確認」）。[startFromWav] で流し直して、
+     * 区切りと確定の文を前後で比べるため。会話の中身なので、端末の外部ファイルの `asr-rec/` にだけ置き、区切りで消す。
+     */
+    private fun recorder(): WavFile.Writer? {
+        if (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return null
+        val dir = app.getExternalFilesDir(RECORDING_DIR) ?: return null
+        val file = File(dir, "conv_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.wav")
+        log("会話の音声を書く: ${file.path}")
+        return runCatching { WavFile.Writer(file) }.onFailure { Logs.w("会話: 音声を書けない", it) }.getOrNull()
     }
 
     /**
@@ -213,11 +237,13 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         log("音声ファイルの認識が終わりました: ${File(path).name}")
     }
 
-    private fun feed(engine: AsrEngine, raw: FloatArray) {
+    /** 音声を音声認識に渡し、渡した音声を返す（読み上げの間は無音に置き換えたもの）。 */
+    private fun feed(engine: AsrEngine, raw: FloatArray): FloatArray {
         // 訳文を読み上げている間とその直後は、マイクの音を無音に置き換える。読み上げの声を発話として拾わないため（2026-11-08）
         val chunk = if (ReadAloud.isAudible()) FloatArray(raw.size) else raw
         _state.update { it.copy(level = level(chunk)) }
         engine.accept(chunk).forEach(::onEvent)
+        return chunk
     }
 
     fun stop() {
@@ -372,6 +398,9 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     companion object {
         /** 途中訳は話している途中の文なので短い。長く生成して確定訳を待たせないよう上限を低くする。 */
         private const val PARTIAL_MAX_TOKENS = 160
+
+        /** デバッグ版が会話の音声を書く、外部ファイルの中のフォルダー。 */
+        const val RECORDING_DIR = "asr-rec"
 
         /** 音声認識（sherpa-onnx）は同じスレッドから順に呼ぶ。 */
         private val asrExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "PlamoAsr") }

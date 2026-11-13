@@ -4,6 +4,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -77,6 +78,22 @@ class AsrTest {
         val samples = shortArrayOf(0, 16384, -32768)
         val wav = wav(samples)
         assertArrayEquals(floatArrayOf(0f, 0.5f, -1f), WavFile.parse(wav), 1e-6f)
+    }
+
+    @Test
+    fun 書いたWAVを読み戻す() {
+        val file = File.createTempFile("rec", ".wav").apply { deleteOnExit() }
+        WavFile.Writer(file).use { w ->
+            w.write(floatArrayOf(0f, 0.5f))
+            w.write(floatArrayOf(-0.5f))
+        }
+        assertArrayEquals(floatArrayOf(0f, 0.5f, -0.5f), WavFile.read(file), 1e-4f)
+    }
+
+    @Test
+    fun 書いている途中で長さが0のままのWAVも末尾まで読む() {
+        val bytes = WavFile.header(0) + wav(shortArrayOf(16384, -16384)).copyOfRange(44, 48)
+        assertArrayEquals(floatArrayOf(0.5f, -0.5f), WavFile.parse(bytes), 1e-6f)
     }
 
     @Test(expected = IllegalArgumentException::class)

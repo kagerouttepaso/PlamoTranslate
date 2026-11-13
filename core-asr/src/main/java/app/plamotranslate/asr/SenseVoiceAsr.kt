@@ -6,6 +6,7 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig
 import com.k2fsa.sherpa.onnx.Vad
+import app.plamotranslate.log.Logs
 import com.k2fsa.sherpa.onnx.VadModelConfig
 import java.io.File
 
@@ -101,9 +102,10 @@ class SenseVoiceAsr private constructor(
             val end = (buffer.size - PHRASE_TAIL_DROP).coerceAtLeast(phraseStart)
             // 中身のない文（雑音の聞き違い）は言語が null になる。その場合は前の文の言語を引き継ぎ、
             // 雑音を挟んだ後の本当の話し手の交代も見分けられるようにする
-            lastPhraseLang = (if (phraseStart == 0 && lastPartialLang != null) lastPartialLang else langOf(phraseStart, end))
+            lastPhraseLang = (if (phraseStart == 0 && lastPartialLang != null) lastPartialLang else langOf(phraseStart, end, "文の終わり"))
                 ?: lastPhraseLang
             lastPhraseEnd = end
+            trace { "文の終わり ${at(end)}、文の言語 $lastPhraseLang" }
             inGap = true
             gapSamples = 0
         } else if (inGap) {
@@ -116,7 +118,7 @@ class SenseVoiceAsr private constructor(
                 gapSamples += samples.size
                 if (gapSamples >= CARD_END_GAP_SAMPLES) {
                     // 話し終わり：最後の文の終わりまでを確定させる
-                    finalOf(buffer.take(lastPhraseEnd))?.let(out::add)
+                    finalOf(buffer.take(lastPhraseEnd), "話し終わり")?.let(out::add)
                     buffer.clear()
                     out += AsrEvent.Speaking(false)
                     return out
@@ -126,10 +128,10 @@ class SenseVoiceAsr private constructor(
 
         if (!switchChecked && buffer.size - phraseStart >= SWITCH_CHECK_SAMPLES) {
             switchChecked = true
-            val lang = sameGroup(langOf(phraseStart, buffer.size))
+            val lang = sameGroup(langOf(phraseStart, buffer.size, "次の文の頭"))
             if (lang != null && lastPhraseLang != null && lang != sameGroup(lastPhraseLang)) {
                 // 話し手が代わった：前の文までを確定させ、今の文から新しいカードにする
-                cut(lastPhraseEnd)?.let(out::add)
+                cut(lastPhraseEnd, "言語の交代（間あり：$lastPhraseLang→$lang）")?.let(out::add)
                 cardLang = lang
             }
         }
@@ -137,7 +139,7 @@ class SenseVoiceAsr private constructor(
         if (buffer.size >= SPLIT_AFTER_SAMPLES) {
             // 長く話し続けている：直近の一番静かなところで区切り、後ろの音声は次のカードの頭として残す
             val at = buffer.quietestPoint(buffer.size - SPLIT_SEARCH_SAMPLES, buffer.size - MIN_TAIL_SAMPLES, FRAME_SAMPLES)
-            cut(at)?.let(out::add)
+            cut(at, "長い発話")?.let(out::add)
         } else {
             sinceLastPartial += samples.size
             if (sinceLastPartial >= partialInterval && buffer.size >= MIN_PARTIAL_SAMPLES) {
@@ -163,18 +165,18 @@ class SenseVoiceAsr private constructor(
      */
     private fun watchLanguage(): AsrEvent.Final? {
         if (cardLang == null) {
-            if (buffer.size >= CARD_LANG_SAMPLES) cardLang = sameGroup(langOf(0, CARD_LANG_SAMPLES))
+            if (buffer.size >= CARD_LANG_SAMPLES) cardLang = sameGroup(langOf(0, CARD_LANG_SAMPLES, "カードの頭"))
             return null
         }
         if (buffer.size < CARD_LANG_SAMPLES + LANG_WINDOW_SAMPLES) return null
-        val recent = sameGroup(langOf(buffer.size - LANG_WINDOW_SAMPLES, buffer.size))
+        val recent = sameGroup(langOf(buffer.size - LANG_WINDOW_SAMPLES, buffer.size, "直近（カード $cardLang）"))
         if (recent == null || recent == cardLang) {
             mismatches = 0
             return null
         }
         if (++mismatches < 2) return null
         val at = switchPoint(buffer.size - SWITCH_SEARCH_SAMPLES, buffer.size - SWITCH_SEARCH_END_SAMPLES, recent)
-        val final = cut(at)
+        val final = cut(at, "言語の交代（話し中：$cardLang→$recent）")
         cardLang = recent
         return final
     }
@@ -189,7 +191,7 @@ class SenseVoiceAsr private constructor(
         val start = from.coerceAtLeast(0)
         var s = start
         while (s <= to) {
-            if (sameGroup(langOf(s, s + LANG_PROBE_SAMPLES)) == newLang) {
+            if (sameGroup(langOf(s, s + LANG_PROBE_SAMPLES, "継ぎ目探し")) == newLang) {
                 return buffer.quietestPoint(s - FRAME_SAMPLES * 2, s + FRAME_SAMPLES * 6, FRAME_SAMPLES)
             }
             s += LANG_PROBE_STEP_SAMPLES
@@ -212,9 +214,9 @@ class SenseVoiceAsr private constructor(
         mismatches = 0
     }
 
-    /** 話し続けたまま [at] で区切る。前を確定させ、後ろは次のカードの頭として残す。 */
-    private fun cut(at: Int): AsrEvent.Final? {
-        val final = finalOf(buffer.take(at))
+    /** 話し続けたまま [at] で区切る。前を確定させ、後ろは次のカードの頭として残す。[reason] はログに出す区切りの理由。 */
+    private fun cut(at: Int, reason: String): AsrEvent.Final? {
+        val final = finalOf(buffer.take(at), reason)
         mismatches = 0
         // 区切った後ろは別の話し手の可能性があるので、カードの言語は決め直す（呼び出し側が分かっていれば上書きする）
         cardLang = null
@@ -227,11 +229,22 @@ class SenseVoiceAsr private constructor(
         return final
     }
 
-    /** ためた音声の [from]〜[to] の言語。短すぎて分からなければ null。 */
-    private fun langOf(from: Int, to: Int): String? {
+    /** ためた音声の [from]〜[to] の言語。短すぎて分からなければ null。[purpose] はログに出す判定の目的。 */
+    private fun langOf(from: Int, to: Int, purpose: String): String? {
         if (to - from < MIN_PARTIAL_SAMPLES) return null
-        return decode(buffer.slice(from, to)).second
+        val (text, lang) = decode(buffer.slice(from, to))
+        trace { "言語の判定（$purpose）${at(from)}〜${at(to)}: [$lang] $text" }
+        return lang
     }
+
+    /** ためた音声の中の位置を、会話の始めからの秒で書く（ログ用）。 */
+    private fun at(pos: Int): String = "%.2f秒".format((bufferStart + pos).coerceAtLeast(0) / AsrEngine.SAMPLE_RATE.toDouble())
+
+    /**
+     * 区切りと言語の判定の経過をログに出す（docs/設計/会話翻訳.md「動作確認」）。話した言葉を含むので、デバッグ版だけに出る
+     * （[Logs.text]）。録音を流し直して、区切りの理由と確定の文の違いを調べるため。
+     */
+    private fun trace(message: () -> String) = Logs.text { "会話の認識: ${message()}" }
 
     override fun flush(): List<AsrEvent> {
         if (closed) return emptyList()
@@ -239,7 +252,7 @@ class SenseVoiceAsr private constructor(
         while (!vad.empty()) vad.pop()
         if (!buffer.active) return emptyList()
         val out = mutableListOf<AsrEvent>()
-        finalOf(buffer.snapshot())?.let(out::add)
+        finalOf(buffer.snapshot(), "停止")?.let(out::add)
         buffer.clear()
         out += AsrEvent.Speaking(false)
         return out
@@ -254,13 +267,21 @@ class SenseVoiceAsr private constructor(
         startCard()
     }
 
-    /** ためた音声の先頭 [samples] を確定した発話として認識する。 */
-    private fun finalOf(samples: FloatArray): AsrEvent.Final? {
+    /** ためた音声の先頭 [samples] を確定した発話として認識する。[reason] はログに出す区切りの理由。 */
+    private fun finalOf(samples: FloatArray, reason: String): AsrEvent.Final? {
         val startedAt = bufferStart
         bufferStart += samples.size
-        if (samples.size < MIN_PARTIAL_SAMPLES) return null
+        val range = "%.2f〜%.2f秒".format(
+            startedAt.coerceAtLeast(0) / AsrEngine.SAMPLE_RATE.toDouble(), bufferStart / AsrEngine.SAMPLE_RATE.toDouble(),
+        )
+        if (samples.size < MIN_PARTIAL_SAMPLES) {
+            trace { "区切り（$reason）$range: 短いので捨てた" }
+            return null
+        }
         val start = System.nanoTime()
         val (text, lang) = decode(samples)
+        // 確定の文と、直前の途中の文を並べる（途中は合っていたのに確定で変わった例を見分けるため）
+        trace { "区切り（$reason）$range: 確定 [$lang] $text ／ 直前の途中 [$lastPartialLang] $lastPartialText" }
         if (text.isEmpty()) return null
         return AsrEvent.Final(
             Utterance(
