@@ -164,7 +164,7 @@ private fun HomeScreen(onToggleScreenTranslate: () -> Unit) {
             Row(Modifier.fillMaxWidth().weight(2.6f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Tile(
                     icon = "📷",
-                    title = "カメラ",
+                    title = "カメラ翻訳",
                     note = "看板・メニューにかざす",
                     container = scheme.secondaryContainer,
                     content = scheme.onSecondaryContainer,
