@@ -2,6 +2,9 @@ package app.plamotranslate.screen
 
 import android.content.Context
 import app.plamotranslate.ocr.OcrLanguage
+import app.plamotranslate.pipeline.layout.Grouping
+import app.plamotranslate.pipeline.screen.ScreenPreset
+import app.plamotranslate.pipeline.screen.ScreenSettings
 
 /**
  * 画面翻訳の認識モード（2026-11-12、作者の要望。ゲームの画面で、文字の奥のキャラクターが動いて読み取りが崩れる）。
@@ -46,6 +49,22 @@ internal enum class ScreenDismissal(val menuName: String) {
     }
 }
 
+/** 場面のプリセットのメニュー名。 */
+internal val ScreenPreset.menuName: String
+    get() = when (this) {
+        ScreenPreset.MANGA -> "漫画"
+        ScreenPreset.CHAT -> "チャット"
+        ScreenPreset.GAME -> "ゲーム"
+    }
+
+/** まとめ方のメニュー名。 */
+internal val Grouping.menuName: String
+    get() = when (this) {
+        Grouping.BUBBLE -> "吹き出し"
+        Grouping.TEXT -> "文章"
+        Grouping.MENU -> "メニュー"
+    }
+
 /**
  * 画面翻訳の設定（原文の言語、認識モード、始め方、訳の消え方）。端末に残し、次に始めたときも引き継ぐ。
  * カメラ翻訳は言語そのものを選ぶので別に持つ（camera/CameraPreferences.kt）。
@@ -74,10 +93,33 @@ internal class ScreenPreferences(context: Context) {
         get() = ScreenDismissal.parse(prefs.getString(KEY_DISMISSAL, null))
         set(value) = prefs.edit().putString(KEY_DISMISSAL, value.name).apply()
 
-    /** 訳の枠を吹き出しの内側まで広げるか（浮遊ボタンの長押しで切り替える。overlay/BubbleFit.kt）。 */
+    /** 訳の枠を広げるか（浮遊ボタンの長押しで切り替える。広げ方は単位の種類で決まる。overlay/SlotLayout.kt）。 */
     var fitBubbles: Boolean
         get() = prefs.getBoolean(KEY_FIT_BUBBLES, false)
         set(value) = prefs.edit().putBoolean(KEY_FIT_BUBBLES, value).apply()
+
+    /** 浮遊ボタンの長押しで選んだ行のまとめ方。読めなければ吹き出し（0.7.0までの唯一のまとめ方）。 */
+    var grouping: Grouping
+        get() = Grouping.entries.firstOrNull { it.name == prefs.getString(KEY_GROUPING, null) } ?: Grouping.BUBBLE
+        set(value) = prefs.edit().putString(KEY_GROUPING, value.name).apply()
+
+    /**
+     * 工程の中身の組（認識モード・まとめ方・訳の枠・訳の消え方）。場面のプリセットを選ぶと、まとめて書く。
+     * 保存は行ごとの値のままなので、前の版の設定もそのまま読める。
+     */
+    var settings: ScreenSettings
+        get() = ScreenSettings(
+            motion = recognition == ScreenRecognition.MOTION,
+            grouping = grouping,
+            fit = fitBubbles,
+            untilTouched = dismissal == ScreenDismissal.ON_TOUCH,
+        )
+        set(value) {
+            recognition = if (value.motion) ScreenRecognition.MOTION else ScreenRecognition.NORMAL
+            grouping = value.grouping
+            fitBubbles = value.fit
+            dismissal = if (value.untilTouched) ScreenDismissal.ON_TOUCH else ScreenDismissal.ON_CHANGE
+        }
 
     /**
      * 訳の枠を透かさないか（設定の画面で切り替える。ユーザー補助のサービス OverlayAccessibilityService を使う）。
@@ -93,6 +135,7 @@ internal class ScreenPreferences(context: Context) {
         const val KEY_TRIGGER = "trigger"
         const val KEY_DISMISSAL = "dismissal"
         const val KEY_FIT_BUBBLES = "fit_bubbles"
+        const val KEY_GROUPING = "grouping"
         const val KEY_OPAQUE_OVERLAY = "opaque_overlay"
     }
 }

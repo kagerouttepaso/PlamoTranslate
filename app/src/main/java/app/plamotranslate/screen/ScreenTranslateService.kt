@@ -35,6 +35,8 @@ import app.plamotranslate.overlay.toBox
 import app.plamotranslate.overlay.groupLines
 import app.plamotranslate.pipeline.layout.Grouping
 import app.plamotranslate.pipeline.screen.SceneProfile
+import app.plamotranslate.pipeline.screen.ScreenPreset
+import app.plamotranslate.pipeline.screen.ScreenSettings
 import app.plamotranslate.pipeline.screen.ScreenChange
 import app.plamotranslate.pipeline.screen.ScreenSession
 import app.plamotranslate.pipeline.screen.ScreenSession.Effect
@@ -229,11 +231,12 @@ class ScreenTranslateService : Service() {
         val w = Work(session).also { work = it }
         val capturer = capturer ?: return dispatch(SessionEvent.Captured(session, ok = false))
         val profile = profile
+        val settings = preferences.settings
         val choice = LayoutChoice(
             language = preferences.language,
             outlined = profile.outlinedText,
-            grouping = Grouping.BUBBLE,
-            fitBubbles = preferences.fitBubbles,
+            grouping = settings.grouping,
+            fitBubbles = settings.fit,
         )
         scope.launch(w.job) {
             val hiddenAt = SystemClock.uptimeMillis()
@@ -495,18 +498,15 @@ class ScreenTranslateService : Service() {
         Toast.makeText(this, text, Toast.LENGTH_LONG).show()
     }
 
-    /** 場面の設定（認識モードと訳の消え方）を今の設定に合わせ、判定器を作り直す。 */
+    /** 場面の設定（認識モードと訳の消え方から組み立てる撮り方・読み方・判定器）を今の設定に合わせ、判定器を作り直す。 */
     private fun applyProfile() {
-        profile = SceneProfile.of(
-            motion = preferences.recognition == ScreenRecognition.MOTION,
-            untilTouched = preferences.dismissal == ScreenDismissal.ON_TOUCH,
-        )
+        profile = preferences.settings.scene
         startJudge = StartJudge(profile.start).also { it.reset(SystemClock.uptimeMillis()) }
         validity = ValidityJudge(profile.validity)
     }
 
     /**
-     * 長押しのメニュー：原文の言語、始め方、認識モード、訳の消え方、訳の枠、翻訳モデル、終了。
+     * 長押しのメニュー：場面、原文の言語、始め方、認識モード、まとめ方、訳の枠、訳の消え方、翻訳モデル、終了。
      * 翻訳モデルはアプリ全体で1つなので、ここで変えると会話・カメラ・テキストの画面のモデルも変わる。
      * 開くと訳を消し、訳している途中なら取り消す（訳の枠がメニューより手前に出て触れなくなるため。状態遷移の MenuOpened）。
      */
@@ -521,6 +521,14 @@ class ScreenTranslateService : Service() {
 
     /** メニューの行。選択肢を押すたびに作り直すので、今の設定を読んで作る。 */
     private fun menuEntries(): List<MenuEntry> = buildList {
+        val settings = preferences.settings
+        val preset = ScreenPreset.matching(settings)
+        // 場面を選ぶと、下の工程の中身の行がまとめて変わる。行を個別に変えて組と合わなくなったら「カスタム」
+        add(MenuEntry.Choice("場面", ScreenPreset.entries.map { p ->
+            Option(p.menuName, checked = p == preset) { changeSettings(p.settings) }
+        } + listOfNotNull(
+            if (preset == null) Option("カスタム", checked = true, enabled = false, disabledHint = "上の場面を選ぶと、下の行がまとめて変わります") {} else null,
+        )))
         add(MenuEntry.Choice("原文の言語", OcrLanguage.entries.map { lang ->
             Option(lang.menuName, checked = lang == preferences.language) {
                 preferences.language = lang
@@ -535,21 +543,20 @@ class ScreenTranslateService : Service() {
             }
         }))
         add(MenuEntry.Choice("認識モード", ScreenRecognition.entries.map { mode ->
-            Option(mode.menuName, checked = mode == preferences.recognition) {
-                preferences.recognition = mode
-                applyProfile()
-            }
+            val motion = mode == ScreenRecognition.MOTION
+            Option(mode.menuName, checked = settings.motion == motion) { changeSettings(settings.copy(motion = motion)) }
         }))
-        add(MenuEntry.Choice("訳の消え方", ScreenDismissal.entries.map { d ->
-            Option(d.menuName, checked = d == preferences.dismissal) {
-                preferences.dismissal = d
-                applyProfile()
-            }
+        add(MenuEntry.Choice("まとめ方", Grouping.entries.map { g ->
+            Option(g.menuName, checked = settings.grouping == g) { changeSettings(settings.copy(grouping = g)) }
         }))
         add(MenuEntry.Choice("訳の枠", listOf(
-            Option("文字に合わせる", checked = !preferences.fitBubbles) { preferences.fitBubbles = false },
-            Option("吹き出しに広げる", checked = preferences.fitBubbles) { preferences.fitBubbles = true },
+            Option("文字に合わせる", checked = !settings.fit) { changeSettings(settings.copy(fit = false)) },
+            Option("広げる", checked = settings.fit) { changeSettings(settings.copy(fit = true)) },
         )))
+        add(MenuEntry.Choice("訳の消え方", ScreenDismissal.entries.map { d ->
+            val untilTouched = d == ScreenDismissal.ON_TOUCH
+            Option(d.menuName, checked = settings.untilTouched == untilTouched) { changeSettings(settings.copy(untilTouched = untilTouched)) }
+        }))
         val engineState = EngineHolder.state.value
         val current = (engineState as? ModelState.Ready)?.model ?: EngineHolder.selected(this@ScreenTranslateService)
         add(MenuEntry.Choice("翻訳モデル", TranslationModel.entries.map { m ->
@@ -562,6 +569,12 @@ class ScreenTranslateService : Service() {
             ) { if (m != current) switchModel(m) }
         }))
         add(MenuEntry.Action("画面翻訳を終了") { stopSelf() })
+    }
+
+    /** 工程の中身の組を変え、判定器を作り直す。次の翻訳から効く（メニューを開いた時点で今の翻訳は取り消してある）。 */
+    private fun changeSettings(settings: ScreenSettings) {
+        preferences.settings = settings
+        applyProfile()
     }
 
     /** 翻訳モデルを切り替え、読み込みの進み具合を上部の小さな表示に出す。訳している途中なら取り消す（古いエンジンは閉じられる）。 */
