@@ -49,10 +49,10 @@ internal object OverlayStyle {
     /** 横書きの訳の枠の、左右の内側の余白（dp）。 */
     const val H_PADDING_DP = 2
 
-    /** 認識した枠は文字にぴったりなので、少し広げて原文の端が見えないようにする。吹き出しまで広げた枠（[OverlaySlot.bubble]）はそのまま。 */
-    fun padded(context: Context, rect: Rect): Rect = Rect(rect).apply { inset(-context.dp(4), -context.dp(2)) }
-
-    /** 訳の枠を置く範囲。余白を足した後に占めてよい範囲で切るので、隣の単位へはみ出さない（中核の `Rooms.drawn`）。 */
+    /**
+     * 訳の枠を置く範囲。認識した枠は文字にぴったりなので、広げない枠には余白を足して原文の端が見えないようにする。
+     * 余白を足した後に占めてよい範囲で切るので、隣の単位へはみ出さない（中核の `Rooms.drawn`）。広げた枠（[OverlaySlot.bubble]）はそのまま。
+     */
     fun boxRect(context: Context, slot: OverlaySlot): Rect = Rooms.drawn(
         box = slot.rect.toBox(),
         grown = if (slot.bubble) slot.rect.toBox() else null,

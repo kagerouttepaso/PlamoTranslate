@@ -65,7 +65,7 @@ data class PlacedUnit(val unit: TextUnit, val room: Box)
 object TextLayout {
     /**
      * [lines] を [grouping] でまとめ、読み順に並べて範囲を付ける（画面翻訳）。[screen] は画面の範囲。
-     * 約束（`TextLayoutTest`）：どの行もちょうど1つの単位に入る。範囲は原文を含み画面を出ず、原文の重ならない単位どうしで重ならない。
+     * 約束（`GroupersTest`）：どの行もちょうど1つの単位に入る。範囲は原文を含み画面を出ず、原文の重ならない単位どうしで重ならない。
      */
     fun arrange(lines: List<TextLine>, grouping: Grouping, screen: Box): List<PlacedUnit> {
         val units = ReadingOrder.sort(units(lines, grouping))
