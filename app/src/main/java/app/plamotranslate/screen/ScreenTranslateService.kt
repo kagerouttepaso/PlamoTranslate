@@ -315,11 +315,9 @@ class ScreenTranslateService : Service() {
             w.model = ready.model.label
             w.translateStart = SystemClock.uptimeMillis()
             // 1回の翻訳ごとに翻訳の流れを開き、終わったら閉じる（docs/設計/翻訳コア.md「翻訳の契約」）。
-            // 控えは端末のデータベースにも残し、次に始めたときも使う。データベースでは確かなモデル（2B）の訳を優先する（SqlitePersistentCache.Scope）
-            val store = SqlitePersistentCache.get(this@ScreenTranslateService)
-            val stream = Translations.open(this, this@ScreenTranslateService, TranslationStream.Options(source, SCREEN_TARGET), memoryCache) { r ->
-                Translations.PersistentMemory(store.scope(r.model.file.sha256.take(16), r.model.cacheRank, source, SCREEN_TARGET), store.generation)
-            }
+            // メモリの控えはサービスが持って翻訳どうしで共有し、永続の控え（端末のデータベース）で次に始めたときも使う
+            val persistent = SqlitePersistentCache.get(this@ScreenTranslateService)
+            val stream = Translations.open(this, this@ScreenTranslateService, TranslationStream.Options(source, SCREEN_TARGET), memoryCache, persistent)
             try {
                 stream.submit(w.targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })
                 stream.updates.transformWhile { u ->

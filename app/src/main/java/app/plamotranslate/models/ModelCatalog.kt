@@ -1,6 +1,7 @@
 package app.plamotranslate.models
 
 import android.content.Context
+import app.plamotranslate.pipeline.translation.ModelOrigin
 import java.io.File
 
 /**
@@ -59,10 +60,11 @@ enum class TranslationModel(val label: String, val note: String, val file: Model
     fun isPresent(context: Context): Boolean = file.file(context).length() == file.size
 
     /**
-     * 訳の確かさの順位（大きいほど確か）。画面翻訳の訳の控えで、確かなモデルの訳を優先するのに使う（overlay/SqlitePersistentCache.kt）。
-     * 並びは小さいモデルから大きいモデルの順にしておくこと。
+     * 訳の控えで使う、訳したモデル（docs/設計/翻訳コア.md「控え」）。識別子は重みの SHA-256 の先頭、
+     * 訳の確かさ（[ModelOrigin.quality]、大きいほど確か）は並びの順で、控えは確かなモデルの訳を優先する。
+     * 並びは訳の確かさの低いもの（小さいモデル）から高いものの順にしておくこと。
      */
-    val cacheRank: Int get() = ordinal
+    val origin: ModelOrigin get() = ModelOrigin(file.sha256.take(16), ordinal)
 }
 
 /**

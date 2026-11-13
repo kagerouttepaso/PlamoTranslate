@@ -21,7 +21,8 @@ import kotlinx.coroutines.withContext
  * - 購読：[updates] で文ごとの途中の訳・確定の訳・失敗を受け取る（購読するのは1か所だけ）。
  *
  * 文は、エンジンの「同時に訳す数」に合うコア（[coreFor]）で片に分けて訳し、片の訳をつないで文の訳に戻す。同じ片は1回だけ訳す。
- * 控えは、メモリ（[cache]。流れどうしで共有できる）と、渡されていれば永続の控え（[Backend.memory]）を使う。
+ * 控えは2層で、鍵はどちらも「範囲（[Options.cacheScope]）＋片の原文」（docs/設計/翻訳コア.md「控え」）。
+ * メモリの控え（[cache]。流れどうしで共有できる）を引き、外れた片は渡されていれば永続の控え（[Backend.persistent]）を引く。
  * 訳している間に頼まれた文も、空いた流れですぐ訳す（永続の控えを引くのは、訳し始める前に頼まれた文だけ）。
  *
  * 状態は [lock] で守る。命令はどのスレッドから呼んでもよい。エンジンからの呼び出し（[source]）は推論のスレッドで来る。
@@ -40,10 +41,13 @@ class TranslationStream(
         val context: String? = null,
         /** 1回の依頼で生成するトークンの上限。 */
         val maxTokens: Int = DEFAULT_MAX_TOKENS,
-    )
+    ) {
+        /** 訳の控えの範囲。訳を変える条件だけを入れる（[maxTokens] は入れない）。 */
+        val cacheScope: CacheScope get() = CacheScope(source, target, form, context)
+    }
 
-    /** 訳すのに使う部品。[key] は訳したエンジン（翻訳モデル）を表し、変わったらメモリの控えを捨てる。 */
-    class Backend(val engine: JobEngine, val key: Any, val memory: PersistentCache? = null)
+    /** 訳すのに使う部品。[origin] は訳すモデルで、控えはその確かさ以上の訳だけを使う。[persistent] は永続の控え（無ければ使わない）。 */
+    class Backend(val engine: JobEngine, val origin: ModelOrigin, val persistent: PersistentCache? = null)
 
     /** 訳した結果の数（ログ用）。 */
     data class Stats(val pieces: Int, val memoryHits: Int, val storedHits: Int, val retried: Int, val stopped: Int)
@@ -98,7 +102,11 @@ class TranslationStream(
     private val tooLong = ArrayList<String>()
     private val toStore = LinkedHashMap<String, String>()
     private var core: TranslationCore = SequentialCore()
-    private var memory: PersistentCache? = null
+    private val cacheScope = options.cacheScope
+
+    /** 今の実行の部品（[work] が実行のたびに入れ替える）。 */
+    private var origin = ModelOrigin("", 0)
+    private var persistent: PersistentCache? = null
 
     private var piecesTranslated = 0
     private var memoryHits = 0
@@ -178,17 +186,20 @@ class TranslationStream(
                     fail("翻訳モデルを読めません")
                     break
                 }
-                cache.use(b.key)
+                // 永続の控えを消していたら（設定の画面）、メモリの控えも捨てる。書くときは、訳し始める前のこの世代を渡す
+                val stored = b.persistent?.let { it to it.generation }
+                cache.sync(stored?.second ?: 0)
                 val gen: Int
                 val lookup = synchronized(lock) {
                     core = coreFor(b.engine.parallel)
-                    memory = b.memory
+                    origin = b.origin
+                    persistent = b.persistent
                     gen = generation
                     drainInbox()
                 }
-                val hits = if (lookup.isNotEmpty() && b.memory != null) {
+                val hits = if (lookup.isNotEmpty() && b.persistent != null) {
                     try {
-                        b.memory.lookup(lookup)
+                        b.persistent.lookup(cacheScope, b.origin.quality, lookup)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -210,7 +221,7 @@ class TranslationStream(
                     } finally {
                         // 確定はエンジンが戻る前に流れるので、購読する側は最後の確定を受け取ってすぐ閉じてよい。
                         // 閉じられても（取り消されても）、訳し終えた片は永続の控えに書き終える
-                        withContext(NonCancellable) { flushStore(b.memory) }
+                        withContext(NonCancellable) { flushStore(stored, b.origin) }
                     }
                 }
             }
@@ -235,7 +246,7 @@ class TranslationStream(
                 when {
                     p in finals || p in queued -> Unit
                     else -> {
-                        val hit = cache[p]
+                        val hit = cache.get(cacheScope, p, origin.quality)
                         if (hit != null) {
                             memoryHits++
                             finals[p] = hit
@@ -262,7 +273,8 @@ class TranslationStream(
             val hit = hits[p]
             if (hit != null) {
                 storedHits++
-                cache[p] = hit
+                // 永続の控えの訳は今のモデル以上の確かさだが、正確な値は持たないので今のモデルの確かさで入れる
+                cache.put(cacheScope, p, hit, origin.quality)
                 pieceFinal(p, hit, fromEngine = false)
             } else {
                 queue.addLast(Piece(p))
@@ -343,13 +355,15 @@ class TranslationStream(
         tooLong.clear()
     }
 
-    private suspend fun flushStore(memory: PersistentCache?) {
+    /** 実行で訳し終えた片を、永続の控え [stored]（控えと、訳し始める前の世代）へまとめて書く。 */
+    private suspend fun flushStore(stored: Pair<PersistentCache, Int>?, origin: ModelOrigin) {
         val batch = synchronized(lock) {
             if (toStore.isEmpty()) return
             LinkedHashMap(toStore).also { toStore.clear() }
         }
+        val (persistent, generation) = stored ?: return
         try {
-            memory?.store(batch)
+            persistent.store(cacheScope, origin, generation, batch)
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -410,8 +424,8 @@ class TranslationStream(
             }
             for ((p, t) in outcome.finals) {
                 piecesTranslated++
-                cache[p] = t
-                if (memory != null && t.isNotEmpty() && !TranslationChecks.copied(p, t)) toStore[p] = t
+                cache.put(cacheScope, p, t, origin.quality)
+                if (persistent != null && t.isNotEmpty() && !TranslationChecks.copied(p, t)) toStore[p] = t
                 pieceFinal(p, t, fromEngine = true)
             }
         }

@@ -20,6 +20,7 @@ import app.plamotranslate.overlay.OverlaySlot
 import app.plamotranslate.overlay.dp
 import app.plamotranslate.overlay.selectTargets
 import app.plamotranslate.overlay.spToPx
+import app.plamotranslate.pipeline.translation.ModelOrigin
 import app.plamotranslate.pipeline.translation.Segment
 import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
@@ -101,7 +102,7 @@ class BenchActivity : ComponentActivity() {
             val t1 = SystemClock.uptimeMillis()
             // 訳す対象が無い画像（日本語だけ・空の画面）では流れを開かない。空の依頼は何も流さないので、確定を待つと止まる
             if (targets.isNotEmpty()) coroutineScope {
-                val stream = TranslationStream(this, { TranslationStream.Backend(engine, engine) }, TranslationStream.Options(language.sourceLanguage, SCREEN_TARGET))
+                val stream = TranslationStream(this, { TranslationStream.Backend(engine, BENCH_ORIGIN) }, TranslationStream.Options(language.sourceLanguage, SCREEN_TARGET))
                 try {
                     stream.submit(targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })
                     val done = HashSet<Long>()
@@ -203,6 +204,8 @@ class BenchActivity : ComponentActivity() {
     }
 
     private companion object {
+        /** 評価は画像ごとに流れとメモリの控えを作り直し、永続の控えも使わないので、モデルの確かさは比べない。 */
+        val BENCH_ORIGIN = ModelOrigin("bench", 0)
         const val TAG = "PlamoTranslate"
     }
 }

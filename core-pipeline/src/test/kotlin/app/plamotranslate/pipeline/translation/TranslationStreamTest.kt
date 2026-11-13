@@ -1,5 +1,6 @@
 package app.plamotranslate.pipeline.translation
 
+import app.plamotranslate.llm.JapaneseForm
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.TranslationRequest
 import kotlinx.coroutines.CoroutineScope
@@ -73,8 +74,40 @@ class TranslationStreamTest {
         private fun outputFor(request: TranslationRequest) = request.text.split('\n').joinToString("\n") { translate(it) }
     }
 
-    private fun stream(engine: FakeEngine, cache: MemoryCache = MemoryCache(), memory: PersistentCache? = null) =
-        TranslationStream(scope, { TranslationStream.Backend(engine, engine, memory) }, TranslationStream.Options(Language.EN, Language.JA), cache)
+    /**
+     * 偽の永続の控え。[saved] は「範囲の id|原文」→ 訳と確かさ。書いた呼び出しは [stores] に残す。
+     * [io] なら本物と同じく IO のスレッドへ移って書く（取り消されていれば止まる）。
+     */
+    private class FakePersistent(val io: Boolean = false) : PersistentCache {
+        class Store(val scope: CacheScope, val origin: ModelOrigin, val generation: Int, val translations: Map<String, String>)
+
+        val saved = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Int>>()
+        val stores = java.util.concurrent.CopyOnWriteArrayList<Store>()
+        val lookups = java.util.concurrent.CopyOnWriteArrayList<Pair<CacheScope, Int>>()
+
+        @Volatile
+        override var generation = 0
+
+        override suspend fun lookup(scope: CacheScope, minQuality: Int, texts: Collection<String>): Map<String, String> {
+            lookups += scope to minQuality
+            return texts.mapNotNull { t -> saved["${scope.id}|$t"]?.takeIf { it.second >= minQuality }?.let { t to it.first } }.toMap()
+        }
+
+        override suspend fun store(scope: CacheScope, origin: ModelOrigin, generation: Int, translations: Map<String, String>) {
+            if (io) withContext(Dispatchers.IO) { stores += Store(scope, origin, generation, translations) } else stores += Store(scope, origin, generation, translations)
+        }
+
+        fun awaitStores(n: Int) = runBlocking { withTimeout(2_000) { while (stores.size < n) kotlinx.coroutines.delay(10) } }
+    }
+
+    private fun stream(
+        engine: JobEngine,
+        cache: MemoryCache = MemoryCache(),
+        persistent: PersistentCache? = null,
+        options: TranslationStream.Options = TranslationStream.Options(Language.EN, Language.JA),
+        origin: ModelOrigin = SMALL,
+        scope: CoroutineScope = this.scope,
+    ) = TranslationStream(scope, { TranslationStream.Backend(engine, origin, persistent) }, options, cache)
 
     /** [ids] の文が全部確定（または失敗）するまで結果を集める。 */
     private fun TranslationStream.collectUntilDone(ids: Set<Long>): List<SegmentUpdate> = runBlocking {
@@ -155,7 +188,7 @@ class TranslationStreamTest {
                 return fake.run(slots, wrapped, maxTokens)
             }
         }
-        val s = TranslationStream(scope, { TranslationStream.Backend(merging, merging) }, TranslationStream.Options(Language.EN, Language.JA))
+        val s = stream(merging)
         s.submit(listOf(Segment(1, "Hello"), Segment(2, "Bye")))
         val updates = s.collectUntilDone(setOf(1, 2))
         assertEquals(mapOf(1L to "訳「Hello」", 2L to "訳「Bye」"), finals(updates))
@@ -205,48 +238,134 @@ class TranslationStreamTest {
 
     @Test
     fun 永続の控えを引き_写しは残さない() {
-        val stored = HashMap<String, String>()
-        val memory = object : PersistentCache {
-            override suspend fun lookup(texts: Collection<String>) = mapOf("Saved" to "保存済み").filterKeys { it in texts }
-            override suspend fun store(translations: Map<String, String>) {
-                stored.putAll(translations)
-            }
-        }
+        val persistent = FakePersistent()
+        val scope = TranslationStream.Options(Language.EN, Language.JA).cacheScope
+        persistent.saved["${scope.id}|Saved"] = "保存済み" to SMALL.quality
         // 「Sounds good」は原文のまま返す（写し）
         val engine = FakeEngine(parallel = 4) { if (it == "Sounds good") it else "訳「$it」" }
-        val s = stream(engine, memory = memory)
+        val s = stream(engine, persistent = persistent)
         s.submit(listOf(Segment(1, "Saved"), Segment(2, "Hello"), Segment(3, "Sounds good")))
         val updates = s.collectUntilDone(setOf(1, 2, 3))
         assertEquals("保存済み", finals(updates)[1])
         assertEquals(listOf("Hello", "Sounds good"), engine.requests.sorted())
-        runBlocking { withTimeout(2_000) { while (stored.isEmpty()) kotlinx.coroutines.delay(10) } }
-        assertEquals(mapOf("Hello" to "訳「Hello」"), stored)
+        persistent.awaitStores(1)
+        assertEquals(mapOf("Hello" to "訳「Hello」"), persistent.stores.single().translations)
+    }
+
+    @Test
+    fun 永続の控えで当たった片はメモリの控えにも入れる() {
+        val persistent = FakePersistent()
+        persistent.saved["${TranslationStream.Options(Language.EN, Language.JA).cacheScope.id}|Saved"] = "保存済み" to SMALL.quality
+        val cache = MemoryCache()
+        val engine = FakeEngine(parallel = 1)
+        stream(engine, cache, persistent).also { it.submit(listOf(Segment(1, "Saved"))) }.collectUntilDone(setOf(1))
+        val second = stream(engine, cache, persistent)
+        second.submit(listOf(Segment(2, "Saved")))
+        assertEquals("保存済み", finals(second.collectUntilDone(setOf(2)))[2])
+        assertEquals(1, second.stats.memoryHits)
+        assertEquals(1, persistent.lookups.size)
+        assertTrue(engine.requests.isEmpty())
+    }
+
+    @Test
+    fun 控えの範囲は契約が依頼の条件から作る() {
+        // 機能も層の実装も範囲を組まない。訳を変える条件（言語・訳す先・言い方・背景）が全部入る
+        val persistent = FakePersistent()
+        val options = TranslationStream.Options(null, Language.JA, JapaneseForm.PLAIN, context = "ボタン")
+        val s = stream(FakeEngine(parallel = 1), persistent = persistent, options = options, origin = LARGE)
+        s.submit(listOf(Segment(1, "Stop")))
+        s.collectUntilDone(setOf(1))
+        persistent.awaitStores(1)
+        val expected = CacheScope(null, Language.JA, JapaneseForm.PLAIN, "ボタン")
+        assertEquals(listOf(expected to LARGE.quality), persistent.lookups.toList())
+        assertEquals(expected, persistent.stores.single().scope)
+        assertEquals(LARGE, persistent.stores.single().origin)
+        // 原文の言語の自動と明示、言い方の違いは別の範囲
+        assertTrue(expected.id != CacheScope(Language.EN, Language.JA, JapaneseForm.PLAIN, "ボタン").id)
+        assertTrue(expected.id != CacheScope(null, Language.JA, JapaneseForm.POLITE, "ボタン").id)
+    }
+
+    @Test
+    fun 範囲の違う流れどうしでメモリの控えを共有しても混ざらない() {
+        val engine = FakeEngine(parallel = 1)
+        val cache = MemoryCache()
+        stream(engine, cache).also { it.submit(listOf(Segment(1, "Hello"))) }.collectUntilDone(setOf(1))
+        val table = stream(engine, cache, options = TranslationStream.Options(Language.EN, Language.JA, context = "表"))
+        table.submit(listOf(Segment(2, "Hello")))
+        table.collectUntilDone(setOf(2))
+        assertEquals(0, table.stats.memoryHits)
+        assertEquals(listOf("Hello", "Hello"), engine.requests)
+    }
+
+    @Test
+    fun メモリの控えは今のモデル以上の確かさの訳だけを使う() {
+        // モデルを切り替えても控えは捨てない。小さいモデルの訳は大きいモデルでは使わず、大きいモデルの訳は小さいモデルでも使う
+        val small = FakeEngine(parallel = 1) { "小「$it」" }
+        val large = FakeEngine(parallel = 1) { "大「$it」" }
+        val cache = MemoryCache()
+        stream(small, cache, origin = SMALL).also { it.submit(listOf(Segment(1, "Hello"))) }.collectUntilDone(setOf(1))
+        val up = stream(large, cache, origin = LARGE)
+        up.submit(listOf(Segment(2, "Hello")))
+        assertEquals("大「Hello」", finals(up.collectUntilDone(setOf(2)))[2])
+        val down = stream(small, cache, origin = SMALL)
+        down.submit(listOf(Segment(3, "Hello")))
+        assertEquals("大「Hello」", finals(down.collectUntilDone(setOf(3)))[3])
+        assertEquals(1, small.requests.size)
+        assertEquals(1, large.requests.size)
+    }
+
+    @Test
+    fun 永続の控えを消したらメモリの控えも捨て_消す前の世代で書く() {
+        val persistent = FakePersistent()
+        val cache = MemoryCache()
+        val engine = FakeEngine(parallel = 1)
+        stream(engine, cache, persistent).also { it.submit(listOf(Segment(1, "Hello"))) }.collectUntilDone(setOf(1))
+        // 設定の画面で消した。消す前に訳したメモリの控えは使わない
+        persistent.generation = 1
+        // 訳している途中にもう一度消す。この実行の訳は、訳し始める前の世代（1）で書く（実装はそれが今と違えば書かない）
+        engine.onRequest = { persistent.generation = 2 }
+        val second = stream(engine, cache, persistent)
+        second.submit(listOf(Segment(2, "Hello")))
+        second.collectUntilDone(setOf(2))
+        assertEquals(0, second.stats.memoryHits)
+        assertEquals(2, engine.requests.size)
+        persistent.awaitStores(2)
+        assertEquals(listOf(0, 1), persistent.stores.map { it.generation }.sorted())
     }
 
     @Test
     fun 最後の確定の直後に閉じても訳を控えに残す() {
         // 確定はエンジンが戻る前に流れるので、購読する側が最後の確定を受け取ってすぐ閉じると、閉じたあとに控えへ書く段が来る（画面翻訳）。
         // 本物のエンジンは戻るときに取り消しを確かめ（ensureActive）、本物の控えは IO のスレッドへ移る（withContext）ので、どちらも取り消しで止まる
-        val stored = java.util.concurrent.ConcurrentHashMap<String, String>()
-        val memory = object : PersistentCache {
-            override suspend fun lookup(texts: Collection<String>) = emptyMap<String, String>()
-            override suspend fun store(translations: Map<String, String>) = withContext(Dispatchers.IO) { stored.putAll(translations) }
-        }
-        val fake = FakeEngine(parallel = 1)
-        val engine = object : JobEngine {
-            override val parallel = 1
-            override suspend fun run(slots: Int, source: JobSource, maxTokens: Int): Int {
-                fake.run(slots, source, maxTokens)
-                // 訳し終えても、取り消されるまで戻らない（本物は戻るときに取り消しを確かめる）
-                awaitCancellation()
-            }
-        }
-        val s = TranslationStream(scope, { TranslationStream.Backend(engine, engine, memory) }, TranslationStream.Options(Language.EN, Language.JA))
+        val persistent = FakePersistent(io = true)
+        val s = stream(UntilCancelled(), persistent = persistent)
         s.submit(listOf(Segment(1, "Hello")))
         assertEquals("訳「Hello」", finals(s.collectUntilDone(setOf(1)))[1])
         s.close()
-        runBlocking { withTimeout(2_000) { while (stored.isEmpty()) kotlinx.coroutines.delay(10) } }
-        assertEquals(mapOf("Hello" to "訳「Hello」"), stored.toMap())
+        persistent.awaitStores(1)
+        assertEquals(mapOf("Hello" to "訳「Hello」"), persistent.stores.single().translations)
+    }
+
+    @Test
+    fun 流れを開いたスコープを取り消しても訳を控えに残す() {
+        val persistent = FakePersistent(io = true)
+        val owner = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val s = stream(UntilCancelled(), persistent = persistent, scope = owner)
+        s.submit(listOf(Segment(1, "Hello")))
+        assertEquals("訳「Hello」", finals(s.collectUntilDone(setOf(1)))[1])
+        owner.cancel()
+        persistent.awaitStores(1)
+        assertEquals(mapOf("Hello" to "訳「Hello」"), persistent.stores.single().translations)
+    }
+
+    /** 訳し終えても、取り消されるまで戻らないエンジン（本物は戻るときに取り消しを確かめる）。 */
+    private class UntilCancelled : JobEngine {
+        private val fake = FakeEngine(parallel = 1)
+        override val parallel = 1
+        override suspend fun run(slots: Int, source: JobSource, maxTokens: Int): Int {
+            fake.run(slots, source, maxTokens)
+            awaitCancellation()
+        }
     }
 
     @Test
@@ -292,5 +411,10 @@ class TranslationStreamTest {
         s.submit(listOf(Segment(1, "Hello")))
         val updates = s.collectUntilDone(setOf(1))
         assertTrue(updates.single() is SegmentUpdate.Failed)
+    }
+
+    private companion object {
+        val SMALL = ModelOrigin("small", 0)
+        val LARGE = ModelOrigin("large", 1)
     }
 }
