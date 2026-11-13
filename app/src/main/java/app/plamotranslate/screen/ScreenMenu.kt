@@ -102,31 +102,37 @@ internal class ScreenMenu(private val context: Context, private val windowManage
         view.addView(list)
 
         val screen = windowManager.maximumWindowMetrics.bounds
+        val (anchorX, anchorY) = anchor
+        // ボタンの左に収まる幅にする（ボタンに重ねない）。左が狭すぎるときだけ画面の幅まで使う
+        val maxWidth = (anchorX - context.dp(16)).takeIf { it >= context.dp(280) } ?: (screen.width() - context.dp(16))
         list.measure(
-            View.MeasureSpec.makeMeasureSpec(screen.width() - context.dp(16), View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(maxWidth, View.MeasureSpec.AT_MOST),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
         )
         val height = minOf(list.measuredHeight, screen.height() - context.dp(32))
-        val (anchorX, anchorY) = anchor
         p.height = height
         // ボタンの左に出す（画面の右端に寄せたボタンでも見切れないように）。下にはみ出すなら上へずらす
         p.x = (anchorX - list.measuredWidth - context.dp(8)).coerceAtLeast(context.dp(8))
         p.y = anchorY.coerceAtMost(screen.height() - height - context.dp(16)).coerceAtLeast(context.dp(16))
     }
 
-    /** 左に設定の名前、右に選択肢を横に並べた1行。 */
+    /** 左に設定の名前、右に選択肢を横に並べた1行。選択肢は幅が足りなければ折り返す（[WrapLayout]）。 */
     private fun choiceRow(entry: MenuEntry.Choice): View = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
+        gravity = Gravity.TOP
         setPadding(0, context.dp(4), 0, context.dp(4))
         addView(TextView(context).apply {
             text = entry.label
             setTextColor(Color.argb(170, 255, 255, 255))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             minWidth = context.dp(68)
-            setPadding(context.dp(2), 0, context.dp(6), 0)
+            // 選択肢の1行目と高さをそろえる
+            setPadding(context.dp(2), context.dp(8), context.dp(6), 0)
         })
-        entry.options.forEach { addView(chip(it)) }
+        addView(
+            WrapLayout(context, gap = context.dp(6)).apply { entry.options.forEach { addView(chip(it)) } },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+        )
     }
 
     /** 選択肢1つ。選んでいるものは塗り、ほかは枠だけにする。 */
@@ -135,15 +141,14 @@ internal class ScreenMenu(private val context: Context, private val windowManage
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
         setTextColor(Color.WHITE)
         gravity = Gravity.CENTER
+        // 選択肢の名前は1行で出す（縦に潰さない）
+        maxLines = 1
         setPadding(context.dp(12), context.dp(7), context.dp(12), context.dp(7))
         background = GradientDrawable().apply {
             cornerRadius = context.dp(16).toFloat()
             if (option.checked) setColor(Color.rgb(98, 0, 238)) else setStroke(context.dp(1), Color.argb(110, 255, 255, 255))
         }
         if (!option.enabled) alpha = 0.4f
-        layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-        ).apply { marginEnd = context.dp(6) }
         setOnClickListener {
             OwnTouch.mark()
             if (!option.enabled) {
