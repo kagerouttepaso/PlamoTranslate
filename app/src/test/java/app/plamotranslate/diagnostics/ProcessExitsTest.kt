@@ -18,7 +18,11 @@ class ProcessExitsTest {
         assertEquals(ExitCause.SIGNALED, ProcessExits.causeOf(ApplicationExitInfo.REASON_SIGNALED))
         assertEquals(ExitCause.LOW_MEMORY, ProcessExits.causeOf(ApplicationExitInfo.REASON_LOW_MEMORY))
         assertEquals(ExitCause.USER_STOPPED, ProcessExits.causeOf(ApplicationExitInfo.REASON_USER_REQUESTED))
-        assertEquals(ExitCause.OTHER, ProcessExits.causeOf(ApplicationExitInfo.REASON_PACKAGE_UPDATED))
+        assertEquals(ExitCause.SYSTEM_CHANGE, ProcessExits.causeOf(ApplicationExitInfo.REASON_PACKAGE_UPDATED))
+        assertEquals(ExitCause.SYSTEM_CHANGE, ProcessExits.causeOf(ApplicationExitInfo.REASON_PERMISSION_CHANGE))
+        // 知らない理由は OTHER（記録の対象に残す）
+        assertEquals(ExitCause.OTHER, ProcessExits.causeOf(ApplicationExitInfo.REASON_OTHER))
+        assertEquals(ExitCause.OTHER, ProcessExits.causeOf(ApplicationExitInfo.REASON_UNKNOWN))
     }
 
     @Test

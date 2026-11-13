@@ -34,7 +34,10 @@ enum class ExitCause {
     /** 本人が強制停止した。 */
     USER_STOPPED,
 
-    /** そのほか（更新・権限の変更・本人が閉じた など）。 */
+    /** アプリの更新・権限の変更など、OS 側の理由で止められた（落ちたのではないと分かっている）。 */
+    SYSTEM_CHANGE,
+
+    /** そのほか（知らない理由。OS の版で増える理由もここに入る）。 */
     OTHER,
 }
 
@@ -135,10 +138,10 @@ object ExitJudge {
 
     /**
      * 本人が使っている最中に終わっても、落ちたのではないと分かっている原因（本人の強制停止と、更新・権限の変更など OS 側の理由）。
-     * 使っている最中の終わり方は、これ以外を全部記録する。落ち方を数え上げると、知らない終わり方を見落とすため
-     * （2026-11-13、画面翻訳中に終了コード0で自分で終わったのを記録できなかった）。
+     * 使っている最中の終わり方は、これ以外を全部記録する。知らない理由（[ExitCause.OTHER]）も記録する。落ち方を数え上げると、
+     * 知らない終わり方を見落とすため（2026-11-13、画面翻訳中に終了コード0で自分で終わったのを記録できなかった）。
      */
-    private val BENIGN_WHILE_IN_USE = setOf(ExitCause.USER_STOPPED, ExitCause.OTHER)
+    private val BENIGN_WHILE_IN_USE = setOf(ExitCause.USER_STOPPED, ExitCause.SYSTEM_CHANGE)
 
     /**
      * 不具合として記録するか。異常終了は、いつでも記録する。本人が使っている最中に終わったものは、落ちたのではないと
@@ -166,6 +169,7 @@ object ExitTexts {
         ExitCause.LOW_MEMORY -> "メモリ不足でOSに止められた"
         ExitCause.EXCESSIVE_RESOURCE -> "資源の使いすぎでOSに止められた"
         ExitCause.USER_STOPPED -> "強制停止"
+        ExitCause.SYSTEM_CHANGE -> "更新や権限の変更でOSに止められた"
         ExitCause.OTHER -> "終了の理由${exit.rawReason}"
     }
 }

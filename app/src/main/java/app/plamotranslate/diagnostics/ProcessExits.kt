@@ -30,6 +30,8 @@ object ProcessExits {
         ApplicationExitInfo.REASON_LOW_MEMORY -> ExitCause.LOW_MEMORY
         ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> ExitCause.EXCESSIVE_RESOURCE
         ApplicationExitInfo.REASON_USER_REQUESTED, ApplicationExitInfo.REASON_USER_STOPPED -> ExitCause.USER_STOPPED
+        ApplicationExitInfo.REASON_PACKAGE_UPDATED, ApplicationExitInfo.REASON_PACKAGE_STATE_CHANGE,
+        ApplicationExitInfo.REASON_PERMISSION_CHANGE -> ExitCause.SYSTEM_CHANGE
         else -> ExitCause.OTHER
     }
 
