@@ -45,6 +45,15 @@ class ExitJudgeTest {
     }
 
     @Test
+    fun 使っている最中に自分で終わったものも記録する() {
+        // 画面翻訳中（フォアグラウンドサービス）に終了コード0で終わった（2026-11-13、作者の端末）
+        assertTrue(ExitJudge.recordable(exit(ExitCause.EXIT_SELF, 0, importance = ProcessImportance.FOREGROUND_SERVICE, mark = ProcessMark("a"))))
+        // 裏に回った後なら記録しない。更新や権限の変更（OTHER）は使っている最中でも記録しない
+        assertFalse(ExitJudge.recordable(exit(ExitCause.EXIT_SELF, 0, importance = ProcessImportance.BACKGROUND)))
+        assertFalse(ExitJudge.recordable(exit(ExitCause.OTHER, importance = ProcessImportance.FOREGROUND)))
+    }
+
+    @Test
     fun 自分で起動し直したときは記録しない() {
         // killProcess で自分を終えると、OS には前面でシグナル9と残る（featurelab で確かめた）
         val restart = exit(ExitCause.SIGNALED, 9, mark = ProcessMark("a", intended = true))

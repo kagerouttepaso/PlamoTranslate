@@ -134,12 +134,19 @@ object ExitJudge {
     fun inUse(exit: ProcessExit): Boolean = exit.importance <= ProcessImportance.PERCEPTIBLE
 
     /**
-     * 不具合として記録するか。異常終了に加え、本人が使っている最中に OS に止められたもの（メモリ不足・資源の使いすぎ・SIGKILL）も、
-     * 本人には「落ちた」と見えるので記録する。裏に回った後に OS が片付けた終わり方と、アプリが意図して終えたものは記録しない。
+     * 本人が使っている最中に終わっても、落ちたのではないと分かっている原因（本人の強制停止と、更新・権限の変更など OS 側の理由）。
+     * 使っている最中の終わり方は、これ以外を全部記録する。落ち方を数え上げると、知らない終わり方を見落とすため
+     * （2026-11-13、画面翻訳中に終了コード0で自分で終わったのを記録できなかった）。
+     */
+    private val BENIGN_WHILE_IN_USE = setOf(ExitCause.USER_STOPPED, ExitCause.OTHER)
+
+    /**
+     * 不具合として記録するか。異常終了は、いつでも記録する。本人が使っている最中に終わったものは、落ちたのではないと
+     * 分かっている原因（[BENIGN_WHILE_IN_USE]）を除いて記録する。本人には「落ちた」と見えるため。
+     * 裏に回った後に OS が片付けた終わり方と、アプリが意図して終えたものは記録しない。
      */
     fun recordable(exit: ProcessExit): Boolean = !intended(exit) && (
-        abnormal(exit) ||
-            (inUse(exit) && exit.cause in setOf(ExitCause.LOW_MEMORY, ExitCause.EXCESSIVE_RESOURCE, ExitCause.SIGNALED))
+        abnormal(exit) || (inUse(exit) && exit.cause !in BENIGN_WHILE_IN_USE)
         )
 
     /** 同じプロセスの記録か。印が両方にあれば印で、どちらかに無ければ pid で見る（1つのプロセスは1度しか終わらない）。 */
