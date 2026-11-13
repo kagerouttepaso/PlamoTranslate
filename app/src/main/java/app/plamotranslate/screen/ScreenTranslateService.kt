@@ -509,53 +509,52 @@ class ScreenTranslateService : Service() {
     private fun showMenu() {
         val (x, y) = button?.position ?: return
         dispatch(SessionEvent.MenuOpened)
-        val entries = buildList {
-            add(MenuEntry.Header("原文の言語"))
-            OcrLanguage.entries.forEach { lang ->
-                add(MenuEntry.Item(lang.menuName, checked = lang == preferences.language) {
-                    preferences.language = lang
-                    button?.setLabel(buttonLabel(lang, preferences.trigger))
-                })
+        menu?.show(x, y, ::menuEntries)
+    }
+
+    /** メニューの行。選択肢を押すたびに作り直すので、今の設定を読んで作る。 */
+    private fun menuEntries(): List<MenuEntry> = buildList {
+        add(MenuEntry.Choice("原文の言語", OcrLanguage.entries.map { lang ->
+            Option(lang.menuName, checked = lang == preferences.language) {
+                preferences.language = lang
+                button?.setLabel(buttonLabel(lang, preferences.trigger))
             }
-            add(MenuEntry.Header("翻訳の始め方"))
-            ScreenTrigger.entries.forEach { t ->
-                add(MenuEntry.Item(t.menuName, checked = t == preferences.trigger) {
-                    preferences.trigger = t
-                    button?.setLabel(buttonLabel(preferences.language, t))
-                    dispatch(SessionEvent.TriggerChanged(t.toTrigger()))
-                })
+        }))
+        add(MenuEntry.Choice("始め方", ScreenTrigger.entries.map { t ->
+            Option(t.menuName, checked = t == preferences.trigger) {
+                preferences.trigger = t
+                button?.setLabel(buttonLabel(preferences.language, t))
+                dispatch(SessionEvent.TriggerChanged(t.toTrigger()))
             }
-            add(MenuEntry.Header("認識モード"))
-            ScreenRecognition.entries.forEach { mode ->
-                add(MenuEntry.Item(mode.menuName, checked = mode == preferences.recognition) {
-                    preferences.recognition = mode
-                    applyProfile()
-                })
+        }))
+        add(MenuEntry.Choice("認識モード", ScreenRecognition.entries.map { mode ->
+            Option(mode.menuName, checked = mode == preferences.recognition) {
+                preferences.recognition = mode
+                applyProfile()
             }
-            add(MenuEntry.Header("訳の消え方"))
-            ScreenDismissal.entries.forEach { d ->
-                add(MenuEntry.Item(d.menuName, checked = d == preferences.dismissal) {
-                    preferences.dismissal = d
-                    applyProfile()
-                })
+        }))
+        add(MenuEntry.Choice("訳の消え方", ScreenDismissal.entries.map { d ->
+            Option(d.menuName, checked = d == preferences.dismissal) {
+                preferences.dismissal = d
+                applyProfile()
             }
-            add(MenuEntry.Header("訳の枠"))
-            add(MenuEntry.Item("元の文字に合わせる", checked = !preferences.fitBubbles) { preferences.fitBubbles = false })
-            add(MenuEntry.Item("吹き出しいっぱいに広げる", checked = preferences.fitBubbles) { preferences.fitBubbles = true })
-            add(MenuEntry.Header("翻訳モデル"))
-            val engineState = EngineHolder.state.value
-            val current = (engineState as? ModelState.Ready)?.model ?: EngineHolder.selected(this@ScreenTranslateService)
-            TranslationModel.entries.forEach { m ->
-                val present = m.isPresent(this@ScreenTranslateService)
-                val label = if (present) m.label else "${m.label}（設定の画面からダウンロード）"
-                add(MenuEntry.Item(label, checked = m == current, enabled = present && engineState !is ModelState.Loading) {
-                    if (m != current) switchModel(m)
-                })
-            }
-            add(MenuEntry.Header(""))
-            add(MenuEntry.Item("画面翻訳を終了") { stopSelf() })
-        }
-        menu?.show(x, y, entries)
+        }))
+        add(MenuEntry.Choice("訳の枠", listOf(
+            Option("文字に合わせる", checked = !preferences.fitBubbles) { preferences.fitBubbles = false },
+            Option("吹き出しに広げる", checked = preferences.fitBubbles) { preferences.fitBubbles = true },
+        )))
+        val engineState = EngineHolder.state.value
+        val current = (engineState as? ModelState.Ready)?.model ?: EngineHolder.selected(this@ScreenTranslateService)
+        add(MenuEntry.Choice("翻訳モデル", TranslationModel.entries.map { m ->
+            val present = m.isPresent(this@ScreenTranslateService)
+            Option(
+                m.label,
+                checked = m == current,
+                enabled = present && engineState !is ModelState.Loading,
+                disabledHint = if (present) "翻訳モデルを読み込んでいます" else "${m.label}は設定の画面からダウンロードしてください",
+            ) { if (m != current) switchModel(m) }
+        }))
+        add(MenuEntry.Action("画面翻訳を終了") { stopSelf() })
     }
 
     /** 翻訳モデルを切り替え、読み込みの進み具合を上部の小さな表示に出す。訳している途中なら取り消す（古いエンジンは閉じられる）。 */

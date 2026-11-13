@@ -8,8 +8,8 @@ import app.plamotranslate.ocr.OcrLanguage
  * [MOTION] は数枚を続けて撮り、画素ごとの中央値で動く背景を消してから読む（[FrameStack]、docs/設計/画面翻訳.md「場面の設定」）。
  */
 internal enum class ScreenRecognition(val menuName: String) {
-    NORMAL("通常（1枚で読む）"),
-    MOTION("動く画面（ゲーム向け）"),
+    NORMAL("通常"),
+    MOTION("動く画面"),
     ;
 
     companion object {
@@ -22,8 +22,8 @@ internal enum class ScreenRecognition(val menuName: String) {
  * [AUTO] は画面が変わったら訳を消し、画面が止まったら訳す（[ScreenChange]、docs/設計/画面翻訳.md「判定器」）。
  */
 internal enum class ScreenTrigger(val menuName: String) {
-    TAP("タップで訳す"),
-    AUTO("自動（画面が止まったら訳す）"),
+    TAP("タップ"),
+    AUTO("自動"),
     ;
 
     companion object {
@@ -37,8 +37,8 @@ internal enum class ScreenTrigger(val menuName: String) {
  * （`SceneProfile.untilTouched`、docs/設計/画面翻訳.md「場面の設定」）。
  */
 internal enum class ScreenDismissal(val menuName: String) {
-    ON_CHANGE("画面が変わったら消す"),
-    ON_TOUCH("触れるまで残す"),
+    ON_CHANGE("画面が変わったら"),
+    ON_TOUCH("触れるまで"),
     ;
 
     companion object {
