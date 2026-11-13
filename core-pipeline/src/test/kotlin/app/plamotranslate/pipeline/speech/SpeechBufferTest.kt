@@ -1,4 +1,4 @@
-package app.plamotranslate.asr
+package app.plamotranslate.pipeline.speech
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -33,15 +33,6 @@ class SpeechBufferTest {
         buf.speaking(floatArrayOf(5f))
         assertArrayEquals(floatArrayOf(3f, 4f, 5f), buf.snapshot(), 0f)
         assertTrue(buf.active)
-    }
-
-    @Test
-    fun 一番静かなところを区切りにする() {
-        val buf = SpeechBuffer(prerollSamples = 1, maxSamples = 100)
-        // 0〜19は大きな音、20〜29は静か、30〜39は大きな音
-        buf.speaking(FloatArray(40) { if (it in 20 until 30) 0.01f else 0.8f })
-        val at = buf.quietestPoint(0, 40, frame = 10)
-        assertTrue("区切り $at", at in 20..30)
     }
 
     @Test

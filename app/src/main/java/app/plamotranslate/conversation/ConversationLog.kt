@@ -1,5 +1,6 @@
 package app.plamotranslate.conversation
 
+import app.plamotranslate.pipeline.conversation.Turn
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -35,7 +36,7 @@ object ConversationLog {
                 .append(if (d.mine) "自分" else "相手").append('（').append(d.source.label).append("）**\n")
             append("原文：").append(turn.original.oneLine()).append('\n')
             append("訳（").append(d.target.label).append("）：")
-                .append(if (turn.translated) turn.translation.oneLine() else "（翻訳中）").append('\n')
+                .append(if (turn.translated) turn.shownTranslation.oneLine() else "（翻訳中）").append('\n')
         }
     }
 

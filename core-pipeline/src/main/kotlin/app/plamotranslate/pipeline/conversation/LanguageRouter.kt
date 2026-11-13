@@ -1,4 +1,4 @@
-package app.plamotranslate.conversation
+package app.plamotranslate.pipeline.conversation
 
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.isChinese

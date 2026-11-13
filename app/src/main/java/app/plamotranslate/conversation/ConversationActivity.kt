@@ -1,5 +1,6 @@
 package app.plamotranslate.conversation
 
+import app.plamotranslate.pipeline.conversation.PartnerMode
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge

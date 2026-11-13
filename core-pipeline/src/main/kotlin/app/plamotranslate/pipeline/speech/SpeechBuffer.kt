@@ -1,18 +1,16 @@
-package app.plamotranslate.asr
-
-import kotlin.math.sqrt
+package app.plamotranslate.pipeline.speech
 
 /**
  * 話している最中の音声をためる。途中結果と確定結果は、どちらもここにためた音声から認識する。
  * VADは話し始めを少し遅れて検出するので、直前の [prerollSamples] 分の音声を常に残しておき、頭に足す。
- * 長い発話を区切るときは先頭から取り出し（[take]）、残りは次の発話の頭として続けてためる。
+ * 長い発話を区切るときは先頭から取り出し（[take]）、残りは次の発話の頭として続けてためる。区切る位置は [CutPoint] が選ぶ。
  */
-internal class SpeechBuffer(private val prerollSamples: Int, private val maxSamples: Int) {
+class SpeechBuffer(private val prerollSamples: Int, private val maxSamples: Int) {
     private val preroll = FloatArray(prerollSamples)
     private var prerollFilled = 0
     private var prerollPos = 0
 
-    private var speech = FloatArray(AsrEngine.SAMPLE_RATE * 2)
+    private var speech = FloatArray(SpeechEngine.SAMPLE_RATE * 2)
     private var speechSize = 0
 
     var active = false
@@ -58,30 +56,6 @@ internal class SpeechBuffer(private val prerollSamples: Int, private val maxSamp
         speech.copyInto(speech, 0, n, speechSize)
         speechSize -= n
         return head
-    }
-
-    /**
-     * [from]〜[to] の範囲で、[frame] サンプルごとの音量（二乗平均平方根）が一番小さい区間の中央を返す。
-     * 長い発話を区切る位置に使う（息継ぎや語の切れ目は音が小さい）。
-     */
-    fun quietestPoint(from: Int, to: Int, frame: Int): Int {
-        val start = from.coerceIn(0, speechSize)
-        val end = to.coerceIn(start, speechSize)
-        if (end - start < frame) return end
-        var best = start + frame / 2
-        var bestRms = Double.MAX_VALUE
-        var i = start
-        while (i + frame <= end) {
-            var sum = 0.0
-            for (j in i until i + frame) sum += speech[j] * speech[j]
-            val rms = sqrt(sum / frame)
-            if (rms < bestRms) {
-                bestRms = rms
-                best = i + frame / 2
-            }
-            i += frame / 2
-        }
-        return best
     }
 
     fun clear() {

@@ -21,6 +21,8 @@ dependencies {
     // ライブラリ名がぶつからない。AARは tools/get-sherpa-onnx.ps1 で取得する（Gitに入れない）。2026-11-06作者承認（大きな依存）。
     // ライブラリモジュールはローカルAARを同梱できないので、ここではコンパイルだけに使い、appで同梱する
     compileOnly(files(rootProject.file("third_party/sherpa-onnx/sherpa-onnx-static-link-onnxruntime-${libs.versions.sherpa.onnx.get()}.aar")))
+    // 中核の差し込み口（VoiceActivity・SpeechRecognizer）を実装し、中核の区切り（SpeechEngine）を返す
+    api(project(":core-pipeline"))
     implementation(project(":core-log"))
     testImplementation(libs.junit)
 }

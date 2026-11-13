@@ -1,5 +1,6 @@
 package app.plamotranslate.conversation
 
+import app.plamotranslate.pipeline.conversation.Turn
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Intent

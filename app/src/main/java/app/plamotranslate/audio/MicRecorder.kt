@@ -5,7 +5,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import androidx.annotation.RequiresPermission
-import app.plamotranslate.asr.AsrEngine
+import app.plamotranslate.pipeline.speech.SpeechEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
@@ -18,16 +18,16 @@ import kotlinx.coroutines.isActive
  * 音源は音声認識向け（VOICE_RECOGNITION）で、端末の自動音量調整や雑音処理を音声認識に合わせたものを使う。
  */
 object MicRecorder {
-    private const val CHUNK = AsrEngine.SAMPLE_RATE / 10
+    private const val CHUNK = SpeechEngine.SAMPLE_RATE / 10
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun stream(): Flow<FloatArray> = flow {
         val minBuffer = AudioRecord.getMinBufferSize(
-            AsrEngine.SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+            SpeechEngine.SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
         )
         val record = AudioRecord(
             MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            AsrEngine.SAMPLE_RATE,
+            SpeechEngine.SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
             maxOf(minBuffer, CHUNK * 2 * 4),

@@ -1,5 +1,8 @@
 package app.plamotranslate.conversation
 
+import app.plamotranslate.pipeline.conversation.CONVERSATION_LANGUAGES
+import app.plamotranslate.pipeline.conversation.PartnerMode
+import app.plamotranslate.pipeline.conversation.conversationLabel
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement

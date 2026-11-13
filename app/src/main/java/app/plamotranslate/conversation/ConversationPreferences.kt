@@ -2,6 +2,7 @@ package app.plamotranslate.conversation
 
 import android.content.Context
 import app.plamotranslate.llm.Language
+import app.plamotranslate.pipeline.conversation.CONVERSATION_LANGUAGES
 
 /** 会話翻訳の設定（表示モード・自分の言語）。次に開いたときも同じにする。 */
 internal class ConversationPreferences(context: Context) {

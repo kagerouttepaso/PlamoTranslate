@@ -5,9 +5,9 @@ import android.app.Application
 import androidx.annotation.RequiresPermission
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import app.plamotranslate.asr.AsrEngine
-import app.plamotranslate.asr.AsrEvent
 import app.plamotranslate.asr.SenseVoiceAsr
+import app.plamotranslate.pipeline.speech.SpeechEngine
+import app.plamotranslate.pipeline.speech.SpeechEvent
 import app.plamotranslate.audio.MicRecorder
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.isChinese
@@ -53,7 +53,7 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
     private var translateJob: Job? = null
 
     /** 音声入力の音声認識。初めてマイクを押したときに読み込む（会話翻訳と同じモデル）。 */
-    private var asr: AsrEngine? = null
+    private var asr: SpeechEngine? = null
     private var voiceJob: Job? = null
 
     /** 止めるボタンが押されたか。押されたら、話しかけの分も確定させてから止める。 */
@@ -103,15 +103,15 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
                             .collect { chunk ->
                                 silentChunks++
                                 for (event in engine.accept(chunk)) when (event) {
-                                    is AsrEvent.Speaking -> if (event.speaking) spoke = true
-                                    is AsrEvent.Partial -> _state.update { it.copy(input = joinSpoken(base, event.text)) }
-                                    is AsrEvent.Final -> heard = event.utterance.text
+                                    is SpeechEvent.Speaking -> if (event.speaking) spoke = true
+                                    is SpeechEvent.Partial -> _state.update { it.copy(input = joinSpoken(base, event.text)) }
+                                    is SpeechEvent.Final -> heard = event.utterance.text
                                 }
                             }
                     } finally {
                         // 止めるボタンで止めたときも、話しかけだった分を確定させる
                         if (heard == null) {
-                            heard = engine.flush().filterIsInstance<AsrEvent.Final>().firstOrNull()?.utterance?.text
+                            heard = engine.flush().filterIsInstance<SpeechEvent.Final>().firstOrNull()?.utterance?.text
                         }
                     }
                 }
@@ -132,7 +132,7 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
         stopVoice = true
     }
 
-    private suspend fun loadAsr(): AsrEngine? {
+    private suspend fun loadAsr(): SpeechEngine? {
         val dir = ModelCatalog.asrDir(app)
         if (SenseVoiceAsr.missingFiles(dir).isNotEmpty()) {
             _state.update { it.copy(error = "音声認識のモデルがありません。トップ画面の「モデルの準備」でダウンロードしてください") }

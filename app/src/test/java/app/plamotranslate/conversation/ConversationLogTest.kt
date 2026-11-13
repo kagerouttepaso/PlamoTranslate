@@ -1,5 +1,7 @@
 package app.plamotranslate.conversation
 
+import app.plamotranslate.pipeline.conversation.Direction
+import app.plamotranslate.pipeline.conversation.Turn
 import app.plamotranslate.llm.Language
 import org.junit.Assert.assertEquals
 import org.junit.Test

@@ -1,5 +1,6 @@
 package app.plamotranslate.asr
 
+import app.plamotranslate.pipeline.speech.SpeechEngine
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
@@ -39,7 +40,7 @@ object WavFile {
         ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {
             putInt(RIFF); putInt(36 + data); putInt(WAVE)
             putInt(FMT); putInt(16); putShort(1); putShort(1)
-            putInt(AsrEngine.SAMPLE_RATE); putInt(AsrEngine.SAMPLE_RATE * 2); putShort(2); putShort(16)
+            putInt(SpeechEngine.SAMPLE_RATE); putInt(SpeechEngine.SAMPLE_RATE * 2); putShort(2); putShort(16)
             putInt(DATA); putInt(data)
         }.array()
 
@@ -61,7 +62,7 @@ object WavFile {
                     bits = buf.getShort(body + 14).toInt()
                 }
                 DATA -> {
-                    require(channels == 1 && rate == AsrEngine.SAMPLE_RATE && bits == 16) {
+                    require(channels == 1 && rate == SpeechEngine.SAMPLE_RATE && bits == 16) {
                         "16kHz・モノラル・16bitのWAVだけ読めます（$name：${rate}Hz・${channels}ch・${bits}bit）"
                     }
                     // 長さが0なら、書いている途中で落ちたファイルとみなして末尾まで読む

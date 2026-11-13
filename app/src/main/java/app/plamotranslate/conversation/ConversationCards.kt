@@ -1,5 +1,8 @@
 package app.plamotranslate.conversation
 
+import app.plamotranslate.pipeline.conversation.Direction
+import app.plamotranslate.pipeline.conversation.LiveSpeech
+import app.plamotranslate.pipeline.conversation.Turn
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -68,7 +71,7 @@ internal fun FaceCard(turn: Turn, reader: Reader) {
     val d = turn.direction
     val readerLanguage = readerLanguage(d, reader)
     val originalFirst = d.source == readerLanguage
-    val translation = turn.translation.ifEmpty { "…" }
+    val translation = turn.shownTranslation.ifEmpty { "…" }
     UtteranceCard(
         turn = turn,
         translationIsMain = !originalFirst,
@@ -79,7 +82,7 @@ internal fun FaceCard(turn: Turn, reader: Reader) {
         mainPending = !originalFirst && !turn.translated,
         sub = if (originalFirst) translation else turn.original,
         subPending = originalFirst && !turn.translated,
-        stats = if (reader == Reader.ME) turn.stats else "",
+        stats = if (reader == Reader.ME) turn.statsText else "",
     )
 }
 
@@ -92,11 +95,11 @@ internal fun SharedCard(turn: Turn) {
         label = cardLabel(turn.direction, null),
         mine = turn.direction.mine,
         right = turn.direction.mine,
-        main = turn.translation.ifEmpty { "…" },
+        main = turn.shownTranslation.ifEmpty { "…" },
         mainPending = !turn.translated,
         sub = turn.original,
         subPending = false,
-        stats = turn.stats,
+        stats = turn.statsText,
         subFirst = true,
     )
 }
@@ -126,7 +129,7 @@ private fun UtteranceCard(
     val context = LocalContext.current
     val speaking by ReadAloud.speaking.collectAsStateWithLifecycle()
     val key = "turn-${turn.id}"
-    val speak = Modifier.clickable(enabled = turn.translated && turn.translation.isNotBlank()) {
+    val speak = Modifier.clickable(enabled = turn.translated && turn.failure == null && turn.translation.isNotBlank()) {
         ReadAloud.toggle(context, key, turn.translation, turn.direction.target)
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (right) Arrangement.End else Arrangement.Start) {
