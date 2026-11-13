@@ -167,7 +167,6 @@ private fun ModelPage() {
     ModelChooser(model)
 }
 
-/** 「このアプリについて」のページ。 */
 /** 画面の色：端末に合わせる・ライト（さえずりの紙）・ダーク（夜の鳥）。選ぶとすぐ変わる。 */
 @Composable
 private fun AppearancePage() {
@@ -186,6 +185,7 @@ private fun AppearancePage() {
     }
 }
 
+/** 「このアプリについて」のページ。 */
 @Composable
 private fun AboutPage() {
     val context = LocalContext.current
