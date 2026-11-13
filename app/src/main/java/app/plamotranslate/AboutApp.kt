@@ -40,6 +40,7 @@ private val NOTICES = listOf(
     Notice("sherpa-onnx・ONNX Runtime（音声認識・読み上げの実行）", "Apache-2.0・MIT", "https://github.com/k2-fsa/sherpa-onnx"),
     Notice("llama.cpp（翻訳モデルの実行）", "MIT", "https://github.com/ggml-org/llama.cpp"),
     Notice("PP-OCRv6 manga（漫画の文字の認識）", "リンク先のライセンス", "https://huggingface.co/Kellenok/PP-OCRv6_manga"),
+    Notice("PP-OCRv5 korean（韓国語の文字の認識、PaddlePaddle）", "Apache-2.0", "https://huggingface.co/PaddlePaddle/korean_PP-OCRv5_mobile_rec"),
     Notice("ML Kit Text Recognition（文字の認識、Google）", "ML Kit の利用規約", "https://developers.google.com/ml-kit/terms"),
     Notice("Android Jetpack・CameraX（Google）", "Apache-2.0", "https://developer.android.com/jetpack"),
 )
