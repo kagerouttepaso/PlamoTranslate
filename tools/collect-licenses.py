@@ -124,7 +124,7 @@ def main():
         "",
     ]
     for key in sorted(third, key=str.lower):
-        body += ["=" * 72, key, "=" * 72, third[key].strip(), ""]
+        body += ["=" * 40, key, "=" * 40, third[key].strip(), ""]
     with open(os.path.join(OUT, "google-third-party.txt"), "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(body) + "\n")
 

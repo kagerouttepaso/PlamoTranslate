@@ -2,9 +2,9 @@ Google のライブラリ（ML Kit・Play services など）が使っている�
 
 この文は各ライブラリの AAR に同梱された third_party_licenses から tools/collect-licenses.py が集める。
 
-========================================================================
+========================================
 Abseil
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         https://www.apache.org/licenses/
@@ -207,9 +207,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 address_sorting
-========================================================================
+========================================
 Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
 All rights reserved.
 
@@ -237,9 +237,9 @@ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 SUCH DAMAGE.
 
-========================================================================
+========================================
 Android SDK
-========================================================================
+========================================
 ANDROID SOFTWARE DEVELOPMENT KIT
 
 Terms and Conditions
@@ -508,9 +508,9 @@ injunctive remedies (or an equivalent type of urgent legal relief) in any jurisd
 
 April 10, 2009
 
-========================================================================
+========================================
 Android SDK Platforms
-========================================================================
+========================================
 ANDROID SOFTWARE DEVELOPMENT KIT
 
 Terms and Conditions
@@ -779,9 +779,9 @@ injunctive remedies (or an equivalent type of urgent legal relief) in any jurisd
 
 April 10, 2009
 
-========================================================================
+========================================
 AndroidX activity library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -971,9 +971,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX annotation experimental library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -1163,9 +1163,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX annotation jvm library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -1355,9 +1355,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX annotation library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -1547,9 +1547,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX architecture core common library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -1739,9 +1739,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX architecture core library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -1931,9 +1931,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX architecture core runtime library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -2123,9 +2123,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX architecture library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -2315,9 +2315,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX asynclayoutinflater library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -2507,9 +2507,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX collection jvm library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -2699,9 +2699,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX collection library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -2891,9 +2891,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX concurrent futures library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -3083,9 +3083,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX coordinatorlayout library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -3275,9 +3275,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX core ktx library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -3467,9 +3467,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX core library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -3659,9 +3659,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX cursoradapter library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -3851,9 +3851,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX customview library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -4043,9 +4043,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX documentfile library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -4235,9 +4235,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX drawerlayout library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -4427,9 +4427,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX exifinterface library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -4619,9 +4619,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX fragment library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -4811,9 +4811,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX interpolator library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -5003,9 +5003,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX legacy coreui library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -5195,9 +5195,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX legacy coreutils library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -5387,9 +5387,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX legacy v4 library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -5579,9 +5579,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX lifecycle common library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -5771,9 +5771,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX lifecycle livedatacore library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -5963,9 +5963,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX lifecycle runtime library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -6155,9 +6155,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX lifecycle viewmodel library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -6347,9 +6347,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX lifecycle viewmodel savedstate library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -6539,9 +6539,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX loader library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -6731,9 +6731,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX localbroadcastmanager library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -6923,9 +6923,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX media base library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -7115,9 +7115,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX print library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -7307,9 +7307,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX savedstate library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -7499,9 +7499,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX swiperefreshlayout library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -7691,9 +7691,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX tracing library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -7883,9 +7883,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX versionedparcelable library
-========================================================================
+========================================
 Copyright (c) 2005-2018, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -8075,9 +8075,9 @@ Copyright (c) 2005-2018, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 AndroidX viewpager library
-========================================================================
+========================================
 Copyright (c) 2005-2011, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -8267,9 +8267,9 @@ Copyright (c) 2005-2011, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 angle
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -9281,9 +9281,9 @@ This special exception was added by the Free Software Foundation in version
 
 --
 
-========================================================================
+========================================
 Animal Sniffer
-========================================================================
+========================================
 The MIT License
 
 Copyright (c) 2008 Kohsuke Kawaguchi and codehaus.org.
@@ -9306,9 +9306,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-========================================================================
+========================================
 apksig
-========================================================================
+========================================
 Copyright (c) 2005-2008, The Android Open Source Project
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -9498,9 +9498,9 @@ Copyright (c) 2005-2008, The Android Open Source Project
 
    END OF TERMS AND CONDITIONS
 
-========================================================================
+========================================
 Bazel Platforms
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -9703,9 +9703,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 Boost
-========================================================================
+========================================
 Files: *
 
 Boost Software License - Version 1.0 - August 17th, 2003
@@ -10211,9 +10211,9 @@ modification, are permitted.
 
 There's ABSOLUTELY NO WARRANTY, express or implied.
 
-========================================================================
+========================================
 BoringSSL
-========================================================================
+========================================
 BoringSSL is a fork of OpenSSL. As such, large parts of it fall under OpenSSL
 licensing. Files that are completely new have a Google copyright and an ISC
 license. This license is reproduced at the bottom of this file.
@@ -10467,9 +10467,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 Brotli
-========================================================================
+========================================
 Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -10490,9 +10490,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-========================================================================
+========================================
 bzip2
-========================================================================
+========================================
 --------------------------------------------------------------------------
 
 This program, "bzip2", the associated library "libbzip2", and all
@@ -10535,9 +10535,9 @@ bzip2/libbzip2 version 1.0.8 of 13 July 2019
 
 --------------------------------------------------------------------------
 
-========================================================================
+========================================
 c-ares
-========================================================================
+========================================
 # c-ares license
 
 Copyright (c) 2007 - 2018, Daniel Stenberg with many contributors, see AUTHORS
@@ -10602,9 +10602,9 @@ WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
 OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-========================================================================
+========================================
 cblas
-========================================================================
+========================================
 The reference BLAS is a freely-available software package. It is
 available from netlib via anonymous ftp and the World Wide Web. Thus,
 it can be included in commercial software packages (and has been). We
@@ -10620,9 +10620,9 @@ We will gladly answer any questions regarding the software. If a
 modification is done, however, it is the responsibility of the person
 who modified the routine to provide support
 
-========================================================================
+========================================
 Checker Framework Annotations
-========================================================================
+========================================
 A few parts of the Checker Framework have more permissive licenses.
 
  * The annotations are licensed under the MIT License.  (The text of this
@@ -10659,9 +10659,9 @@ THE SOFTWARE.
 
 ===========================================================================
 
-========================================================================
+========================================
 Chrome Certificate Verifier
-========================================================================
+========================================
 // Copyright 2015 The Chromium Authors
 //
 // Redistribution and use in source and binary forms, with or without
@@ -10690,9 +10690,9 @@ Chrome Certificate Verifier
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 cnpy
-========================================================================
+========================================
 The MIT License
 
 Copyright (c) Carl Rogers, 2011
@@ -10715,9 +10715,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-========================================================================
+========================================
 cppitertools
-========================================================================
+========================================
 Copyright (c) 2013, Ryan Haining, Aaron Josephs, Google
 All rights reserved.
 
@@ -10742,9 +10742,9 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 cpu_features
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -10975,9 +10975,9 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
 OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 SUCH DAMAGE.
 
-========================================================================
+========================================
 cpuinfo
-========================================================================
+========================================
 Copyright (c) 2019 Google LLC
 Copyright (c) 2017-2018 Facebook Inc.
 Copyright (C) 2012-2017 Georgia Institute of Technology
@@ -11006,9 +11006,9 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 Crunchy Crypt
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -11211,9 +11211,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 cutlass
-========================================================================
+========================================
 Copyright (c) 2017 - 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: BSD-3-Clause
 
@@ -11242,9 +11242,9 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 Dagger
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -11447,9 +11447,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 Darts-clone
-========================================================================
+========================================
 # The BSD 2-clause license
 
 Copyright (c) 2008-2014, Susumu Yata
@@ -11462,9 +11462,9 @@ Redistribution and use in source and binary forms, with or without modification,
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 dav1d
-========================================================================
+========================================
 Software License Agreement (BSD License, BSD-2-Clause-NetBSD, ISC) 
 
 Av1 Decoder (Dav1d) - https://code.videolan.org/videolan/dav1d
@@ -11567,9 +11567,9 @@ WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-========================================================================
+========================================
 dawn
-========================================================================
+========================================
 // Copyright 2017-2023 The Dawn & Tint Authors
 //
 // Redistribution and use in source and binary forms, with or without
@@ -11597,9 +11597,9 @@ dawn
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 Dimsum
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -11802,9 +11802,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 double-conversion
-========================================================================
+========================================
 Copyright 2006-2011, the V8 project authors. All rights reserved.
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are
@@ -11832,9 +11832,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 ducc
-========================================================================
+========================================
 ---
 BSD 3-clause License
 
@@ -12358,9 +12358,9 @@ Files: google/*
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 ecclesia
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -12563,9 +12563,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 Edge TPU (0)
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -12962,9 +12962,9 @@ DEALINGS IN THE SOFTWARE.
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * MATERIALS OR THE USE OR OTHER DEALINGS IN THE MATERIALS.
 
-========================================================================
+========================================
 Edge TPU (1)
-========================================================================
+========================================
 Copyright 2018 The TensorFlow Authors.  All rights reserved.
 
                                  Apache License
@@ -13169,9 +13169,9 @@ Copyright 2018 The TensorFlow Authors.  All rights reserved.
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 Edge TPU firmware callback
-========================================================================
+========================================
 Preamble
 This License governs Your use of the Work. This License is intended to allow developers to use the Source Code and Executable Files provided as part of the Work in any application in any form.
 The main points subject to the terms of the License are:
@@ -13224,9 +13224,9 @@ BY EXERCISING ANY RIGHTS TO THE WORK PROVIDED HEREIN, YOU ACCEPT AND AGREE TO BE
         c. No term or provision of this License shall be deemed waived and no breach consented to unless such waiver or consent shall be in writing and signed by the party to be charged with such waiver or consent.
         d. This License constitutes the entire agreement between the parties with respect to the Work licensed herein. There are no understandings, agreements or representations with respect to the Work not specified herein. The Author shall not be bound by any additional provisions that may appear in any communication from You. This License may not be modified without the mutual written agreement of the Author and You.
 
-========================================================================
+========================================
 Eigen 3
-========================================================================
+========================================
 Eigen 3.3.90
 The corresponding source for this library is available at
 https://eigen.googlesource.com/mirror/
@@ -14759,9 +14759,9 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FO
 DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-========================================================================
+========================================
 Error Prone
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -14964,9 +14964,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 expat
-========================================================================
+========================================
 Copyright (c) 1998-2000 Thai Open Source Software Center Ltd and Clark Cooper
 Copyright (c) 2001-2017 Expat maintainers
 
@@ -15245,9 +15245,9 @@ Except as contained in this notice, the name of a copyright holder shall not
 be used in advertising or otherwise to promote the sale, use or other dealings
 in this Software without prior written authorization of the copyright holder.
 
-========================================================================
+========================================
 f2reduce
-========================================================================
+========================================
 Copyright 2018-2020 Philippe Tillet
 Copyright 2020-2022 OpenAI
 
@@ -15335,9 +15335,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE
 SOFTWARE.
 
-========================================================================
+========================================
 fast_hash
-========================================================================
+========================================
 The MIT License
 
 Copyright (C) 2012 Zilong Tan (eric.zltan@gmail.com)
@@ -15362,9 +15362,9 @@ ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-========================================================================
+========================================
 Firebase
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -15567,9 +15567,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 FlatBuffers
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -15772,9 +15772,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 FP16
-========================================================================
+========================================
 The MIT License (MIT)
 
 Copyright (c) 2017 Facebook Inc.
@@ -15786,9 +15786,9 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-========================================================================
+========================================
 from_libaom (0)
-========================================================================
+========================================
 Copyright (c) 2006, 2008 Edward Rosten
 All rights reserved.
 
@@ -15820,9 +15820,9 @@ LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
 NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 from_libaom (1)
-========================================================================
+========================================
 The MIT License (MIT)
 Copyright (c) 2016 Peter Goldsborough
 
@@ -15843,9 +15843,9 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-========================================================================
+========================================
 FXdiv
-========================================================================
+========================================
 The MIT License (MIT)
 
 Copyright (c) 2017 Facebook Inc.
@@ -15857,9 +15857,9 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-========================================================================
+========================================
 gcc_14_1_0
-========================================================================
+========================================
 ================================================================================
 
                     GNU GENERAL PUBLIC LICENSE
@@ -16612,9 +16612,9 @@ The availability of this Exception does not imply any general
 presumption that third-party software is unaffected by the copyleft
 requirements of the license of GCC.
 
-========================================================================
+========================================
 gemmlowp
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -16817,9 +16817,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 giflib
-========================================================================
+========================================
 The GIFLIB distribution is Copyright (c) 1997  Eric S. Raymond
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -16840,9 +16840,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-========================================================================
+========================================
 glslang
-========================================================================
+========================================
 Here, glslang proper means core GLSL parsing, HLSL parsing, and SPIR-V code
 generation. Glslang proper requires use of a number of licenses, one that covers
 preprocessing and others that covers non-preprocessing.
@@ -17860,9 +17860,9 @@ NVIDIA HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ** IN THE MATERIALS.
 */
 
-========================================================================
+========================================
 Google Auto
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -18065,9 +18065,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 Google Toolbox for Mac
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -18270,9 +18270,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 gRPC
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -18883,9 +18883,9 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   This Source Code Form is "Incompatible With Secondary Licenses", as
   defined by the Mozilla Public License, v. 2.0.
 
-========================================================================
+========================================
 gRPC Protos
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -19088,9 +19088,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 gsfclient
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -19293,9 +19293,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 Guava JDK5
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -19498,9 +19498,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 Guava JDK7
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -19703,9 +19703,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 Halide
-========================================================================
+========================================
 Copyright (c) 2012-2020 MIT CSAIL, Google, Facebook, Adobe, NVIDIA CORPORATION, and other contributors.
 
 Developed by:
@@ -19922,9 +19922,9 @@ We will gladly answer any questions regarding the software. If a modification is
 done, however, it is the responsibility of the person who modified the routine
 to provide support.
 
-========================================================================
+========================================
 highway
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -20127,9 +20127,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 HighwayHash
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -20332,9 +20332,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 hwloc
-========================================================================
+========================================
 Copyright © 2004-2006 The Trustees of Indiana University and Indiana University Research and Technology Corporation.  All rights reserved.
 Copyright © 2004-2005 The University of Tennessee and The University of Tennessee Research Foundation.  All rights reserved.
 Copyright © 2004-2005 High Performance Computing Center Stuttgart, University of Stuttgart.  All rights reserved.
@@ -20375,9 +20375,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 ICU4C
-========================================================================
+========================================
 UNICODE LICENSE V3
 
 COPYRIGHT AND PERMISSION NOTICE
@@ -20825,9 +20825,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 imath
-========================================================================
+========================================
 Copyright Contributors to the OpenEXR Project. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
@@ -20840,9 +20840,9 @@ Redistribution and use in source and binary forms, with or without modification,
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 intel_dnnl
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -21859,9 +21859,9 @@ prospectively choose to deem waived or otherwise exclude such Section(s) of
 the License, but only in their entirety and only with respect to the Combined
 Software.
 
-========================================================================
+========================================
 J2ObjC
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -23311,9 +23311,9 @@ Agreement will bring a legal action under this Agreement more than one year
 after the cause of action arose. Each party waives its rights to a jury trial
 in any resulting litigation.
 
-========================================================================
+========================================
 Jakarta Inject
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -23516,9 +23516,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 java_annotations
-========================================================================
+========================================
 Apache License
 Version 2.0, January 2004
 http://www.apache.org/licenses/
@@ -23685,9 +23685,9 @@ agree to indemnify, defend, and hold each Contributor harmless for any liability
 incurred by, or claims asserted against, such Contributor by reason of your
 accepting any such warranty or additional liability.
 
-========================================================================
+========================================
 jpegxl
-========================================================================
+========================================
 BEGIN LICENSE
 
 Copyright (c) the JPEG XL Project Authors.
@@ -24630,9 +24630,9 @@ BEGIN testdata/external/wide-gamut-tests/LICENSE
 
 END testdata/external/wide-gamut-tests/LICENSE
 
-========================================================================
+========================================
 JsInterop Annotations
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -24835,9 +24835,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 JSpecify
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -25040,9 +25040,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 JSR 250
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -25245,9 +25245,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 JSR 305
-========================================================================
+========================================
 Copyright (c) 2007-2009, JSR305 expert group
 All rights reserved.
 
@@ -25277,9 +25277,9 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
 POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 JSR 330
-========================================================================
+========================================
 JSR-330
                                  Apache License
                            Version 2.0, January 2004
@@ -25483,9 +25483,9 @@ JSR-330
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 Khronos OpenGL headers
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -25688,9 +25688,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 KleidiAI
-========================================================================
+========================================
 Apache License
 Version 2.0, January 2004
 http://www.apache.org/licenses/
@@ -25765,9 +25765,9 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-========================================================================
+========================================
 Kotlin
-========================================================================
+========================================
 Files: kotlinc/*
 
                                  Apache License
@@ -27820,9 +27820,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-========================================================================
+========================================
 Kotlin coroutines
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -28025,9 +28025,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 kotlinx_atomicfu
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -28230,9 +28230,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 LAPACK
-========================================================================
+========================================
 Copyright (c) 1992-2021 The University of Tennessee and The University
                         of Tennessee Research Foundation.  All rights
                         reserved.
@@ -28307,9 +28307,9 @@ Files: LAPACKE/*
   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
   THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 legacy_libcxx_sort
-========================================================================
+========================================
 ==============================================================================
 The LLVM Project is under the Apache License v2.0 with LLVM Exceptions:
 ==============================================================================
@@ -28622,9 +28622,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-========================================================================
+========================================
 Leptonica
-========================================================================
+========================================
 /*====================================================================*
  -  Copyright (C) 2001 Leptonica.  All rights reserved.
  -
@@ -28651,9 +28651,9 @@ Leptonica
  -  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *====================================================================*/
 
-========================================================================
+========================================
 libaom
-========================================================================
+========================================
 Copyright (c) 2016, Alliance for Open Media. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -28782,9 +28782,9 @@ The algorithm is due to Ron Rivest.  This code was
 written by Colin Plumb in 1993, no copyright is claimed.
 This code is in the public domain; do with it what you wish.
 
-========================================================================
+========================================
 libavif
-========================================================================
+========================================
 Copyright 2019 Joe Drago. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -29043,9 +29043,9 @@ Files: android_jni/gradlew*
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 libdeflate
-========================================================================
+========================================
 Copyright 2016 Eric Biggers
 
 Permission is hereby granted, free of charge, to any person
@@ -29068,9 +29068,9 @@ ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-========================================================================
+========================================
 libexecinfo
-========================================================================
+========================================
 Copyright (c) 2003 Maxim Sobolev <sobomax@FreeBSD.org>
 All rights reserved.
 
@@ -29097,9 +29097,9 @@ SUCH DAMAGE.
 
 $Id: execinfo.c,v 1.3 2004/07/19 05:21:09 sobomax Exp $
 
-========================================================================
+========================================
 libjpeg-turbo
-========================================================================
+========================================
 For a summary of these license terms for the main libjpeg-turbo code, see
 LICENSE.md.
 
@@ -29247,9 +29247,9 @@ OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
 OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-========================================================================
+========================================
 libpfm4
-========================================================================
+========================================
 All other files are published under the following license:
 
 Copyright (c) 2002-2006 Hewlett-Packard Development Company, L.P.
@@ -29271,9 +29271,9 @@ HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTIO
 CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
 OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-========================================================================
+========================================
 liburing
-========================================================================
+========================================
 Copyright 2020 Jens Axboe
 
 Permission is hereby granted, free of charge, to any person obtaining a
@@ -29295,9 +29295,9 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-========================================================================
+========================================
 libwebp
-========================================================================
+========================================
 Copyright 2010 Google LLC
 
 Redistribution and use in source and binary forms, with or without
@@ -30285,9 +30285,9 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-========================================================================
+========================================
 Libxml2
-========================================================================
+========================================
 Libxml2, an XML C Parser
 
 Except where otherwise noted in the source code (e.g. the files hash.c,
@@ -30414,9 +30414,9 @@ http://ctrio.sourceforge.net/
 
 *************************************************************************
 
-========================================================================
+========================================
 libyuv
-========================================================================
+========================================
 Copyright 2011 The LibYuv Project Authors. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -30447,9 +30447,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 Little CMS
-========================================================================
+========================================
 BEGIN LICENSE
 
 MIT License
@@ -30570,9 +30570,9 @@ Users of this code must verify correctness for their application.
 
 END LICENSE_softsurfer
 
-========================================================================
+========================================
 LLVM
-========================================================================
+========================================
 Copied from llvm-project/llvm/LICENSE.TXT:
 ==============================================================================
 The LLVM Project is under the Apache License v2.0 with LLVM Exceptions:
@@ -32043,9 +32043,9 @@ License:
   * See md5.c for more information.
   */
 
-========================================================================
+========================================
 mecab
-========================================================================
+========================================
 Copyright (c) 2001-2007, Taku Kudo
 Copyright (c) 2004-2007, Nippon Telegraph and Telephone Corporation
 All rights reserved.
@@ -32076,9 +32076,9 @@ INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT
 TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 MediaPipe
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -32298,9 +32298,9 @@ For files under tasks/cc/text/language_detector/custom_ops/utils/utf/
  * OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR PURPOSE.
  */
 
-========================================================================
+========================================
 minizip
-========================================================================
+========================================
 zlib
 
 (extracted from README, except for match.S)
@@ -32349,9 +32349,9 @@ Copyright notice:
     misrepresented as being the original software.
  3. This notice may not be removed or altered from any source distribution.
 
-========================================================================
+========================================
 ml_dtypes
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -32554,9 +32554,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 Mosys
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -32759,9 +32759,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 mozilla_psl
-========================================================================
+========================================
 Mozilla Public License Version 2.0
 ==================================
 
@@ -33136,9 +33136,9 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   This Source Code Form is "Incompatible With Secondary Licenses", as
   defined by the Mozilla Public License, v. 2.0.
 
-========================================================================
+========================================
 Nano Protocol Buffers
-========================================================================
+========================================
 Copyright 2008, Google Inc.
 All rights reserved.
 
@@ -33173,9 +33173,9 @@ of the input file used when generating it.  This code is not
 standalone and requires a support library to be linked with it.  This
 support library is itself covered by the above license.
 
-========================================================================
+========================================
 nanoflann
-========================================================================
+========================================
 Software License Agreement (BSD License)
 
 Copyright 2008-2009  Marius Muja (mariusm@cs.ubc.ca). All rights reserved.
@@ -33205,9 +33205,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 NCurses
-========================================================================
+========================================
 Copyright (c) 1998-2017,2018 Free Software Foundation, Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a
@@ -33329,9 +33329,9 @@ DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
 THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-========================================================================
+========================================
 neon2sse
-========================================================================
+========================================
 created by Victoria Zhislina, the Senior Application Engineer, Intel Corporation,  victoria.zhislina@intel.com
 
 *** Copyright (C) 2012-2020 Intel Corporation.  All rights reserved.
@@ -33362,9 +33362,9 @@ and on any theory of liability, whether in contract, strict liability,
 or tort (including negligence or otherwise) arising in any way out of
 the use of this software, even if advised of the possibility of such damage.
 
-========================================================================
+========================================
 nsync
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -33567,9 +33567,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 NVIDIA Management Library
-========================================================================
+========================================
 Copyright 1993-2012 NVIDIA Corporation.  All rights reserved.
 
 NOTICE TO USER:   
@@ -33603,16 +33603,16 @@ Any use of this source code in individual and commercial software must
 include, in the user documentation and internal comments to the code,
 the above Disclaimer and U.S. Government End Users Notice.
 
-========================================================================
+========================================
 Ooura FFT
-========================================================================
+========================================
 Copyright(C) 1997,2001 Takuya OOURA (email: ooura@kurims.kyoto-u.ac.jp).
 You may use, copy, modify this code for any purpose and 
 without fee. You may distribute this ORIGINAL package.
 
-========================================================================
+========================================
 open_platforms_util_subtle
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -33815,9 +33815,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 OpenCensus
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -34020,9 +34020,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 opencl_headers
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -34225,9 +34225,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 opencl_icd_loader
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -34430,9 +34430,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 OpenCV
-========================================================================
+========================================
 Apache-2.0
 
 
@@ -34870,9 +34870,9 @@ Permission to use, copy, modify, and distribute this
 software is freely granted, provided that this notice
 is preserved.
 
-========================================================================
+========================================
 openexr
-========================================================================
+========================================
 Copyright (c) Contributors to the OpenEXR Project. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -34900,9 +34900,9 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 openssh
-========================================================================
+========================================
 This file is part of the OpenSSH software.
 
 The licences which components of this software fall under are as
@@ -35432,9 +35432,9 @@ OpenSSH contains no GPL code.
 ------
 $OpenBSD: LICENCE,v 1.20 2017/04/30 23:26:16 djm Exp $
 
-========================================================================
+========================================
 PCG Random Number Generator
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -35637,9 +35637,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 pdlp
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -35842,9 +35842,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 perfetto
-========================================================================
+========================================
 Copyright (C) 2017 The Android Open Source Project
  
  Licensed under the Apache License, Version 2.0 (the "License");
@@ -36078,9 +36078,9 @@ Copyright (C) 2017 The Android Open Source Project
  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 piex
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -36283,9 +36283,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 PNG
-========================================================================
+========================================
 COPYRIGHT NOTICE, DISCLAIMER, and LICENSE
 =========================================
 
@@ -36421,9 +36421,9 @@ to supporting the PNG file format in commercial products.  If you use
 this source code in a product, acknowledgment is not required but would
 be appreciated.
 
-========================================================================
+========================================
 pngnq
-========================================================================
+========================================
 --------------------------------------------------------------------------
       Copyright (c) 2004 Stuart Coyle  
 
@@ -36474,9 +36474,9 @@ pngnq
   
 ----------------------------------------------------------------------------
 
-========================================================================
+========================================
 program_image_remapper
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -36679,9 +36679,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 Proto Converter
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -36884,9 +36884,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 Protocol Buffers
-========================================================================
+========================================
 Copyright 2008, Google Inc.
 All rights reserved.
 
@@ -36951,9 +36951,9 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
-========================================================================
+========================================
 Protocol Buffers for Java
-========================================================================
+========================================
 Copyright 2008 Google Inc.  All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -36987,9 +36987,9 @@ of the input file used when generating it.  This code is not
 standalone and requires a support library to be linked with it.  This
 support library is itself covered by the above license.
 
-========================================================================
+========================================
 pthreadpool
-========================================================================
+========================================
 Copyright 2019 Google LLC
 Copyright (c) 2017 Facebook Inc.
 Copyright (c) 2015-2017 Georgia Institute of Technology
@@ -37016,9 +37016,9 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 RE2
-========================================================================
+========================================
 // Copyright (c) 2009 The RE2 Authors. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -37047,9 +37047,9 @@ RE2
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 Riegeli
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -37252,9 +37252,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 ruy
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -37457,9 +37457,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 SafeParcelable library
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -37662,9 +37662,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 sentencepiece
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -37956,9 +37956,9 @@ of the input file used when generating it.  This code is not
 standalone and requires a support library to be linked with it.  This
 support library is itself covered by the above license.
 
-========================================================================
+========================================
 sequence_lock
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -38161,9 +38161,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 sha3
-========================================================================
+========================================
 Copyright (c) 2009 The Go Authors. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -38192,9 +38192,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 sjpeg
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -38397,9 +38397,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 Skia
-========================================================================
+========================================
 Copyright (c) 2011 Google Inc. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -38430,9 +38430,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 sobol_data
-========================================================================
+========================================
 -----------------------------------------------------------------------------
 Licence pertaining to sobol.cc and the accompanying sets of direction numbers
 
@@ -38466,9 +38466,9 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 spirv_headers
-========================================================================
+========================================
 Files: All files except for those called out below.
 Copyright (c) 2015-2024 The Khronos Group Inc.
 
@@ -38573,9 +38573,9 @@ SOFTWARE.
 
 ---
 
-========================================================================
+========================================
 spirv_tools
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -38778,9 +38778,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 splitfile
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -38983,9 +38983,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 stablehlo
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -39188,9 +39188,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 SwiftShader
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -40230,9 +40230,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE
 SOFTWARE.
 
-========================================================================
+========================================
 tbb
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -40435,9 +40435,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 TCMalloc
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         https://www.apache.org/licenses/
@@ -40640,9 +40640,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 TensorFlow
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -40895,9 +40895,9 @@ By contributing to the BVLC/caffe repository through pull-request, comment,
 or otherwise, the contributor releases their content to the
 license and copyright terms herein.
 
-========================================================================
+========================================
 TensorFlow Lite Support
-========================================================================
+========================================
 Copyright 2020 The TensorFlow Authors.  All rights reserved.
 
                                  Apache License
@@ -41102,9 +41102,9 @@ Copyright 2020 The TensorFlow Authors.  All rights reserved.
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 TensorFlow Models
-========================================================================
+========================================
 Copyright 2022 Google LLC. All rights reserved.
 
 All files in the following folders:
@@ -41318,9 +41318,9 @@ Are licensed as follows:
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 TensorFlow Serving
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -41523,9 +41523,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 tf_runtime
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -41780,9 +41780,9 @@ mechanisms:
 2) It will contain specific license and restriction terms at the top of every
    file.
 
-========================================================================
+========================================
 tf_runtime_eigen
-========================================================================
+========================================
 Mozilla Public License Version 2.0
 ==================================
 
@@ -42157,9 +42157,9 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   This Source Code Form is "Incompatible With Secondary Licenses", as
   defined by the Mozilla Public License, v. 2.0.
 
-========================================================================
+========================================
 tf_runtime_llvm
-========================================================================
+========================================
 ==============================================================================
 The LLVM Project is under the Apache License v2.0 with LLVM Exceptions:
 ==============================================================================
@@ -42439,9 +42439,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE
 SOFTWARE.
 
-========================================================================
+========================================
 tiff
-========================================================================
+========================================
 # LibTIFF license
 
 Copyright © 1988-1997 Sam Leffler\
@@ -42532,9 +42532,9 @@ WHETHER OR NOT ADVISED OF THE POSSIBILITY OF DAMAGE, AND ON ANY THEORY OF
 LIABILITY, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE
 OF THIS SOFTWARE.
 
-========================================================================
+========================================
 Tink
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -42737,9 +42737,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 tz database
-========================================================================
+========================================
 Unless specified below, all files in the tz code and data (including
 this LICENSE file) are in the public domain.
 
@@ -42774,9 +42774,9 @@ contain material derived from BSD and use the BSD 3-clause license.
   OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
   SUCH DAMAGE.
 
-========================================================================
+========================================
 Unsmear
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -42979,9 +42979,9 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-========================================================================
+========================================
 UTF
-========================================================================
+========================================
 UTF-8 Library
 
 The authors of this software are Rob Pike and Ken Thompson.
@@ -42996,9 +42996,9 @@ WARRANTY.  IN PARTICULAR, NEITHER THE AUTHORS NOR LUCENT TECHNOLOGIES MAKE ANY
 REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE MERCHANTABILITY
 OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR PURPOSE.
 
-========================================================================
+========================================
 utf8_range
-========================================================================
+========================================
 MIT License
 
 Copyright (c) 2019 Yibo Cai
@@ -43022,9 +43022,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-========================================================================
+========================================
 vulkan_headers
-========================================================================
+========================================
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -43238,9 +43238,9 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-========================================================================
+========================================
 vulkan_loader
-========================================================================
+========================================
 The majority of files in this project use the Apache 2.0 License.
 There are a few exceptions and their license can be found in the source.
 Any license deviations from Apache 2.0 are "more permissive" licenses.
@@ -43504,9 +43504,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 vulkan_memory_allocator
-========================================================================
+========================================
 Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -43527,9 +43527,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-========================================================================
+========================================
 vulkan_volk
-========================================================================
+========================================
 Copyright (c) 2018-2024 Arseny Kapoulkine
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -43550,9 +43550,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-========================================================================
+========================================
 X.Org
-========================================================================
+========================================
 The following is the 'standard copyright' agreed upon by most contributors,
 and is currently the canonical license preferred by the X.Org Foundation.
 This is a slight variant of the common MIT license form published by the
@@ -44495,9 +44495,9 @@ WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-========================================================================
+========================================
 XCB library
-========================================================================
+========================================
 Copyright (C) 2001-2006 Bart Massey, Jamey Sharp, and Josh Triplett.
 All Rights Reserved.
 
@@ -44529,9 +44529,9 @@ otherwise to promote the sale, use or other dealings in this
 Software without prior written authorization from the
 authors.
 
-========================================================================
+========================================
 xmp_toolkit
-========================================================================
+========================================
 The BSD License
 
 Copyright (c) 1999 - 2014, Adobe Systems Incorporated
@@ -44564,9 +44564,9 @@ LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
 NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 XNNPACK
-========================================================================
+========================================
 BSD License
 
 For XNNPACK software
@@ -44599,9 +44599,9 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 xxhash
-========================================================================
+========================================
 xxHash Library
 Copyright (c) 2012-2021 Yann Collet
 All rights reserved.
@@ -44629,9 +44629,9 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-========================================================================
+========================================
 Zippy
-========================================================================
+========================================
 Copyright 2011, Google Inc.
 All rights reserved.
 
@@ -45453,9 +45453,9 @@ you are located before using this ebook.
 
 from https://www.gutenberg.org/policy/license.html
 
-========================================================================
+========================================
 zlib
-========================================================================
+========================================
 (extracted from README, except for match.S)
 
 Copyright notice:
@@ -45510,9 +45510,9 @@ freely, subject to the following restrictions:
   misrepresented as being the original software.
 3. This notice may not be removed or altered from any source distribution.
 
-========================================================================
+========================================
 Zstandard
-========================================================================
+========================================
 BSD License
 
 For Zstandard software
