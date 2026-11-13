@@ -62,6 +62,8 @@ foreach ($hit in Grep @('-E', '\bLlamaNative\b', '--', '*.kt', ':(exclude)core-l
 
 # 合図1：大きいファイル
 foreach ($f in git -C $root -c core.quotepath=false ls-files '*.kt') {
+    # 作業ツリーで消して、まだ index に残っているファイルは飛ばす
+    if (-not (Test-Path -LiteralPath (Join-Path $root $f))) { continue }
     $n = (Get-Content -LiteralPath (Join-Path $root $f) -Encoding utf8).Count
     if ($n -gt $MaxLines) { $warnings.Add("$f が $n 行。責務が集まっていないかを見る（分けるなら docs/設計/ の差し込み口に沿って）") }
 }
