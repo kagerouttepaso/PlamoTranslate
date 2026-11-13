@@ -78,8 +78,8 @@ class BenchActivity : ComponentActivity() {
         }
         val language = OcrLanguage.parse(intent.getStringExtra("lang"))
         say("ベンチ: 原文の言語 $language")
-        val ocr = MultiScriptOcr(ModelCatalog.mangaDir(this))
-        say("ベンチ: 漫画モデル ${if (ocr.hasMangaModel) "あり" else "なし（ML Kitだけ）"}")
+        val ocr = MultiScriptOcr(ModelCatalog.ocrDir(this))
+        say("ベンチ: PP-OCR ${ocr.paddleSources.ifEmpty { setOf("なし（ML Kitだけ）") }.joinToString("・")}")
         val statusBar = statusBarHeight()
         val results = File(output, "results.jsonl")
         results.writeText("")

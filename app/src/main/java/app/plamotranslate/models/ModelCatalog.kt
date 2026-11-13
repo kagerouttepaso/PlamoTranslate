@@ -180,8 +180,8 @@ object ModelCatalog {
     /** 音声認識（SenseVoice・Silero VAD）の置き場。会話翻訳とテキスト翻訳の音声入力が使う。 */
     fun asrDir(context: Context): File = File(modelsDir(context), "asr")
 
-    /** 漫画用OCRの置き場。無ければML Kitだけで動く。 */
-    fun mangaDir(context: Context): File = File(modelsDir(context), "ocr/manga")
+    /** PP-OCR のモデルの置き場（`manga/`・`korean/`）。無ければML Kitだけで動く。 */
+    fun ocrDir(context: Context): File = File(modelsDir(context), "ocr")
 
     val totalSize: Long get() = files.sumOf { it.size }
 }

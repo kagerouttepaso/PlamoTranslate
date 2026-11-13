@@ -75,7 +75,7 @@ class LiveFrame(
  */
 class LiveTranslator(private val context: Context, private val scope: CoroutineScope) {
     // 1行ずつ読む（段落にまとめると読み揺れで揃わない）。漫画モデルは縦書きの漫画用で遅いので使わない
-    private val ocr = MultiScriptOcr(mangaDir = null, groupLines = false)
+    private val ocr = MultiScriptOcr(paddleDir = null, groupLines = false)
     private val tracker = LineTracker()
     private val _frame = MutableStateFlow<LiveFrame?>(null)
     val frame: StateFlow<LiveFrame?> = _frame.asStateFlow()

@@ -83,7 +83,7 @@ class ScreenTranslateService : Service() {
     private var menu: ScreenMenu? = null
     private var touchWatcher: TouchWatcher? = null
     private val preferences by lazy { ScreenPreferences(this) }
-    private val ocr by lazy { MultiScriptOcr(ModelCatalog.mangaDir(this)) }
+    private val ocr by lazy { MultiScriptOcr(ModelCatalog.ocrDir(this)) }
 
     /** 翻訳のメモリの控え。1回の翻訳ごとに開く翻訳の流れで共有する（訳したモデルが変わったら捨てる）。 */
     private val memoryCache = MemoryCache()
