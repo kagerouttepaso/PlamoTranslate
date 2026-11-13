@@ -1,37 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  テーマに合わせて色が変わるアイコン（Android 13以降）用の単色版。1色で塗られるので、塗りつぶしにすると
-  中の波形と行が消える。吹き出しは線で描く。
+  テーマに合わせて色が変わるアイコン（Android 13以降）用の単色版。図柄は前景（ic_launcher_foreground）と同じ「水面に映る訳」。
+  1色で塗られるので、翼と目は鳥の輪郭と1つのパスにまとめ、evenOdd で抜いて見せる。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <path
+        android:pathData="M33.7,67.7 H55.9 M41.9,72.9 H63.5 M44.8,78.1 H64.3 M49.3,83.3 H71.7 M52.2,88.5 H63.7"
+        android:strokeWidth="3"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M0,63 H108"
+        android:strokeWidth="3.2"
+        android:strokeColor="#FF000000" />
     <group
-        android:pivotX="54"
-        android:pivotY="54"
-        android:scaleX="1.06"
-        android:scaleY="1.06">
+        android:translateX="8.28"
+        android:translateY="4.52"
+        android:scaleX="0.86"
+        android:scaleY="0.86">
         <path
-            android:pathData="M34,57 H56 A6,6 0 0 1 62,63 V71 A6,6 0 0 1 56,77 H40 L33,82 L34,77 A6,6 0 0 1 28,71 V63 A6,6 0 0 1 34,57 Z"
-            android:strokeWidth="3"
-            android:strokeColor="#FF000000"
-            android:strokeLineJoin="round" />
+            android:pathData="M50,62 V68 M56,60 V68"
+            android:strokeWidth="2.79"
+            android:strokeColor="#FF000000" />
+        <!-- 鳥の輪郭から、翼と目を抜く -->
         <path
-            android:pathData="M36,64.5 V69.5 M41,61.5 V72.5 M46,59.5 V74.5 M51,62.5 V71.5 M56,64.5 V69.5"
-            android:strokeWidth="3.2"
-            android:strokeColor="#FF000000"
-            android:strokeLineCap="round" />
-        <path
-            android:pathData="M74,51 H52 A6,6 0 0 1 46,45 V37 A6,6 0 0 1 52,31 H68 L75,26 L74,31 A6,6 0 0 1 80,37 V45 A6,6 0 0 1 74,51 Z"
-            android:strokeWidth="3"
-            android:strokeColor="#FF000000"
-            android:strokeLineJoin="round" />
-        <path
-            android:pathData="M52,36.5 H74 M60,41 H74 M56,45.5 H74"
-            android:strokeWidth="3.2"
-            android:strokeColor="#FF000000"
-            android:strokeLineCap="round" />
+            android:fillColor="#FF000000"
+            android:fillType="evenOdd"
+            android:pathData="M81,31 L70,33 C69,26 63,22 57,22.5 C50,23 46,28 45,34 C43,42 38,49 33,55 L23,65 L29,69 L41,64 C50,65 59,61 63,54 C67,47 68,41 69,37 Z M52,37 C58,42 58,52 50,58 L37,63 C40,52 44,42 52,37 Z M57.09,30 A2.91,2.91 0 1 0 62.91,30 A2.91,2.91 0 1 0 57.09,30 Z" />
     </group>
 </vector>
