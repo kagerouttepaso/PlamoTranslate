@@ -1,10 +1,11 @@
 package app.plamotranslate
 
-import android.app.ActivityManager
-import android.app.ApplicationExitInfo
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import app.plamotranslate.diagnostics.ProcessExits
+import app.plamotranslate.diagnostics.toProcessExit
+import app.plamotranslate.pipeline.diagnostics.ExitJudge
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -19,7 +20,7 @@ import java.util.Locale
  *
  * そこで、GPUで読み込む前に「読み込み中」の印（プロセスID）を端末に書き、読み込みと初回の推論が済んだら消す。
  * 次の起動で印が残っていれば、前回はGPUの読み込み中に終わっている。Androidが記録した前回の終わり方
- * （[ApplicationExitInfo]）が異常終了ならすぐ、そうでなくても2回続けばCPUに切り替える。
+ * （[ProcessExits]）が異常終了（中核の [ExitJudge.abnormal]）ならすぐ、そうでなくても2回続けばCPUに切り替える。
  * 1回目の強制停止やメモリ不足で止められただけでGPUを外さないよう、異常終了でないものは2回まで待つ。
  * アプリの版か端末のビルド（ドライバーを含む）が変わったら、もう一度GPUを試す。設定の画面からも試し直せる。
  */
@@ -28,9 +29,6 @@ internal object GpuGuard {
 
     /** 異常終了でない中断（強制停止・メモリ不足など）が何回続いたらCPUに切り替えるか。 */
     const val MAX_INTERRUPTIONS = 2
-
-    /** 前回の終わり方の分類。 */
-    enum class ExitKind { ABNORMAL, OTHER }
 
     sealed interface Decision {
         /** 前回はGPUの読み込み中ではなかった。 */
@@ -43,39 +41,14 @@ internal object GpuGuard {
     }
 
     /**
-     * 前回の終わり方から決める。[exit] は印を書いたプロセスの終わり方の記録。見つからなければ null。
+     * 前回の終わり方から決める。[abnormal] は印を書いたプロセスが異常終了したか（記録が見つからなければ false）。
      * [interruptions] はこれまでに続いた、異常終了でない中断の回数。
      */
-    fun decide(pending: Boolean, interruptions: Int, exit: ExitKind?, exitLabel: String): Decision = when {
+    fun decide(pending: Boolean, interruptions: Int, abnormal: Boolean, exitLabel: String): Decision = when {
         !pending -> Decision.Normal
-        exit == ExitKind.ABNORMAL -> Decision.Disable(exitLabel)
+        abnormal -> Decision.Disable(exitLabel)
         interruptions + 1 >= MAX_INTERRUPTIONS -> Decision.Disable("GPUでの読み込みが${MAX_INTERRUPTIONS}回続けて終わりませんでした")
         else -> Decision.Retry(interruptions + 1)
-    }
-
-    /** Androidの記録した終わり方を分類する。`exit(1)`（[ApplicationExitInfo.REASON_EXIT_SELF]、状態1）も異常終了とみなす。 */
-    fun classify(reason: Int, status: Int): ExitKind = when (reason) {
-        ApplicationExitInfo.REASON_CRASH,
-        ApplicationExitInfo.REASON_CRASH_NATIVE,
-        ApplicationExitInfo.REASON_ANR,
-        ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> ExitKind.ABNORMAL
-        ApplicationExitInfo.REASON_EXIT_SELF -> if (status != 0) ExitKind.ABNORMAL else ExitKind.OTHER
-        // SIGKILL（9）は、強制停止やシステムによる終了。それ以外のシグナルはネイティブの異常
-        ApplicationExitInfo.REASON_SIGNALED -> if (status != 9) ExitKind.ABNORMAL else ExitKind.OTHER
-        else -> ExitKind.OTHER
-    }
-
-    /** 画面に出す終わり方の説明。 */
-    fun label(reason: Int, status: Int): String = when (reason) {
-        ApplicationExitInfo.REASON_CRASH -> "Javaの例外"
-        ApplicationExitInfo.REASON_CRASH_NATIVE -> "ネイティブのクラッシュ"
-        ApplicationExitInfo.REASON_ANR -> "応答なし"
-        ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "初期化の失敗"
-        ApplicationExitInfo.REASON_EXIT_SELF -> "プロセスが終了コード${status}で終了"
-        ApplicationExitInfo.REASON_SIGNALED -> "シグナル${status}で終了"
-        ApplicationExitInfo.REASON_LOW_MEMORY -> "メモリ不足で終了"
-        ApplicationExitInfo.REASON_USER_REQUESTED, ApplicationExitInfo.REASON_USER_STOPPED -> "強制停止"
-        else -> "終了の理由${reason}"
     }
 
     /**
@@ -92,10 +65,10 @@ internal object GpuGuard {
             preferences.gpuDisabled = null
         }
         val pendingPid = preferences.gpuLoadingPid
-        val record = if (pendingPid != 0) lastExit(context, pendingPid) else null
-        val exit = record?.let { classify(it.reason, it.status) }
-        val exitLabel = record?.let { label(it.reason, it.status) } ?: "終わり方の記録なし"
-        return when (val decision = decide(pendingPid != 0, preferences.gpuInterruptions, exit, exitLabel)) {
+        val exit = if (pendingPid != 0) ProcessExits.history(context, pendingPid, 1).firstOrNull()?.toProcessExit() else null
+        val exitLabel = exit?.let(ExitJudge::label) ?: "終わり方の記録なし"
+        val abnormal = exit?.let(ExitJudge::abnormal) ?: false
+        return when (val decision = decide(pendingPid != 0, preferences.gpuInterruptions, abnormal, exitLabel)) {
             Decision.Normal -> true
             is Decision.Retry -> {
                 Log.w(TAG, "GPU: 前回はGPUでの読み込み中に止まりました（$exitLabel）。もう一度GPUで試します")
@@ -143,12 +116,6 @@ internal object GpuGuard {
         val at = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.JAPAN).format(Date(it.at))
         "${it.reason}、$at"
     }
-
-    private fun lastExit(context: Context, pid: Int): ApplicationExitInfo? = runCatching {
-        context.getSystemService(ActivityManager::class.java)
-            .getHistoricalProcessExitReasons(context.packageName, pid, 1)
-            .firstOrNull()
-    }.getOrNull()
 
     /** アプリの版と端末のビルド（GPUのドライバーを含む）。どちらかが変わったら、外したGPUをもう一度試す。 */
     private fun buildKey(context: Context): String {
