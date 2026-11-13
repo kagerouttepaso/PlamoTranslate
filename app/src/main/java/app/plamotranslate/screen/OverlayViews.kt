@@ -20,6 +20,9 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import app.plamotranslate.overlay.OverlaySlot
+import app.plamotranslate.overlay.toBox
+import app.plamotranslate.overlay.toRect
+import app.plamotranslate.pipeline.layout.Rooms
 import app.plamotranslate.overlay.dp
 import kotlin.math.abs
 
@@ -49,8 +52,14 @@ internal object OverlayStyle {
     /** 認識した枠は文字にぴったりなので、少し広げて原文の端が見えないようにする。吹き出しまで広げた枠（[OverlaySlot.bubble]）はそのまま。 */
     fun padded(context: Context, rect: Rect): Rect = Rect(rect).apply { inset(-context.dp(4), -context.dp(2)) }
 
-    /** 訳の枠を置く範囲。 */
-    fun boxRect(context: Context, slot: OverlaySlot): Rect = if (slot.bubble) Rect(slot.rect) else padded(context, slot.rect)
+    /** 訳の枠を置く範囲。余白を足した後に占めてよい範囲で切るので、隣の単位へはみ出さない（中核の `Rooms.drawn`）。 */
+    fun boxRect(context: Context, slot: OverlaySlot): Rect = Rooms.drawn(
+        box = slot.rect.toBox(),
+        grown = if (slot.bubble) slot.rect.toBox() else null,
+        padX = context.dp(4),
+        padY = context.dp(2),
+        room = slot.room?.toBox(),
+    ).toRect()
 
     /**
      * 訳の文字は太字にし、背景色でぼかした縁取りを付ける（2026-11-12、作者の指摘「漫画の小さな文字の訳が読みにくい」）。

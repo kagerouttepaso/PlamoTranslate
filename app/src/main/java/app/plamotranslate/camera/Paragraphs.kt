@@ -3,8 +3,8 @@ package app.plamotranslate.camera
 import android.graphics.Rect
 import app.plamotranslate.camera.LineTracker.Track
 import app.plamotranslate.overlay.textLine
-import app.plamotranslate.pipeline.layout.MenuGrouper
-import app.plamotranslate.pipeline.layout.TextGrouper
+import app.plamotranslate.pipeline.layout.Grouping
+import app.plamotranslate.pipeline.layout.TextLayout
 
 /** 表示と翻訳の単位。安定した行（[Track]）を1つ以上まとめたもの。 */
 internal class Paragraph(val lines: List<Track>) {
@@ -24,8 +24,8 @@ internal class Paragraph(val lines: List<Track>) {
 internal object Paragraphs {
     /** [lines] は上から順に並んだ行。[table] なら表・メニューのまとめ方。 */
     fun group(lines: List<Track>, table: Boolean): List<Paragraph> {
-        val grouper = if (table) MenuGrouper else TextGrouper
-        return grouper.group(lines.map { textLine(it.consensus(), it.rect) }).map { u -> Paragraph(u.members.map { lines[it] }) }
+        val units = TextLayout.units(lines.map { textLine(it.consensus(), it.rect) }, if (table) Grouping.MENU else Grouping.TEXT)
+        return units.map { u -> Paragraph(u.members.map { lines[it] }) }
     }
 
     /** 行をつなぐ。韓国語・欧文は単語の間で折り返すので空白、日本語・中国語は詰める。 */

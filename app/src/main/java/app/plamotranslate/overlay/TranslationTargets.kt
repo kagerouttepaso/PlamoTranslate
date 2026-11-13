@@ -9,9 +9,16 @@ import app.plamotranslate.ocr.TextQuality
 
 /**
  * 訳の枠1つ：撮影画像の座標での位置、縦書きか、元の画面から読み取った背景色と文字色。
- * [bubble] が true なら、[rect] は吹き出しの内側まで広げた範囲（[BubbleFit]）で、さらには広げない。
+ * [bubble] が true なら、[rect] は背景いっぱいまで広げた範囲（[BubbleFit]）で、さらには広げない（余白も足さない）。
+ * [room] は占めてよい範囲で、描く枠は余白を足してもここを出ない。無ければ切らない（カメラ翻訳）。
  */
-data class OverlaySlot(val rect: Rect, val vertical: Boolean, val colors: BoxColors = BoxColors.DEFAULT, val bubble: Boolean = false)
+data class OverlaySlot(
+    val rect: Rect,
+    val vertical: Boolean,
+    val colors: BoxColors = BoxColors.DEFAULT,
+    val bubble: Boolean = false,
+    val room: Rect? = null,
+)
 
 /** 訳す1件：認識したまとまり、訳の枠（位置・縦書き・色）、翻訳に渡す原文。 */
 internal class TranslationTarget(val block: TextBlock, val slot: OverlaySlot) {

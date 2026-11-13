@@ -15,12 +15,11 @@ import kotlin.math.min
  * - 範囲が大きく重なる行は、形に関係なく同じまとまりにする。重なったまま別々に訳を描くと読めなくなる
  *   （2026-11-05、作者の指摘）。
  * - 仮名を含む行（日本語）とそれ以外の行はつながない。日本語の行は訳さないため、混ぜると訳す範囲がずれる。
- * - 縦書きのまとまりは右の列から、横書きは上の行から読む。
  */
 object BubbleGrouper : LineGrouper {
     private const val GAP_RATIO = 0.8f
 
-    override fun group(lines: List<TextLine>): List<TextUnit> {
+    override fun group(lines: List<TextLine>): List<List<Int>> {
         val parent = IntArray(lines.size) { it }
         fun find(i: Int): Int {
             var x = i
@@ -32,29 +31,7 @@ object BubbleGrouper : LineGrouper {
                 if (connected(lines[i], lines[j])) parent[find(i)] = find(j)
             }
         }
-        return lines.indices.groupBy(::find).values.map { members -> unit(lines, members) }
-    }
-
-    private fun unit(lines: List<TextLine>, members: List<Int>): TextUnit {
-        val vertical = members.any { lines[it].verticalLine } && members.none { lines[it].box.isHorizontal }
-        val ordered = if (vertical) members.sortedByDescending { lines[it].box.right } else rowOrder(lines, members)
-        return TextUnit(UnitKind.BUBBLE, ordered, unionOf(members.map { lines[it].box }), vertical)
-    }
-
-    /**
-     * 横書きの行を上から、同じ高さの行は左から並べる。上端の数ピクセルの差で左右が逆転しないよう、
-     * 行の高さの半分以上重なる行を同じ段とみなす（2026-11-06、英語の吹き出しで「HAVE FUN / I STILL」と逆転した）。
-     */
-    private fun rowOrder(lines: List<TextLine>, members: List<Int>): List<Int> {
-        val rows = mutableListOf<MutableList<Int>>()
-        for (i in members.sortedBy { lines[it].box.centerY }) {
-            val row = rows.lastOrNull()
-            val ref = row?.first()?.let { lines[it].box }
-            val box = lines[i].box
-            val overlap = if (ref == null) 0 else min(ref.bottom, box.bottom) - max(ref.top, box.top)
-            if (ref != null && overlap > min(ref.height, box.height) / 2) row.add(i) else rows += mutableListOf(i)
-        }
-        return rows.flatMap { row -> row.sortedBy { lines[it].box.left } }
+        return lines.indices.groupBy(::find).values.toList()
     }
 
     private fun connected(a: TextLine, b: TextLine): Boolean {

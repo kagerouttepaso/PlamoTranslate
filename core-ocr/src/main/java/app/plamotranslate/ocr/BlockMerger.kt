@@ -30,9 +30,6 @@ internal data class Candidate(
 internal object BlockMerger {
     private const val SAME_LINE_IOU = 0.4f
 
-    /** 同じ行とみなす上端のずれ（px）。読み順を上から下、左から右にそろえる。 */
-    private const val ROW_TOLERANCE_PX = 24
-
     /** 同じ位置の行を、読み手ごとに読んだ版。 */
     private class LineGroup(val bounds: Rect) {
         val versions = mutableMapOf<Source, Candidate>()
@@ -92,7 +89,8 @@ internal object BlockMerger {
         return groups.map { it.pick() }
             .filter { it.text.isNotBlank() }
             .map { OcrLine(it.text, it.bounds, ScriptDetector.detect(it.text)) }
-            .sortedWith(compareBy({ it.bounds.top / ROW_TOLERANCE_PX }, { it.bounds.left }))
+            // 行は上から並べるだけ。単位の読み順は、まとめた後に中核（ReadingOrder）が決める
+            .sortedWith(compareBy({ it.bounds.top }, { it.bounds.left }))
     }
 
     private fun Candidate.reading(source: Source) = Reading(source, text, confidence)

@@ -28,9 +28,7 @@ import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.translation.SqlitePersistentCache
-import app.plamotranslate.overlay.selectTargets
 import app.plamotranslate.overlay.toBox
-import app.plamotranslate.overlay.groupLines
 import app.plamotranslate.pipeline.screen.SceneProfile
 import app.plamotranslate.pipeline.screen.ScreenChange
 import app.plamotranslate.pipeline.screen.ScreenSession
@@ -226,13 +224,7 @@ class ScreenTranslateService : Service() {
         val w = Work(session).also { work = it }
         val capturer = capturer ?: return dispatch(SessionEvent.Captured(session, ok = false))
         val profile = profile
-        val settings = preferences.settings
-        val choice = LayoutChoice(
-            language = preferences.language,
-            outlined = profile.outlinedText,
-            grouping = settings.grouping,
-            fitBubbles = settings.fit,
-        )
+        val choice = LayoutChoice.of(preferences.language, preferences.settings)
         scope.launch(w.job) {
             val hiddenAt = SystemClock.uptimeMillis()
             hiding = true
@@ -248,13 +240,17 @@ class ScreenTranslateService : Service() {
             }
             if (captured != null) {
                 val (image, frames) = captured
-                w.frame = ScreenFrame(
-                    image = image,
-                    reference = image.toThumb(),
-                    frames = frames,
-                    captureMillis = SystemClock.uptimeMillis() - hiddenAt,
-                    statusBar = statusBarHeight(),
-                    choice = choice,
+                w.captured(
+                    image,
+                    ScreenFrame(
+                        reference = image.toThumb(),
+                        frames = frames,
+                        captureMillis = SystemClock.uptimeMillis() - hiddenAt,
+                        width = image.width,
+                        height = image.height,
+                        statusBar = statusBarHeight(),
+                        choice = choice,
+                    ),
                 )
             }
             dispatch(SessionEvent.Captured(session, ok = captured != null))
@@ -275,12 +271,13 @@ class ScreenTranslateService : Service() {
     }
 
     /**
-     * 読む・まとめる・選ぶ・枠を決める工程：前提（[ScreenFrame]）だけを読み、結果（[PageLayout]）を作る。
-     * 枠の色を撮影画像から読むので、枠を決めた後に撮影画像を捨てる。
+     * 読む工程を動かし、続けてまとめる・選ぶ・枠を決める工程（[PageLayout.of]）を行う。前提（[ScreenFrame]）と撮影画像は読むだけで、
+     * 結果を置くと撮影画像は捨てられる（[Work.laidOut]）。
      */
     private fun recognize(session: Int) {
         val w = workOf(session) ?: return
         val frame = w.frame ?: return
+        val image = w.image ?: return
         val choice = frame.choice
         scope.launch(w.job) {
             overlay?.showStatus("文字を読んでいます…")
@@ -288,26 +285,28 @@ class ScreenTranslateService : Service() {
             var error: String? = null
             val lines = try {
                 // 白縁取り・白抜きの文字にも強い読み方（OutlinedText）は、場面の設定で選ぶ
-                if (choice.outlined) ocr.recognizeOutlined(frame.image, choice.language) else ocr.recognize(frame.image, choice.language)
+                if (choice.outlined) ocr.recognizeOutlined(image, choice.language) else ocr.recognize(image, choice.language)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 error = "文字を読めませんでした: ${e.message}"
                 emptyList()
             }
-            val ocrMillis = SystemClock.uptimeMillis() - t0
-            val units = groupLines(lines, choice.grouping, frame.image.width, frame.image.height)
-            val targets = selectTargets(units, frame.image, frame.statusBar, SCREEN_TARGET, fitBubbles = choice.fitBubbles)
-            frame.release()
-            w.page = PageLayout(lines = lines.size, units = units.size, targets = targets, ocrMillis = ocrMillis, error = error)
-            dispatch(SessionEvent.Recognized(session, targets.size))
+            val page = PageLayout.of(frame, image, lines, SystemClock.uptimeMillis() - t0, error)
+            w.laidOut(page)
+            dispatch(SessionEvent.Recognized(session, page.targets.size))
         }
     }
 
     /** 訳す・流し込む工程：空の訳の枠を出し、翻訳の流れを開いて訳を流し込む。 */
     private fun translate(session: Int) {
         val w = workOf(session) ?: return
-        val frame = w.frame ?: return
-        val targets = w.page?.targets ?: return
+        val frame = w.frame
+        val targets = w.page?.targets
+        if (frame == null || targets == null) {
+            // 状態遷移は撮れて読めた後にだけ訳させるので、ここへは来ない。来ても翻訳中のまま止めない
+            dispatch(SessionEvent.TranslationFailed(session, "訳す材料がありません"))
+            return
+        }
         overlay?.show(targets.map { it.slot }, "${targets.size}件を翻訳中…")
         val source = frame.choice.language.sourceLanguage
         scope.launch(w.job) {
@@ -316,7 +315,7 @@ class ScreenTranslateService : Service() {
                 dispatch(SessionEvent.TranslationFailed(session, "翻訳モデルを読めません。アプリを開いて確認してください"))
                 return@launch
             }
-            val run = TranslationRun(ready.model.label, SystemClock.uptimeMillis()).also { w.run = it }
+            val run = TranslationRun(ready.model.label, SystemClock.uptimeMillis()).also(w::translating)
             // 1回の翻訳ごとに翻訳の流れを開き、終わったら閉じる（docs/設計/翻訳コア.md「翻訳の契約」）。
             // メモリの控えはサービスが持って翻訳どうしで共有し、永続の控え（端末のデータベース）で次に始めたときも使う
             val persistent = SqlitePersistentCache.get(this@ScreenTranslateService)

@@ -46,4 +46,25 @@ class RoomsTest {
         val room = Box(0, 0, 250, 300)
         assertEquals(Box(50, 60, 250, 180), Rooms.clip(Box(50, 60, 400, 180), room, box))
     }
+
+    @Test
+    fun 余白を足した枠も範囲に収める() {
+        // 隙間の狭いメニューの項目：余白（左右4・上下2）を足すと隣の範囲へ出るので、範囲で切る
+        val boxes = listOf(Box(100, 100, 200, 140), Box(204, 100, 300, 140))
+        val rooms = Rooms.assign(boxes, screen)
+        val drawn = Rooms.drawn(boxes[0], grown = null, padX = 4, padY = 2, room = rooms[0])
+        assertEquals(Box(96, 98, 202, 142), drawn)
+        assertFalse(drawn.intersects(rooms[1]))
+    }
+
+    @Test
+    fun 範囲が無ければ余白をそのまま足す() {
+        assertEquals(Box(96, 98, 204, 142), Rooms.drawn(Box(100, 100, 200, 140), null, 4, 2, room = null))
+    }
+
+    @Test
+    fun 広げた枠には余白を足さない() {
+        val grown = Box(50, 50, 260, 200)
+        assertEquals(grown, Rooms.drawn(Box(100, 100, 200, 140), grown, 4, 2, room = Box(0, 0, 300, 300)))
+    }
 }

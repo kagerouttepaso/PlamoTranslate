@@ -17,7 +17,7 @@ object TextGrouper : LineGrouper {
      */
     val ITEM_START = Regex("""^(\d{1,2}(?:[.)．]|\s)|[①-⑳]|[・•\-※*▪■□●○◆◇])""")
 
-    override fun group(lines: List<TextLine>): List<TextUnit> {
+    override fun group(lines: List<TextLine>): List<List<Int>> {
         val paragraphs = mutableListOf<MutableList<Int>>()
         for (i in lines.indices.sortedBy { lines[it].box.top }) {
             val r = lines[i].box
@@ -30,6 +30,6 @@ object TextGrouper : LineGrouper {
             }
             if (target != null) target += i else paragraphs += mutableListOf(i)
         }
-        return paragraphs.map { p -> TextUnit(UnitKind.PARAGRAPH, p, unionOf(p.map { lines[it].box }), vertical = false) }
+        return paragraphs
     }
 }

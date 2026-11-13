@@ -20,29 +20,88 @@ data class TextLine(
     val verticalLine: Boolean get() = box.isVertical && !latin
 }
 
-/** 訳の単位の種類。枠の広げ方を決める（docs/設計/画面翻訳.md「訳文の重ね表示」）。 */
-enum class UnitKind { BUBBLE, PARAGRAPH, MENU_ITEM }
+/** 訳の単位の種類。[expandable] なら、「広げる」を選んだとき占めてよい範囲の中で背景いっぱいまで広げる（docs/設計/画面翻訳.md「訳文の重ね表示」）。 */
+enum class UnitKind(val expandable: Boolean) {
+    /** 吹き出し・段落の塊（漫画）。 */
+    BUBBLE(true),
+
+    /** 文章の段落。広げると隣の段落や名前にかかりやすいので広げない。 */
+    PARAGRAPH(false),
+
+    /** メニュー・ボタンの項目。項目の背景いっぱいまで広げる。 */
+    MENU_ITEM(true),
+
+    /** まとめる前の1行（カメラ翻訳は行を追ってからまとめる）。 */
+    LINE(false),
+}
 
 /**
  * 訳の単位：まとめた行（[members] は入力の行の番号を読む順に並べたもの）、種類、原文の位置、縦書きか。
+ * 位置・縦書きか・読む順は、まとめ方によらず [TextLayout.unitOf] の1か所で決める。
  */
 data class TextUnit(val kind: UnitKind, val members: List<Int>, val box: Box, val vertical: Boolean)
 
-/** まとめる工程の差し替え口。どの行もちょうど1つの単位に入る（[LayoutContract]）。 */
+/** まとめる工程の差し替え口：どの行を1つの単位にするかだけを返す。どの行もちょうど1つの組に入る（`GroupersTest`）。 */
 fun interface LineGrouper {
-    fun group(lines: List<TextLine>): List<TextUnit>
+    fun group(lines: List<TextLine>): List<List<Int>>
 }
 
-/** 行のまとめ方。プリセットとメニューで選ぶ。 */
-enum class Grouping(val grouper: LineGrouper) {
+/** 行のまとめ方。プリセットとメニューで選ぶ。[kind] はできる単位の種類。 */
+enum class Grouping(val grouper: LineGrouper, val kind: UnitKind) {
     /** 吹き出し・段落の塊（漫画）。上下・左右に詰まった行をつなぐ。 */
-    BUBBLE(BubbleGrouper),
+    BUBBLE(BubbleGrouper, UnitKind.BUBBLE),
 
     /** 文章（チャット・ウェブ）。すぐ下に続く行を段落にし、番号・記号で区切る。 */
-    TEXT(TextGrouper),
+    TEXT(TextGrouper, UnitKind.PARAGRAPH),
 
     /** メニュー・表（ゲームのUI）。1行ずつ。ボタンの中の2段書きだけまとめる。 */
-    MENU(MenuGrouper),
+    MENU(MenuGrouper, UnitKind.MENU_ITEM),
+}
+
+/** 単位と、その占めてよい範囲（[Rooms]）。 */
+data class PlacedUnit(val unit: TextUnit, val room: Box)
+
+/** まとめる工程の全体：組を作り、単位にし、読み順に並べ、占めてよい範囲を付ける。 */
+object TextLayout {
+    /**
+     * [lines] を [grouping] でまとめ、読み順に並べて範囲を付ける（画面翻訳）。[screen] は画面の範囲。
+     * 約束（`TextLayoutTest`）：どの行もちょうど1つの単位に入る。範囲は原文を含み画面を出ず、原文の重ならない単位どうしで重ならない。
+     */
+    fun arrange(lines: List<TextLine>, grouping: Grouping, screen: Box): List<PlacedUnit> {
+        val units = ReadingOrder.sort(units(lines, grouping))
+        val rooms = Rooms.assign(units.map { it.box }, screen)
+        return units.zip(rooms) { u, r -> PlacedUnit(u, r) }
+    }
+
+    /** [lines] を [grouping] でまとめた単位（並べ替えず、範囲も付けない。カメラ翻訳の段落）。 */
+    fun units(lines: List<TextLine>, grouping: Grouping): List<TextUnit> =
+        grouping.grouper.group(lines).map { unitOf(grouping.kind, it, lines) }
+
+    /**
+     * 行の組を単位にする。縦の列だけ（横長の行を含まない）なら縦書きで右の列から、そうでなければ上の行から読む。
+     * 位置は入った行の位置を合わせたもの。
+     */
+    fun unitOf(kind: UnitKind, members: List<Int>, lines: List<TextLine>): TextUnit {
+        val vertical = members.any { lines[it].verticalLine } && members.none { lines[it].box.isHorizontal }
+        val ordered = if (vertical) members.sortedByDescending { lines[it].box.right } else rowOrder(lines, members)
+        return TextUnit(kind, ordered, unionOf(members.map { lines[it].box }), vertical)
+    }
+
+    /**
+     * 横書きの行を上から、同じ高さの行は左から並べる。上端の数ピクセルの差で左右が逆転しないよう、
+     * 行の高さの半分以上重なる行を同じ段とみなす（2026-11-06、英語の吹き出しで「HAVE FUN / I STILL」と逆転した）。
+     */
+    private fun rowOrder(lines: List<TextLine>, members: List<Int>): List<Int> {
+        val rows = mutableListOf<MutableList<Int>>()
+        for (i in members.sortedBy { lines[it].box.centerY }) {
+            val row = rows.lastOrNull()
+            val ref = row?.first()?.let { lines[it].box }
+            val box = lines[i].box
+            val overlap = if (ref == null) 0 else min(ref.bottom, box.bottom) - max(ref.top, box.top)
+            if (ref != null && overlap > min(ref.height, box.height) / 2) row.add(i) else rows += mutableListOf(i)
+        }
+        return rows.flatMap { row -> row.sortedBy { lines[it].box.left } }
+    }
 }
 
 /** 単位を読み順に並べる：上から、同じ高さ（[ROW_TOLERANCE_PX] 以内）なら左から。 */

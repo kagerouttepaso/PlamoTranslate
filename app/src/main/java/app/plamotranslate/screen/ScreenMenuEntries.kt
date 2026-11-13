@@ -6,6 +6,8 @@ import app.plamotranslate.ModelState
 import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.ocr.OcrLanguage
 import app.plamotranslate.pipeline.layout.Grouping
+import app.plamotranslate.pipeline.screen.Dismissal
+import app.plamotranslate.pipeline.screen.Recognition
 import app.plamotranslate.pipeline.screen.ScreenPreset
 import app.plamotranslate.pipeline.screen.ScreenSettings
 
@@ -52,9 +54,8 @@ internal class ScreenMenuEntries(
                 actions.triggerChanged(t)
             }
         }))
-        add(MenuEntry.Choice("認識モード", ScreenRecognition.entries.map { mode ->
-            val motion = mode == ScreenRecognition.MOTION
-            Option(mode.menuName, checked = settings.motion == motion) { change(settings.copy(motion = motion)) }
+        add(MenuEntry.Choice("認識モード", Recognition.entries.map { r ->
+            Option(r.menuName, checked = settings.recognition == r) { change(settings.copy(recognition = r)) }
         }))
         add(MenuEntry.Choice("まとめ方", Grouping.entries.map { g ->
             Option(g.menuName, checked = settings.grouping == g) { change(settings.copy(grouping = g)) }
@@ -63,9 +64,8 @@ internal class ScreenMenuEntries(
             Option("文字に合わせる", checked = !settings.fit) { change(settings.copy(fit = false)) },
             Option("広げる", checked = settings.fit) { change(settings.copy(fit = true)) },
         )))
-        add(MenuEntry.Choice("訳の消え方", ScreenDismissal.entries.map { d ->
-            val untilTouched = d == ScreenDismissal.ON_TOUCH
-            Option(d.menuName, checked = settings.untilTouched == untilTouched) { change(settings.copy(untilTouched = untilTouched)) }
+        add(MenuEntry.Choice("訳の消え方", Dismissal.entries.map { d ->
+            Option(d.menuName, checked = settings.dismissal == d) { change(settings.copy(dismissal = d)) }
         }))
         // 翻訳モデルはアプリ全体で1つなので、ここで変えると会話・カメラ・テキストの画面のモデルも変わる
         val engineState = EngineHolder.state.value

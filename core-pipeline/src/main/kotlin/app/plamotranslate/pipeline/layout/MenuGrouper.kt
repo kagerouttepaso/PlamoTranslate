@@ -8,10 +8,10 @@ import kotlin.math.abs
  * 行間がほとんどなく（行の高さの0.3倍以内）、中央がそろい、幅が近い2行だけ。表の行どうしはふつう行間が空いている。
  */
 object MenuGrouper : LineGrouper {
-    override fun group(lines: List<TextLine>): List<TextUnit> {
+    override fun group(lines: List<TextLine>): List<List<Int>> {
         val order = lines.indices.sortedBy { lines[it].box.top }
         val used = mutableSetOf<Int>()
-        val result = mutableListOf<TextUnit>()
+        val result = mutableListOf<List<Int>>()
         for (i in order) {
             if (i in used) continue
             val r = lines[i].box
@@ -24,8 +24,7 @@ object MenuGrouper : LineGrouper {
             }
             used += i
             if (pair != null) used += pair
-            val members = listOfNotNull(i, pair)
-            result += TextUnit(UnitKind.MENU_ITEM, members, unionOf(members.map { lines[it].box }), lines[i].verticalLine && pair == null)
+            result += listOfNotNull(i, pair)
         }
         return result
     }

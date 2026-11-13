@@ -40,6 +40,15 @@ object Rooms {
     }
 
     /**
+     * 描く枠（枠を決める工程の最後）。広げた枠 [grown] があればそれを、無ければ原文の位置 [box] に余白（左右 [padX]・上下 [padY]）を
+     * 足したものを、範囲 [room] に収める。範囲が無ければ収めない（カメラ翻訳）。余白を足しても隣の単位へはみ出さない。
+     */
+    fun drawn(box: Box, grown: Box?, padX: Int, padY: Int, room: Box?): Box {
+        val base = grown ?: Box(box.left - padX, box.top - padY, box.right + padX, box.bottom + padY)
+        return if (room == null) base else clip(base, room, box)
+    }
+
+    /**
      * 広げた枠 [grown] を、範囲 [room] に収める。原文の位置 [box] は必ず含める（範囲は原文を含むので、収めても原文は欠けない）。
      */
     fun clip(grown: Box, room: Box, box: Box): Box = Box(
