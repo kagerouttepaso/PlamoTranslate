@@ -30,7 +30,6 @@ import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.ocr.OcrLanguage
 import app.plamotranslate.translation.SqlitePersistentCache
-import app.plamotranslate.overlay.TranslationTarget
 import app.plamotranslate.overlay.selectTargets
 import app.plamotranslate.overlay.toBox
 import app.plamotranslate.overlay.groupLines
@@ -51,7 +50,6 @@ import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
 import app.plamotranslate.translation.Translations
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -101,25 +99,7 @@ class ScreenTranslateService : Service() {
     private var startJudge = StartJudge(profile.start)
     private var validity = ValidityJudge(profile.validity)
 
-    /** 1回の翻訳（セッション）の作業と材料。状態遷移は番号だけを持ち、材料はここが持つ。 */
-    private class Work(val session: Int) {
-        val job: CompletableJob = SupervisorJob()
-        var bitmap: Bitmap? = null
-        var reference: Thumb? = null
-        var frames = 1
-        var captureMillis = 0L
-        var ocrMillis = 0L
-        var ocrError: String? = null
-        var blocks = 0
-        var targets: List<TranslationTarget> = emptyList()
-        var statusBar = 0
-        var capturedSize = ""
-        var translateStart = 0L
-        var model = ""
-        var stats: TranslationStream.Stats? = null
-        var peekJob: Job? = null
-    }
-
+    /** 今の1回の翻訳の作業とデータ（[Work]）。状態遷移は番号だけを持つ。 */
     private var work: Work? = null
 
     /** 撮る・のぞくために自分の表示を隠している間。見張りはこの間の画面を判定器へ渡さない。 */
@@ -210,10 +190,10 @@ class ScreenTranslateService : Service() {
     private fun perform(effect: Effect) {
         when (effect) {
             is Effect.Capture -> capture(effect.session)
-            is Effect.BeginValidity -> workOf(effect.session)?.reference?.let(validity::begin)
+            is Effect.BeginValidity -> workOf(effect.session)?.frame?.reference?.let(validity::begin)
             is Effect.Recognize -> recognize(effect.session)
-            is Effect.NothingToTranslate -> workOf(effect.session)?.let { w ->
-                overlay?.showStatus(w.ocrError ?: "訳す文字が見つかりませんでした（文字認識 ${w.ocrMillis}ms）")
+            is Effect.NothingToTranslate -> workOf(effect.session)?.page?.let { page ->
+                overlay?.showStatus(page.error ?: "訳す文字が見つかりませんでした（文字認識 ${page.ocrMillis}ms）")
             }
             is Effect.Translate -> translate(effect.session)
             is Effect.Finished -> workOf(effect.session)?.let(::finished)
@@ -233,21 +213,28 @@ class ScreenTranslateService : Service() {
     /** セッションの作業（撮影・文字認識・翻訳・のぞき）を取り消し、材料を捨てる。 */
     private fun cancel(session: Int) {
         val w = workOf(session) ?: return
-        w.job.cancel()
-        w.bitmap?.recycle()
-        w.bitmap = null
+        w.release()
         work = null
         hiding = false
         button?.setVisible(true)
     }
 
-    // ---- 作業の実行 ----
+    // ---- 作業の実行（工程：撮る → 読む・まとめる・選ぶ・枠を決める → 訳す・流し込む） ----
 
-    /** 自分の表示を隠して画面を撮る。場面の設定が数枚を重ねるなら、続けて撮って中央値の1枚にする（[FrameStack]）。 */
+    /**
+     * 撮る工程：自分の表示を隠して画面を撮り、1回の翻訳の前提（[ScreenFrame]）を作る。
+     * 場面の設定が数枚を重ねるなら、続けて撮って中央値の1枚にする（[FrameStack]）。工程の中身（言語・まとめ方など）もここで決める。
+     */
     private fun capture(session: Int) {
         val w = Work(session).also { work = it }
         val capturer = capturer ?: return dispatch(SessionEvent.Captured(session, ok = false))
         val profile = profile
+        val choice = LayoutChoice(
+            language = preferences.language,
+            outlined = profile.outlinedText,
+            grouping = Grouping.BUBBLE,
+            fitBubbles = preferences.fitBubbles,
+        )
         scope.launch(w.job) {
             val hiddenAt = SystemClock.uptimeMillis()
             hiding = true
@@ -261,12 +248,16 @@ class ScreenTranslateService : Service() {
                 button?.setVisible(true)
                 hiding = false
             }
-            w.captureMillis = SystemClock.uptimeMillis() - hiddenAt
             if (captured != null) {
-                w.bitmap = captured.first
-                w.frames = captured.second
-                w.capturedSize = "${captured.first.width}x${captured.first.height}"
-                w.reference = captured.first.toThumb()
+                val (image, frames) = captured
+                w.frame = ScreenFrame(
+                    image = image,
+                    reference = image.toThumb(),
+                    frames = frames,
+                    captureMillis = SystemClock.uptimeMillis() - hiddenAt,
+                    statusBar = statusBarHeight(),
+                    choice = choice,
+                )
             }
             dispatch(SessionEvent.Captured(session, ok = captured != null))
         }
@@ -285,60 +276,62 @@ class ScreenTranslateService : Service() {
         return stacked to frames.size
     }
 
-    /** 文字を読み、訳す対象と枠の位置・色を選ぶ。 */
+    /**
+     * 読む・まとめる・選ぶ・枠を決める工程：前提（[ScreenFrame]）だけを読み、結果（[PageLayout]）を作る。
+     * 枠の色を撮影画像から読むので、枠を決めた後に撮影画像を捨てる。
+     */
     private fun recognize(session: Int) {
         val w = workOf(session) ?: return
-        val bitmap = w.bitmap ?: return
-        val language = preferences.language
-        val outlined = profile.outlinedText
+        val frame = w.frame ?: return
+        val choice = frame.choice
         scope.launch(w.job) {
             overlay?.showStatus("文字を読んでいます…")
             val t0 = SystemClock.uptimeMillis()
+            var error: String? = null
             val lines = try {
                 // 白縁取り・白抜きの文字にも強い読み方（OutlinedText）は、場面の設定で選ぶ
-                if (outlined) ocr.recognizeOutlined(bitmap, language) else ocr.recognize(bitmap, language)
+                if (choice.outlined) ocr.recognizeOutlined(frame.image, choice.language) else ocr.recognize(frame.image, choice.language)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                w.ocrError = "文字を読めませんでした: ${e.message}"
+                error = "文字を読めませんでした: ${e.message}"
                 emptyList()
             }
-            w.ocrMillis = SystemClock.uptimeMillis() - t0
-            val blocks = groupLines(lines, Grouping.BUBBLE)
-            w.blocks = blocks.size
-            w.statusBar = statusBarHeight()
-            w.targets = if (blocks.isEmpty()) emptyList() else selectTargets(blocks, bitmap, w.statusBar, SCREEN_TARGET, fitBubbles = preferences.fitBubbles)
-            bitmap.recycle()
-            w.bitmap = null
-            dispatch(SessionEvent.Recognized(session, w.targets.size))
+            val ocrMillis = SystemClock.uptimeMillis() - t0
+            val units = groupLines(lines, choice.grouping)
+            val targets = selectTargets(units, frame.image, frame.statusBar, SCREEN_TARGET, fitBubbles = choice.fitBubbles)
+            frame.release()
+            w.page = PageLayout(lines = lines.size, units = units.size, targets = targets, ocrMillis = ocrMillis, error = error)
+            dispatch(SessionEvent.Recognized(session, targets.size))
         }
     }
 
-    /** 空の訳の枠を出し、翻訳の流れを開いて訳を流し込む。 */
+    /** 訳す・流し込む工程：空の訳の枠を出し、翻訳の流れを開いて訳を流し込む。 */
     private fun translate(session: Int) {
         val w = workOf(session) ?: return
-        overlay?.show(w.targets.map { it.slot }, "${w.targets.size}件を翻訳中…")
-        val source = preferences.language.sourceLanguage
+        val frame = w.frame ?: return
+        val targets = w.page?.targets ?: return
+        overlay?.show(targets.map { it.slot }, "${targets.size}件を翻訳中…")
+        val source = frame.choice.language.sourceLanguage
         scope.launch(w.job) {
             val ready = EngineHolder.awaitReady(this@ScreenTranslateService)
             if (ready == null) {
                 dispatch(SessionEvent.TranslationFailed(session, "翻訳モデルを読めません。アプリを開いて確認してください"))
                 return@launch
             }
-            w.model = ready.model.label
-            w.translateStart = SystemClock.uptimeMillis()
+            val run = TranslationRun(ready.model.label, SystemClock.uptimeMillis()).also { w.run = it }
             // 1回の翻訳ごとに翻訳の流れを開き、終わったら閉じる（docs/設計/翻訳コア.md「翻訳の契約」）。
             // メモリの控えはサービスが持って翻訳どうしで共有し、永続の控え（端末のデータベース）で次に始めたときも使う
             val persistent = SqlitePersistentCache.get(this@ScreenTranslateService)
             val stream = Translations.open(this, this@ScreenTranslateService, TranslationStream.Options(source, SCREEN_TARGET), memoryCache, persistent)
             try {
-                stream.submit(w.targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })
+                stream.submit(targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })
                 stream.updates.transformWhile { u ->
                     when (u) {
                         is SegmentUpdate.Partial -> overlay?.setTranslation(u.id.toInt(), u.text)
                         is SegmentUpdate.Final -> {
                             overlay?.setTranslation(u.id.toInt(), u.text)
                             // 最後の確定で状態遷移が Finished を返し、その場で記録する（finished）。それより前に控えの数を渡す
-                            w.stats = stream.stats
+                            run.stats = stream.stats
                             dispatch(SessionEvent.SegmentDone(session))
                         }
                         is SegmentUpdate.Failed -> dispatch(SessionEvent.TranslationFailed(session, u.message))
@@ -348,7 +341,7 @@ class ScreenTranslateService : Service() {
                     state.phase.let { it is Phase.Translating && it.session == session }
                 }.collect { }
             } finally {
-                w.stats = stream.stats
+                run.stats = stream.stats
                 stream.close()
             }
         }
@@ -356,16 +349,19 @@ class ScreenTranslateService : Service() {
 
     /** 全部の訳が確定した：上部に件数と時間を出し、記録する。 */
     private fun finished(w: Work) {
-        val translateMillis = SystemClock.uptimeMillis() - w.translateStart
+        val frame = w.frame ?: return
+        val page = w.page ?: return
+        val run = w.run ?: return
+        val translateMillis = SystemClock.uptimeMillis() - run.startedAt
         // 数枚を撮って重ねるときは、撮る時間も待ち時間なので含める
-        val total = w.ocrMillis + translateMillis + if (w.frames > 1) w.captureMillis else 0
-        val frames = if (w.frames > 1) "・${w.frames}枚重ね" else ""
-        overlay?.showStatus("${w.targets.size}件・${"%.1f".format(total / 1000.0)}秒・${w.model}$frames")
-        val st = w.stats
+        val total = page.ocrMillis + translateMillis + if (frame.frames > 1) frame.captureMillis else 0
+        val stacked = if (frame.frames > 1) "・${frame.frames}枚重ね" else ""
+        overlay?.showStatus("${page.targets.size}件・${"%.1f".format(total / 1000.0)}秒・${run.model}$stacked")
+        val st = run.stats
         Log.i(
             TAG,
-            "画面翻訳: ${w.blocks}ブロック中${w.targets.size}件、撮影 ${w.captureMillis}ms（${w.frames}枚）、文字認識 ${w.ocrMillis}ms、" +
-                "翻訳 ${translateMillis}ms、モデル ${w.model}、重要度 ${importance()}、画面 ${w.capturedSize}、状態バー ${w.statusBar}px" +
+            "画面翻訳: ${page.lines}行・${page.units}単位中${page.targets.size}件（${frame.choice.grouping}）、撮影 ${frame.captureMillis}ms（${frame.frames}枚）、" +
+                "文字認識 ${page.ocrMillis}ms、翻訳 ${translateMillis}ms、モデル ${run.model}、重要度 ${importance()}、画面 ${frame.size}、状態バー ${frame.statusBar}px" +
                 (st?.let { "、控え メモリ${it.memoryHits}・データベース${it.storedHits}、訳した${it.pieces}片（訳し直し${it.retried}、打ち切り${it.stopped}）" } ?: ""),
         )
     }
