@@ -247,4 +247,19 @@ class CameraSessionTest {
         ) { it.text != "skip this one" }
         assertEquals(listOf("near the center", "far away text", "unsure but central"), chosen.map { it.text })
     }
+
+    @Test
+    fun 境目の行が付いたり離れたりしても段落を訳し直さない() {
+        val s = session(intake = 2, settings = menu.copy(table = false))
+        val first = Reading(Box(0, 0, 400, 40), "the first line of a paragraph", Unit)
+        // 2行目は、行の間が狭いコマではつながり、広いコマでは離れる位置で揺れる
+        fun second(joined: Boolean) =
+            Reading(Box(0, if (joined) 60 else 80, 400, if (joined) 100 else 120), "continues on the second line", Unit)
+        val effects = (1..3).flatMap { s.handle(Event.Read(listOf(first, second(true)), screen)) }
+        assertEquals(listOf("the first line of a paragraph continues on the second line"), submitted(effects))
+        s.handle(Event.Final(ids(effects).single(), "訳"))
+        repeat(6) { i -> s.handle(Event.Read(listOf(first, second(joined = i % 2 == 1)), screen)) }
+        assertEquals(1, s.submittedCount)
+        assertEquals(0, s.resubmittedCount)
+    }
 }

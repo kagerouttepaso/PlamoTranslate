@@ -22,7 +22,7 @@ class Reading<L>(val box: Box, val text: String, val look: L)
  * 追う行には番号（[Track.id]）を付ける。段落の番号（[CameraParagraph.objectId]）はこの番号から受け継ぐ。
  *
  * - 各コマの行を、前のコマの位置が重なる行（IoU [MATCH_IOU] 以上）、なければ近くにある同じ内容の行に結び付ける。
- * - 行ごとに直近 [READINGS] 回の読み取りを持ち、ほかの読み取りといちばん似ているものを原文にする（[Track.consensus]）。
+ * - 行ごとに直近 [READINGS] 回の読み取りを持ち、文字ごとの多数決で原文を決める（[Track.consensus]・[ReadingFusion]）。
  * - 読めなかったコマが [KEEP_MISSED] 回までなら行を残す（1コマの読み落としで枠がちらつかないように）。
  *   ただし、そのコマで読めた行に重なる古い行は、カメラが動いてずれた枠なので消す。
  */
@@ -31,6 +31,9 @@ class LineTracker<L> {
     private var nextId = 1L
 
     fun clear() = tracks.clear()
+
+    /** 追跡が続いている行の番号（見えていなくても、まだ捨てていない行）。 */
+    fun aliveIds(): Set<Long> = tracks.mapTo(HashSet()) { it.id }
 
     /** このコマの読み取りを、前のコマまでの行に結び付ける。 */
     fun update(readings: List<Reading<L>>) {
@@ -84,21 +87,41 @@ class LineTracker<L> {
             readings.addLast(r.text)
             if (readings.size > READINGS) readings.removeFirst()
             cached = null
+            fused = null
+            agreed = null
         }
 
-        /** ほかの読み取りといちばん似ている読み取り（同点なら新しいもの）。 */
+        private var fused: ReadingFusion.Fused? = null
+        private var agreed: Int? = null
+
+        /**
+         * 原文。読み取りが [FUSE_FROM] 回以上あれば、直近の奇数回分（同数の割れを避けるため）を、ほかといちばん似ている
+         * 読み取りを土台に、文字ごとの多数決で合わせた文（[ReadingFusion]）。読み続けるほど、崩れた読み取りが混じっても
+         * 正しい文になる。それより少なければ、ほかといちばん似ている読み取りをそのまま使う。
+         */
         fun consensus(): String = cached ?: run {
-            val keys = readings.map(::key)
-            val best = readings.indices.maxByOrNull { i ->
+            val list = readings.toList().let { if (it.size >= FUSE_FROM && it.size % 2 == 0) it.drop(1) else it }
+            val keys = list.map(::key)
+            val best = list.indices.maxByOrNull { i ->
                 keys.indices.sumOf { j -> if (i == j) 0.0 else dice(keys[i], keys[j]) } + i * 1e-6
             } ?: 0
-            readings[best]
+            if (list.size >= FUSE_FROM) ReadingFusion.fuse(list, best).also { fused = it }.text else list[best]
         }.also { cached = it }
 
-        /** 多数決で採った読み取りと、ほぼ同じ読み取りの数（自分を含む）。 */
-        fun agreement(): Int {
+        /** 多数決で採った原文と、ほぼ同じ読み取りの数（自分を含む）。 */
+        fun agreement(): Int = agreed ?: run {
             val c = key(consensus())
-            return readings.count { similar(key(it), c) }
+            readings.count { similar(key(it), c) }
+        }.also { agreed = it }
+
+        /**
+         * 読み取りがそろったか。ほぼ同じ読み取りが [AGREE] 回あるか、文字ごとの多数決の得票の割合（確かさ）が [SETTLED_VOTES] 以上か。
+         * どの読み取りも別の位置が崩れていて互いに一致しなくても、多数決で合わせた文が確かなら、そろったとみなす。
+         */
+        fun settled(): Boolean {
+            if (agreement() >= AGREE) return true
+            consensus()
+            return (fused?.confidence ?: 0.0) >= SETTLED_VOTES
         }
     }
 
@@ -114,6 +137,12 @@ class LineTracker<L> {
 
         /** 前のコマの行と同じとみなす重なり。 */
         const val MATCH_IOU = 0.3f
+
+        /** 文字ごとの多数決を使い始める読み取りの数（2回では多数が決まらない）。 */
+        const val FUSE_FROM = 3
+
+        /** そろったとみなす、文字ごとの多数決の得票の割合（3回なら、ほとんどの文字で2票以上）。 */
+        const val SETTLED_VOTES = 0.75
 
         /** 重なりの面積を、合わせた面積で割った値。 */
         private fun iou(a: Box, b: Box): Float {

@@ -130,7 +130,8 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
             if (field == value) return
             field = value
             pausedAt = if (value) SystemClock.uptimeMillis() else null
-            if (value) Logs.i("カメラ翻訳: 一時停止（見えている訳待ち ${session.waitingOnScreen()}件、訳している途中 ${session.inFlightCount}件）")
+            if (value) Logs.i("カメラ翻訳: 一時停止（見えている訳待ち ${session.waitingOnScreen()}件、訳している途中 ${session.inFlightCount}件、" +
+                "ここまでに渡した ${session.submittedCount}件・うち訳し直し ${session.resubmittedCount}件）")
             apply(session.handle(if (value) Event.Paused else Event.Resumed))
         }
 

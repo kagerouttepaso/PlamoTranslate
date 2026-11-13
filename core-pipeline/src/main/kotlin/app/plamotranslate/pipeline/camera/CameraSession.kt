@@ -24,8 +24,8 @@ class CameraParagraph<L>(val objectId: Long, val lines: List<LineTracker.Track<L
     val text: String = join(lines.map { it.consensus() })
     val look: L? get() = lines.first().look
 
-    /** すべての行の読み取りがそろったか。 */
-    val settled: Boolean = lines.all { it.agreement() >= LineTracker.AGREE }
+    /** すべての行の読み取りがそろったか（[LineTracker.Track.settled]）。 */
+    val settled: Boolean = lines.all { it.settled() }
 }
 
 /** 描く1つの段落。[translation] が null ならまだ訳が無い。 */
@@ -94,6 +94,7 @@ class CameraSession<L>(
     }
 
     private val tracker = LineTracker<L>()
+    private val grouping = StableGrouping()
     private var settings: Settings? = null
     private var intake = 0
     private var streamReady = false
@@ -136,7 +137,7 @@ class CameraSession<L>(
                 if (paused && !event.still) return emptyList()
                 tracker.update(event.readings)
                 event.screen?.let { screen = it }
-                regroup()
+                regroup(observe = true)
             }
             Event.Paused -> {
                 paused = true
@@ -150,6 +151,7 @@ class CameraSession<L>(
             }
             Event.Rotated -> {
                 tracker.clear()
+                grouping.clear()
                 regroup()
             }
             is Event.SettingsChanged -> {
@@ -158,7 +160,12 @@ class CameraSession<L>(
                 if (before != event.settings) {
                     // 原文の言語が変わると読み方（認識器）が変わるので、前の読み取りで多数決しない
                     val sourceChanged = before != null && before.source != event.settings.source
-                    if (sourceChanged) tracker.clear()
+                    if (sourceChanged) {
+                        tracker.clear()
+                        grouping.clear()
+                    }
+                    // まとめ方（文章／表・メニュー）が変わったら、前のまとめ方の区切りを持ち越さない
+                    if (before != null && before.table != event.settings.table) grouping.clear()
                     forgetTranslations()
                     regroup()
                     reopen(effects)
@@ -219,6 +226,12 @@ class CameraSession<L>(
     /** 流れに渡して、まだ確定していない文の数。 */
     val inFlightCount: Int get() = inFlight.size
 
+    /** 渡した文の数と、そのうち訳のある段落の訳し直しの数（原文が変わったため）。区切りと原文の安定を実機で比べるため。 */
+    var submittedCount = 0
+        private set
+    var resubmittedCount = 0
+        private set
+
     /**
      * 空いた分だけ、その時点でいちばん先に訳すべき段落を選んで渡す（[TranslationPlan.choose]）。
      * 見えている段落を、読み取りがそろったものを先に選び、空きが残れば、そろっていない段落も渡す。流れが空いているのに
@@ -238,6 +251,8 @@ class CameraSession<L>(
         if (chosen.isEmpty()) return emptyList()
         val segments = chosen.map { c ->
             val id = nextSegmentId++
+            submittedCount++
+            if (c.id in lastTranslation) resubmittedCount++
             inFlight[id] = Request(c.id, key(c.text))
             Segment(id, c.text)
         }
@@ -270,17 +285,29 @@ class CameraSession<L>(
     }
 
     /**
-     * 行をまとめ直し、段落に番号を付ける。前の段落と行の番号が重なれば、いちばん多く重なる前の段落の番号を受け継ぐ。
-     * 今の段落にも渡し中の文にも無い番号の訳は捨てる。
+     * 行を段落にまとめ直し、段落に番号を付ける。[observe] なら、このコマのまとめ方を区切りの多数決（[StableGrouping]）に足す
+     * （見えている行は、読み取りがそろっていない行も数える）。段落は多数決で「つながっている」行の集まり。
+     * 前の段落と行の番号が重なれば、いちばん多く重なる前の段落の番号を受け継ぐ。今の段落にも渡し中の文にも無い番号の訳は捨てる。
      */
-    private fun regroup() {
-        val lines = tracker.lines(includeUnsure = paused)
-        val table = settings?.table ?: false
-        val units = TextLayout.units(lines.map { lineOf(it.consensus(), it.box) }, if (table) Grouping.MENU else Grouping.TEXT)
+    private fun regroup(observe: Boolean = false) {
+        val rule = if (settings?.table == true) Grouping.MENU else Grouping.TEXT
+        // 区切りは、見えている全部の行（読み取りがそろっていない行も）で決め、出す行には後で絞る
+        val all = tracker.lines(includeUnsure = true)
+        val textLines = all.map { lineOf(it.consensus(), it.box) }
+        if (observe) {
+            val units = TextLayout.units(textLines, rule)
+            grouping.observe(units.map { u -> u.members.map { all[it].id } }, all.mapTo(HashSet()) { it.id }, tracker.aliveIds())
+        }
+        val shown = tracker.lines(includeUnsure = paused).mapTo(HashSet()) { it.id }
+        val index = all.withIndex().associate { (i, t) -> t.id to i }
         val previous = paragraphs
         val claimed = HashSet<Long>()
-        paragraphs = units.map { u ->
-            val members = u.members.map { lines[it] }
+        paragraphs = grouping.groups(all.map { it.id }).mapNotNull { group ->
+            // 段落の中の行の並べ方は、中核のまとめ方と同じ規則（TextLayout.unitOf）にする
+            val idx = group.filter { it in shown }.map { index.getValue(it) }
+            if (idx.isEmpty()) return@mapNotNull null
+            val ordered = TextLayout.unitOf(rule.kind, idx, textLines).members
+            val members = ordered.map { all[it] }
             val ids = members.mapTo(HashSet()) { it.id }
             val inherited = previous.filter { it.objectId !in claimed }
                 .maxByOrNull { p -> p.trackIds.count { it in ids } }
@@ -288,7 +315,7 @@ class CameraSession<L>(
             val id = inherited ?: nextObjectId++
             claimed += id
             CameraParagraph(id, members, join)
-        }
+        }.sortedBy { it.box.top }
         val alive = paragraphs.mapTo(HashSet()) { it.objectId } + inFlight.values.map { it.objectId }
         lastTranslation.keys.retainAll(alive)
     }
