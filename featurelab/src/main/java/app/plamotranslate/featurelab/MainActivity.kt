@@ -52,6 +52,11 @@ class MainActivity : Activity() {
         column.addView(log)
         setContentView(ScrollView(this).apply { addView(column) })
         intent.getStringExtra("exit")?.let { ExitLab.run(this, it) }
+        // 全画面の触れない重ね表示を出すと、下のアプリへの操作が届くか（訳の枠を1つの窓にまとめる前に確かめる）
+        when (intent.getStringExtra("overlay")) {
+            "full_on" -> { showFullOverlay(this, true); finish() }
+            "full_off" -> { showFullOverlay(this, false); finish() }
+        }
         if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 0)
         }
@@ -85,6 +90,48 @@ class MainActivity : Activity() {
     companion object {
         private const val REQUEST_CAPTURE = 1
         private var appOverlay: View? = null
+        private var fullOverlay: View? = null
+
+        /**
+         * 画面全体を覆う、触れない（FLAG_NOT_TOUCHABLE）ふつうの重ね表示を出す・消す。不透明度は通り抜けの上限
+         * （maximumObscuringOpacityForTouch）に合わせ、中に水色の四角を1つ置く。下のアプリをスクロールできるかを見る。
+         */
+        fun showFullOverlay(context: Context, show: Boolean) {
+            val app = context.applicationContext
+            val wm = app.getSystemService(WindowManager::class.java)
+            fullOverlay?.let { runCatching { wm.removeView(it) } }
+            fullOverlay = null
+            if (!show) {
+                Lab.log("全画面の重ね表示: 消した")
+                return
+            }
+            if (!Settings.canDrawOverlays(app)) {
+                Lab.log("全画面の重ね表示: 許可がない")
+                return
+            }
+            val limit = app.getSystemService(android.hardware.input.InputManager::class.java).maximumObscuringOpacityForTouch
+            val bounds = wm.currentWindowMetrics.bounds
+            val root = android.widget.FrameLayout(app).apply {
+                addView(View(app).apply { setBackgroundColor(Lab.APP_COLOR) }, android.widget.FrameLayout.LayoutParams(400, 200).apply {
+                    leftMargin = 100
+                    topMargin = 900
+                })
+            }
+            wm.addView(root, WindowManager.LayoutParams(
+                bounds.width(), bounds.height(),
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT,
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                fitInsetsTypes = 0
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                alpha = limit
+            })
+            fullOverlay = root
+            Lab.log("全画面の重ね表示: 出した（${bounds.width()}x${bounds.height()}、不透明度 $limit）")
+        }
 
         /** 水色のふつうの重ね表示（TYPE_APPLICATION_OVERLAY）を出す・消す。触れた操作は下へ通す。 */
         fun showAppOverlay(context: Context, show: Boolean) {
