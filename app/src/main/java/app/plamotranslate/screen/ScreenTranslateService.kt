@@ -29,7 +29,7 @@ import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.ocr.OcrLanguage
-import app.plamotranslate.overlay.TranslationCache
+import app.plamotranslate.overlay.SqlitePersistentCache
 import app.plamotranslate.overlay.TranslationTarget
 import app.plamotranslate.overlay.selectTargets
 import app.plamotranslate.pipeline.screen.SceneProfile
@@ -315,8 +315,8 @@ class ScreenTranslateService : Service() {
             w.model = ready.model.label
             w.translateStart = SystemClock.uptimeMillis()
             // 1回の翻訳ごとに翻訳の流れを開き、終わったら閉じる（docs/設計/翻訳コア.md「翻訳の契約」）。
-            // 控えは端末のデータベースにも残し、次に始めたときも使う。データベースでは確かなモデル（2B）の訳を優先する（TranslationCache.Scope）
-            val store = TranslationCache.get(this@ScreenTranslateService)
+            // 控えは端末のデータベースにも残し、次に始めたときも使う。データベースでは確かなモデル（2B）の訳を優先する（SqlitePersistentCache.Scope）
+            val store = SqlitePersistentCache.get(this@ScreenTranslateService)
             val stream = Translations.open(this, this@ScreenTranslateService, TranslationStream.Options(source, SCREEN_TARGET), memoryCache) { r ->
                 Translations.PersistentMemory(store.scope(r.model.file.sha256.take(16), r.model.cacheRank, source, SCREEN_TARGET), store.generation)
             }

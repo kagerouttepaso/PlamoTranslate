@@ -4,7 +4,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import app.plamotranslate.llm.Language
-import app.plamotranslate.pipeline.translation.TranslationMemory
+import app.plamotranslate.pipeline.translation.PersistentCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,7 +22,7 @@ import kotlinx.coroutines.withContext
  * 件数は [MAX_ENTRIES] までにし、超えたら最後に使った時刻が古いものから消す。
  * Androidに入っている SQLite をそのまま使い、ライブラリ（Room など）は足さない。
  */
-class TranslationCache private constructor(context: Context) {
+class SqlitePersistentCache private constructor(context: Context) {
     private val helper = Helper(context.applicationContext)
 
     private val _entries = MutableStateFlow(-1)
@@ -45,14 +45,14 @@ class TranslationCache private constructor(context: Context) {
      * - 書くときは、自分以上のモデルの訳があれば書かない。2Bの訳は0.8Bの訳を上書きしていく。
      * 同じ原文に残る訳は1つだけで、いちばん確かなモデルのもの。[model] は記録用（どのモデルの重みで訳したか）。
      */
-    inner class Scope(private val model: String, private val rank: Int, source: Language?, target: Language, context: String?) : TranslationMemory {
+    inner class Scope(private val model: String, private val rank: Int, source: Language?, target: Language, context: String?) : PersistentCache {
         private val key = listOf(source?.code ?: "auto", target.code, context.orEmpty()).joinToString("|")
 
         /** 作ったときの [generation]。控えを消した後は、消す前に始めた翻訳の訳を書かない。 */
-        private val born = this@TranslationCache.generation
+        private val born = this@SqlitePersistentCache.generation
 
-        /** 控えを消した回数（[TranslationCache.generation]）。 */
-        val generation: Int get() = this@TranslationCache.generation
+        /** 控えを消した回数（[SqlitePersistentCache.generation]）。 */
+        val generation: Int get() = this@SqlitePersistentCache.generation
 
         /** [texts] のうち、自分以上のモデルの訳が控えにあるもの。使った時刻も新しくする。 */
         override suspend fun lookup(texts: Collection<String>): Map<String, String> = withContext(Dispatchers.IO) {
@@ -83,7 +83,7 @@ class TranslationCache private constructor(context: Context) {
             db.beginTransaction()
             try {
                 // トランザクションの中で確かめる。[clear] は回数を増やしてから消すので、確かめた後に消されても、書いた分ごと消える
-                if (born != this@TranslationCache.generation) return@withContext
+                if (born != this@SqlitePersistentCache.generation) return@withContext
                 for ((text, translation) in entries) {
                     db.execSQL(
                         "INSERT INTO $TABLE (scope, text, translation, model, quality, used_at) VALUES (?, ?, ?, ?, ?, ?) " +
@@ -171,9 +171,9 @@ class TranslationCache private constructor(context: Context) {
         private const val TRIM_TO = 18_000
 
         @Volatile
-        private var instance: TranslationCache? = null
+        private var instance: SqlitePersistentCache? = null
 
-        fun get(context: Context): TranslationCache =
-            instance ?: synchronized(this) { instance ?: TranslationCache(context).also { instance = it } }
+        fun get(context: Context): SqlitePersistentCache =
+            instance ?: synchronized(this) { instance ?: SqlitePersistentCache(context).also { instance = it } }
     }
 }

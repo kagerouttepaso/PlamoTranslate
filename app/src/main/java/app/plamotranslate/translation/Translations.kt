@@ -4,7 +4,7 @@ import android.content.Context
 import app.plamotranslate.EngineHolder
 import app.plamotranslate.ModelState
 import app.plamotranslate.pipeline.translation.MemoryCache
-import app.plamotranslate.pipeline.translation.TranslationMemory
+import app.plamotranslate.pipeline.translation.PersistentCache
 import app.plamotranslate.pipeline.translation.TranslationStream
 import kotlinx.coroutines.CoroutineScope
 
@@ -17,7 +17,7 @@ import kotlinx.coroutines.CoroutineScope
  */
 object Translations {
     /**
-     * 流れを開く。[persistent] を渡すと、今の翻訳モデルに合わせた長く残す控え（画面翻訳のデータベース）も使う。
+     * 流れを開く。[persistent] を渡すと、今の翻訳モデルに合わせた永続の控え（画面翻訳のデータベース）も使う。
      * [cache] を渡すと、メモリの控えをほかの流れと共有する（画面翻訳は1回の翻訳ごとに流れを開くので、サービスが1つ持って渡す）。
      */
     fun open(
@@ -31,12 +31,12 @@ object Translations {
         return TranslationStream(scope, {
             EngineHolder.awaitReady(app)?.let { ready ->
                 val memory = persistent?.invoke(ready)
-                // 長く残す控えを消したら（設定の画面）、メモリの控えも捨てる
+                // 永続の控えを消したら（設定の画面）、メモリの控えも捨てる
                 TranslationStream.Backend(ready.engine, ready.engine to memory?.generation, memory?.memory)
             }
         }, options, cache)
     }
 
-    /** 長く残す控えと、それを消した回数（変わったらメモリの控えを捨てる）。 */
-    class PersistentMemory(val memory: TranslationMemory, val generation: Int)
+    /** 永続の控えと、それを消した回数（変わったらメモリの控えを捨てる）。 */
+    class PersistentMemory(val memory: PersistentCache, val generation: Int)
 }

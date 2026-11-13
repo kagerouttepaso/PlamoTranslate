@@ -21,8 +21,8 @@ import kotlinx.coroutines.withContext
  * - 購読：[updates] で文ごとの途中の訳・確定の訳・失敗を受け取る（購読するのは1か所だけ）。
  *
  * 文は、エンジンの「同時に訳す数」に合うコア（[coreFor]）で片に分けて訳し、片の訳をつないで文の訳に戻す。同じ片は1回だけ訳す。
- * 控えは、メモリ（[cache]。流れどうしで共有できる）と、渡されていれば長く残す控え（[Backend.memory]）を使う。
- * 訳している間に頼まれた文も、空いた流れですぐ訳す（長く残す控えを引くのは、訳し始める前に頼まれた文だけ）。
+ * 控えは、メモリ（[cache]。流れどうしで共有できる）と、渡されていれば永続の控え（[Backend.memory]）を使う。
+ * 訳している間に頼まれた文も、空いた流れですぐ訳す（永続の控えを引くのは、訳し始める前に頼まれた文だけ）。
  *
  * 状態は [lock] で守る。命令はどのスレッドから呼んでもよい。エンジンからの呼び出し（[source]）は推論のスレッドで来る。
  */
@@ -43,7 +43,7 @@ class TranslationStream(
     )
 
     /** 訳すのに使う部品。[key] は訳したエンジン（翻訳モデル）を表し、変わったらメモリの控えを捨てる。 */
-    class Backend(val engine: JobEngine, val key: Any, val memory: TranslationMemory? = null)
+    class Backend(val engine: JobEngine, val key: Any, val memory: PersistentCache? = null)
 
     /** 訳した結果の数（ログ用）。 */
     data class Stats(val pieces: Int, val memoryHits: Int, val storedHits: Int, val retried: Int, val stopped: Int)
@@ -98,7 +98,7 @@ class TranslationStream(
     private val tooLong = ArrayList<String>()
     private val toStore = LinkedHashMap<String, String>()
     private var core: TranslationCore = SequentialCore()
-    private var memory: TranslationMemory? = null
+    private var memory: PersistentCache? = null
 
     private var piecesTranslated = 0
     private var memoryHits = 0
@@ -150,7 +150,7 @@ class TranslationStream(
         tooLong.clear()
     }
 
-    /** 流れを閉じる。訳している途中の依頼も止める。訳し終えた片は、長く残す控えに書いてから止まる。 */
+    /** 流れを閉じる。訳している途中の依頼も止める。訳し終えた片は、永続の控えに書いてから止まる。 */
     fun close() {
         clear()
         worker.cancel()
@@ -209,7 +209,7 @@ class TranslationStream(
                         fail(e.message ?: e.toString())
                     } finally {
                         // 確定はエンジンが戻る前に流れるので、購読する側は最後の確定を受け取ってすぐ閉じてよい。
-                        // 閉じられても（取り消されても）、訳し終えた片は長く残す控えに書き終える
+                        // 閉じられても（取り消されても）、訳し終えた片は永続の控えに書き終える
                         withContext(NonCancellable) { flushStore(b.memory) }
                     }
                 }
@@ -217,7 +217,7 @@ class TranslationStream(
         }
     }
 
-    /** 頼まれた文を片に分け、控え（メモリ）で決まる片を確定し、長く残す控えを引く片を返す。[lock] の中で呼ぶ。 */
+    /** 頼まれた文を片に分け、控え（メモリ）で決まる片を確定し、永続の控えを引く片を返す。[lock] の中で呼ぶ。 */
     private fun drainInbox(): List<String> {
         val lookup = LinkedHashSet<String>()
         while (inbox.isNotEmpty()) {
@@ -251,7 +251,7 @@ class TranslationStream(
         return lookup.toList()
     }
 
-    /** 長く残す控えを引いた結果で、片を確定するか並べる。[lock] の中で呼ぶ。 */
+    /** 永続の控えを引いた結果で、片を確定するか並べる。[lock] の中で呼ぶ。 */
     private fun enqueue(texts: List<String>, hits: Map<String, String>) {
         for (p in texts) {
             if (waiting[p] == null) {
@@ -343,7 +343,7 @@ class TranslationStream(
         tooLong.clear()
     }
 
-    private suspend fun flushStore(memory: TranslationMemory?) {
+    private suspend fun flushStore(memory: PersistentCache?) {
         val batch = synchronized(lock) {
             if (toStore.isEmpty()) return
             LinkedHashMap(toStore).also { toStore.clear() }

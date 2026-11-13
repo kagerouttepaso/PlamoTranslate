@@ -1,10 +1,10 @@
 package app.plamotranslate.pipeline.translation
 
 /**
- * 訳の控えの差し込み口（端末のデータベースなど、長く残す控え）。画面翻訳だけが渡す（app の `TranslationCache`）。
+ * 訳の控えの差し込み口（端末のデータベースなど、永続の控え）。画面翻訳だけが渡す（app の `SqlitePersistentCache`）。
  * どちらも呼んだコルーチンの中で終わらせる。
  */
-interface TranslationMemory {
+interface PersistentCache {
     /** [texts] のうち控えにある片の訳。 */
     suspend fun lookup(texts: Collection<String>): Map<String, String>
 
@@ -24,7 +24,7 @@ class MemoryCache(private val capacity: Int = 500) {
 
     /**
      * 訳したエンジンを [key] にする。前と等しくなければ中身を捨てる。鍵にはエンジン（同じものかで比べる）のほか、
-     * 長く残す控えを消した回数なども組にして入れられる（画面翻訳：設定の画面で控えを消したらメモリの控えも捨てる）。
+     * 永続の控えを消した回数なども組にして入れられる（画面翻訳：設定の画面で控えを消したらメモリの控えも捨てる）。
      */
     fun use(key: Any) = synchronized(map) {
         if (this.key != key) {

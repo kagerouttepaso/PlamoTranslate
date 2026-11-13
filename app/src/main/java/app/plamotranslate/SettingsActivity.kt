@@ -33,7 +33,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.compose.material3.Switch
-import app.plamotranslate.overlay.TranslationCache
+import app.plamotranslate.overlay.SqlitePersistentCache
 import app.plamotranslate.screen.OverlayAccessibilityService
 import app.plamotranslate.screen.ScreenPreferences
 import kotlinx.coroutines.launch
@@ -150,12 +150,12 @@ private fun ModelChooser(model: ModelState) {
 
 /**
  * 画面翻訳の訳の控え（2026-11-12、作者の要望「設定から削除もできるように」）。件数を出し、確かめてから全部消す。
- * 控えは端末のデータベースにあり（TranslationCache）、画面翻訳を終えても次に使う。誤訳が残ったときや場所を空けたいときに消す。
+ * 控えは端末のデータベースにあり（SqlitePersistentCache）、画面翻訳を終えても次に使う。誤訳が残ったときや場所を空けたいときに消す。
  */
 @Composable
 private fun TranslationCacheCard() {
     val context = LocalContext.current
-    val cache = remember { TranslationCache.get(context) }
+    val cache = remember { SqlitePersistentCache.get(context) }
     val entries by cache.entries.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var confirm by remember { mutableStateOf(false) }
@@ -165,7 +165,7 @@ private fun TranslationCacheCard() {
             Text("画面翻訳の訳の控え", style = MaterialTheme.typography.titleMedium)
             Text(
                 "一度訳した文を端末に残し、同じ文はすぐ出します。2Bの訳があれば0.8Bでもそれを使い、" +
-                    "2Bで訳すと0.8Bの訳を上書きします。${TranslationCache.MAX_ENTRIES}件を超えると古いものから消します。",
+                    "2Bで訳すと0.8Bの訳を上書きします。${SqlitePersistentCache.MAX_ENTRIES}件を超えると古いものから消します。",
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(if (entries < 0) "数えています…" else "${entries}件", style = MaterialTheme.typography.bodyMedium)

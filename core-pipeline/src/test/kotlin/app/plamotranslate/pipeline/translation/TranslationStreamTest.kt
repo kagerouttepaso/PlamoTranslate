@@ -73,7 +73,7 @@ class TranslationStreamTest {
         private fun outputFor(request: TranslationRequest) = request.text.split('\n').joinToString("\n") { translate(it) }
     }
 
-    private fun stream(engine: FakeEngine, cache: MemoryCache = MemoryCache(), memory: TranslationMemory? = null) =
+    private fun stream(engine: FakeEngine, cache: MemoryCache = MemoryCache(), memory: PersistentCache? = null) =
         TranslationStream(scope, { TranslationStream.Backend(engine, engine, memory) }, TranslationStream.Options(Language.EN, Language.JA), cache)
 
     /** [ids] の文が全部確定（または失敗）するまで結果を集める。 */
@@ -204,9 +204,9 @@ class TranslationStreamTest {
     }
 
     @Test
-    fun 長く残す控えを引き_写しは残さない() {
+    fun 永続の控えを引き_写しは残さない() {
         val stored = HashMap<String, String>()
-        val memory = object : TranslationMemory {
+        val memory = object : PersistentCache {
             override suspend fun lookup(texts: Collection<String>) = mapOf("Saved" to "保存済み").filterKeys { it in texts }
             override suspend fun store(translations: Map<String, String>) {
                 stored.putAll(translations)
@@ -228,7 +228,7 @@ class TranslationStreamTest {
         // 確定はエンジンが戻る前に流れるので、購読する側が最後の確定を受け取ってすぐ閉じると、閉じたあとに控えへ書く段が来る（画面翻訳）。
         // 本物のエンジンは戻るときに取り消しを確かめ（ensureActive）、本物の控えは IO のスレッドへ移る（withContext）ので、どちらも取り消しで止まる
         val stored = java.util.concurrent.ConcurrentHashMap<String, String>()
-        val memory = object : TranslationMemory {
+        val memory = object : PersistentCache {
             override suspend fun lookup(texts: Collection<String>) = emptyMap<String, String>()
             override suspend fun store(translations: Map<String, String>) = withContext(Dispatchers.IO) { stored.putAll(translations) }
         }

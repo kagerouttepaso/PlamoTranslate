@@ -59,7 +59,7 @@ enum class TranslationModel(val label: String, val note: String, val file: Model
     fun isPresent(context: Context): Boolean = file.file(context).length() == file.size
 
     /**
-     * 訳の確かさの順位（大きいほど確か）。画面翻訳の訳の控えで、確かなモデルの訳を優先するのに使う（overlay/TranslationCache.kt）。
+     * 訳の確かさの順位（大きいほど確か）。画面翻訳の訳の控えで、確かなモデルの訳を優先するのに使う（overlay/SqlitePersistentCache.kt）。
      * 並びは小さいモデルから大きいモデルの順にしておくこと。
      */
     val cacheRank: Int get() = ordinal
