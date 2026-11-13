@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -26,22 +25,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import android.content.Intent
-import android.net.Uri
-import android.provider.Settings
-import androidx.compose.material3.Switch
-import app.plamotranslate.translation.SqlitePersistentCache
-import app.plamotranslate.screen.OverlayAccessibilityService
-import app.plamotranslate.screen.ScreenPreferences
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -52,7 +41,8 @@ import app.plamotranslate.models.DownloadState
 import app.plamotranslate.models.ModelBundle
 import app.plamotranslate.models.ModelDownloads
 import app.plamotranslate.models.TranslationModel
-import androidx.compose.ui.res.stringResource
+import app.plamotranslate.screen.ScreenTranslateSettings
+import app.plamotranslate.screen.screenTranslateSummary
 
 /**
  * 設定（docs/設計/アーキテクチャ.md「設定の画面」）。トップに項目のまとまりを並べ、押すとそのページへ進む階層にする
@@ -72,27 +62,49 @@ class SettingsActivity : ComponentActivity() {
     }
 }
 
-/**
- * 設定のページ。[group] はトップでの見出し、[parent] は戻る先。
- * 何についての設定かでまとめる：全機能で共通の「翻訳」、機能ごとの「機能」、ふつうは触らない「詳細」、アプリそのものの「アプリ」。
- * 機能ごとの設定が増えたら「機能」にページを足す（カメラ翻訳・会話翻訳など）。
- */
-private enum class SettingsPage(val title: String, val group: String?, val parent: SettingsPage?) {
-    HOME("設定", null, null),
-    MODEL("翻訳モデル", "翻訳", HOME),
-    SCREEN("画面翻訳", "機能", HOME),
-    SPEECH("読み上げ", "機能", HOME),
-    PERFORMANCE("性能", "詳細", HOME),
-    ABOUT("このアプリについて", "アプリ", HOME),
-    LICENSES("ライセンス", "アプリ", HOME),
+/** 設定のまとまり。何についての設定かで分ける（docs/設計/アーキテクチャ.md「設定の画面」）。 */
+private enum class SettingsGroup(val label: String) {
+    /** 全機能で共通。 */
+    TRANSLATION("翻訳"),
+
+    /** 機能ごと。機能ごとの設定が増えたら、ここにページを足す（カメラ翻訳・会話翻訳など）。 */
+    FEATURES("機能"),
+
+    /** ふつうは触らない調整と、不具合を調べるためのもの。 */
+    DETAIL("詳細"),
+
+    /** アプリそのもの。 */
+    APP("アプリ"),
 }
 
+/**
+ * 設定のページ。題・まとまり・トップに添える今の状態の一言（[summary]）・中身（[content]）を、ページごとに1つの定義にする。
+ * ページを足すときは、ここに1つ足すだけでよい。トップでの並びは、この定義の順。
+ */
+private enum class SettingsPage(
+    val title: String,
+    val group: SettingsGroup,
+    val summary: @Composable () -> String,
+    val content: @Composable () -> Unit,
+) {
+    MODEL("翻訳モデル", SettingsGroup.TRANSLATION, { modelSummary() }, { ModelPage() }),
+    SCREEN("画面翻訳", SettingsGroup.FEATURES, { screenTranslateSummary() }, { ScreenTranslateSettings() }),
+    SPEECH("読み上げ", SettingsGroup.FEATURES, { speechSummary() }, { SpeechCard() }),
+    PERFORMANCE("性能", SettingsGroup.DETAIL, { "同時に訳す数、スレッド、速さを測る" }, {
+        PerformanceCard(EngineHolder.state.collectAsStateWithLifecycle().value)
+    }),
+    ABOUT("このアプリについて", SettingsGroup.APP, { "版と更新、通信とプライバシー" }, { AboutPage() }),
+    LICENSES("ライセンス", SettingsGroup.APP, { "使っているモデルとソフトウェア" }, { LicensesCard() }),
+}
+
+/** 設定の画面。トップ（[page] が null）と各ページを切り替える。戻る操作は [back] の1か所で決める。 */
 @Composable
 private fun SettingsScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val model by EngineHolder.state.collectAsStateWithLifecycle()
-    var page by rememberSaveable { mutableStateOf(SettingsPage.HOME) }
-    BackHandler(enabled = page.parent != null) { page = page.parent ?: SettingsPage.HOME }
+    var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
+    fun back() {
+        if (page != null) page = null else onBack()
+    }
+    BackHandler(enabled = page != null) { back() }
     // ページごとに上から見せるので、スクロールの位置はページごとに持つ
     Scaffold { padding -> key(page) {
         Column(
@@ -100,54 +112,19 @@ private fun SettingsScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { page.parent?.let { page = it } ?: onBack() }) { Text("←", fontSize = 22.sp) }
-                Text(page.title, style = MaterialTheme.typography.titleLarge)
+                TextButton(onClick = { back() }) { Text("←", fontSize = 22.sp) }
+                Text(page?.title ?: "設定", style = MaterialTheme.typography.titleLarge)
             }
-            when (page) {
-                SettingsPage.HOME -> SettingsHome(model) { page = it }
-                SettingsPage.MODEL -> {
-                    ModelStatus(model, onRetry = { EngineHolder.ensureLoaded(context.applicationContext) })
-                    ModelChooser(model)
-                }
-                SettingsPage.SCREEN -> {
-                    OpaqueOverlayCard()
-                    TranslationCacheCard()
-                }
-                SettingsPage.SPEECH -> SpeechCard()
-                SettingsPage.PERFORMANCE -> PerformanceCard(model)
-                SettingsPage.ABOUT -> {
-                    val version = remember {
-                        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
-                    }
-                    AboutCard(version)
-                }
-                SettingsPage.LICENSES -> LicensesCard()
-            }
+            page?.content?.invoke() ?: SettingsHome { page = it }
         }
     } }
 }
 
 /** 設定のトップ。まとまりごとに見出しを付け、各ページを1行で、今の状態の一言と並べる。 */
 @Composable
-private fun SettingsHome(model: ModelState, open: (SettingsPage) -> Unit) {
-    val context = LocalContext.current
-    val speech = remember { SpeechPreferences(context).engine }
-    val opaque = remember { ScreenPreferences(context).opaqueOverlay }
-    fun summary(p: SettingsPage): String = when (p) {
-        SettingsPage.MODEL -> when (model) {
-            is ModelState.Ready -> "${model.model.label}・${if (model.engine.usesGpu) "GPU" else "CPU"}で動作"
-            ModelState.Loading -> "読み込み中"
-            else -> "使えません"
-        }
-        SettingsPage.SCREEN -> "訳の枠を透かさない：${if (opaque) "オン" else "オフ"}、訳の控え"
-        SettingsPage.SPEECH -> speech.label
-        SettingsPage.PERFORMANCE -> "同時に訳す数、スレッド、速さを測る"
-        SettingsPage.ABOUT -> "版と更新、通信とプライバシー"
-        SettingsPage.LICENSES -> "使っているモデルとソフトウェア"
-        SettingsPage.HOME -> ""
-    }
-    SettingsPage.entries.filter { it.group != null }.groupBy { it.group }.forEach { (group, pages) ->
-        Text(group ?: "", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+private fun SettingsHome(open: (SettingsPage) -> Unit) {
+    SettingsPage.entries.groupBy { it.group }.forEach { (group, pages) ->
+        Text(group.label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         Card(modifier = Modifier.fillMaxWidth()) {
             pages.forEachIndexed { i, p ->
                 if (i > 0) HorizontalDivider()
@@ -155,11 +132,43 @@ private fun SettingsHome(model: ModelState, open: (SettingsPage) -> Unit) {
                     Modifier.fillMaxWidth().clickable { open(p) }.padding(horizontal = 16.dp, vertical = 12.dp),
                 ) {
                     Text(p.title, style = MaterialTheme.typography.titleMedium)
-                    Text(summary(p), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(p.summary(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
     }
+}
+
+/** トップの「翻訳モデル」の行に添える一言。 */
+@Composable
+private fun modelSummary(): String = when (val model = EngineHolder.state.collectAsStateWithLifecycle().value) {
+    is ModelState.Ready -> "${model.model.label}・${if (model.engine.usesGpu) "GPU" else "CPU"}で動作"
+    ModelState.Loading -> "読み込み中"
+    else -> "使えません"
+}
+
+/** トップの「読み上げ」の行に添える一言。 */
+@Composable
+private fun speechSummary(): String {
+    val context = LocalContext.current
+    return remember { SpeechPreferences(context).engine.label }
+}
+
+/** 「翻訳モデル」のページ。 */
+@Composable
+private fun ModelPage() {
+    val context = LocalContext.current
+    val model by EngineHolder.state.collectAsStateWithLifecycle()
+    ModelStatus(model, onRetry = { EngineHolder.ensureLoaded(context.applicationContext) })
+    ModelChooser(model)
+}
+
+/** 「このアプリについて」のページ。 */
+@Composable
+private fun AboutPage() {
+    val context = LocalContext.current
+    val version = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "" }
+    AboutCard(version)
 }
 
 /**
@@ -214,119 +223,6 @@ private fun ModelChooser(model: ModelState) {
             }
             failure?.takeIf { it.bundle == ModelBundle.LARGE_TRANSLATION }?.let {
                 Text(it.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }
-}
-
-/**
- * 画面翻訳の訳の控え（2026-11-12、作者の要望「設定から削除もできるように」）。件数を出し、確かめてから全部消す。
- * 控えは端末のデータベースにあり（SqlitePersistentCache）、画面翻訳を終えても次に使う。誤訳が残ったときや場所を空けたいときに消す。
- */
-@Composable
-private fun TranslationCacheCard() {
-    val context = LocalContext.current
-    val cache = remember { SqlitePersistentCache.get(context) }
-    val entries by cache.entries.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope()
-    var confirm by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { cache.refreshCount() }
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("訳の控え", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "一度訳した文を端末に残し、同じ文はすぐ出します。2Bの訳があれば0.8Bでもそれを使い、" +
-                    "2Bで訳すと0.8Bの訳を上書きします。${SqlitePersistentCache.MAX_ENTRIES}件を超えると古いものから消します。",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(if (entries < 0) "数えています…" else "${entries}件", style = MaterialTheme.typography.bodyMedium)
-            OutlinedButton(enabled = entries > 0, onClick = { confirm = true }) { Text("訳の控えを消す") }
-        }
-    }
-    if (confirm) {
-        AlertDialog(
-            onDismissRequest = { confirm = false },
-            title = { Text("訳の控えを消しますか") },
-            text = { Text("${entries}件の訳をすべて消します。次からは訳し直すので、そのぶん時間がかかります。") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirm = false
-                    scope.launch { cache.clear() }
-                }) { Text("消す") }
-            },
-            dismissButton = { TextButton(onClick = { confirm = false }) { Text("やめる") } },
-        )
-    }
-}
-
-/**
- * 画面翻訳の訳の枠を透かさない（2026-11-12、作者の採用）。ユーザー補助のサービス（OverlayAccessibilityService）を使うと、
- * 訳の枠を不透明のまま、触れた操作を下のアプリへ通せる。使う人がユーザー補助を有効にする手順を、ここで案内する。
- */
-@Composable
-private fun OpaqueOverlayCard() {
-    val context = LocalContext.current
-    val preferences = remember { ScreenPreferences(context) }
-    var on by remember { mutableStateOf(preferences.opaqueOverlay) }
-    val connected by OverlayAccessibilityService.connected.collectAsStateWithLifecycle()
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("訳の枠を透かさない", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                Switch(checked = on, onCheckedChange = {
-                    on = it
-                    preferences.opaqueOverlay = it
-                })
-            }
-            Text(
-                "画面翻訳の訳の下から元の文字が透けないようにします。訳の上に触れた操作は、今までどおり下のアプリへ届きます。" +
-                    "アプリの切り替えや戻る・ホームの操作で、訳している途中の処理も確実に取り消せます。" +
-                    "Androidのユーザー補助の機能を使います。画面の文字や内容は読み取らず、どこにも送りません。",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            if (on) {
-                if (connected) {
-                    Text("ユーザー補助：有効（次に訳したときから透けなくなります）", style = MaterialTheme.typography.bodyMedium)
-                } else if (OverlayAccessibilityService.isEnabled(context)) {
-                    // 有効なのにつながっていない：端末に止められて切り離された（REDMAGICのゲーム支援で確かめた。docs/資料/端末の能力.md）
-                    Text(
-                        "ユーザー補助は有効ですが、端末に止められて切れています（ゲームを開いたときなどに起きます）。" +
-                            "ユーザー補助の設定で「${stringResource(R.string.a11y_overlay_label)}」を一度オフにしてからオンにしてください。",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    OutlinedButton(onClick = {
-                        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                    }) { Text("ユーザー補助の設定を開く") }
-                } else {
-                    Text(
-                        "ユーザー補助がまだ有効ではありません。有効にするまでは今までどおり少し透けます。次の手順で有効にしてください。",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Text(
-                        "1. 「アプリ情報を開く」→ 右上の︙ →「制限付き設定を許可」（表示されない端末では飛ばす）\n" +
-                            "2. 「ユーザー補助の設定を開く」→ ダウンロードしたアプリ（またはインストール済みのアプリ）→ " +
-                            "「${stringResource(R.string.a11y_overlay_label)}」をオン\n" +
-                            "3. 「デバイスのフル コントロール」の確認が出たら「許可」",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = {
-                            context.startActivity(
-                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")),
-                            )
-                        }) { Text("アプリ情報を開く") }
-                        OutlinedButton(onClick = {
-                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                        }) { Text("ユーザー補助の設定を開く") }
-                    }
-                }
-            } else if (connected) {
-                Text(
-                    "ユーザー補助は有効のままです。使わないなら、ユーザー補助の設定でオフにできます。",
-                    style = MaterialTheme.typography.bodySmall,
-                )
             }
         }
     }
