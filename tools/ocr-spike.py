@@ -6,10 +6,14 @@ BenchActivity と同じ形の results.jsonl を書くので、tools/eval-screen.
 使い方（PC、ONNX Runtimeを入れたPython環境で）：
   python tools/ocr-spike.py --model manga --images tools/testdata/ocr/2026-11-05 --out tools/testdata/ocr/2026-11-05-out/spike-manga
   python tools/ocr-spike.py --model v5    --images ... --out ...
+  python tools/ocr-spike.py --model korean --images ... --out ...
 
 モデルは models/ocr/<名前>/ に置く（Gitの対象外）。
   manga：Kellenok/PP-OCRv6_manga（日本語・中国語の漫画向けに調整、Apache-2.0）
   v5   ：PaddlePaddle/PP-OCRv5_mobile（簡体字・繁体字・英語・日本語、Apache-2.0）
+  korean：korean_PP-OCRv5_mobile_rec（韓国語・英語、Apache-2.0）。認識だけのモデルで、検出は manga の det.onnx を使う
+          （アプリと同じ組み合わせ）。rec.onnx と dict.json は、アプリと同じファイルを mxaln/docscanner-ocr から取る
+          （docs/手順/開発環境.md「モデルの取得と置き場」）。
 前処理と復号はモデルカードと inference.yml の値に合わせた。
 """
 import argparse
@@ -27,7 +31,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def load_vocab(model):
     base = os.path.join(ROOT, "models", "ocr", model)
-    if model == "manga":
+    if model == "korean":
+        with open(os.path.join(base, "dict.json"), encoding="utf-8") as f:
+            chars = json.load(f)
+    elif model == "manga":
         with open(os.path.join(base, "dict.txt"), encoding="utf-8") as f:
             chars = [line.rstrip("\n") for line in f]
     else:
@@ -122,13 +129,15 @@ def recognize(session, vocab, image):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", choices=["manga", "v5"], required=True)
+    ap.add_argument("--model", choices=["manga", "v5", "korean"], required=True)
     ap.add_argument("--images", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     base = os.path.join(ROOT, "models", "ocr", args.model)
     opts = ort.SessionOptions()
-    det = ort.InferenceSession(os.path.join(base, "det.onnx"), opts, providers=["CPUExecutionProvider"])
+    # 韓国語は認識だけのモデルなので、検出は漫画用を使う（アプリの PaddleReader と同じ）
+    det_base = os.path.join(ROOT, "models", "ocr", "manga") if args.model == "korean" else base
+    det = ort.InferenceSession(os.path.join(det_base, "det.onnx"), opts, providers=["CPUExecutionProvider"])
     rec = ort.InferenceSession(os.path.join(base, "rec.onnx"), opts, providers=["CPUExecutionProvider"])
     vocab = load_vocab(args.model)
     os.makedirs(args.out, exist_ok=True)

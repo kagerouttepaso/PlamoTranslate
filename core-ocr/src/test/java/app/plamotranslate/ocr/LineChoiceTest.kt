@@ -51,6 +51,28 @@ class LineChoiceTest {
     }
 
     @Test
+    fun 韓国語の行はPP_OCR韓国語を先に採る() {
+        // ML Kit は縁取りの飾り文字「전투」を「전}」と読んだ（2026-11-13、トリッカル）
+        assertEquals(Source.PADDLE_KO, choose(Source.MLKIT_KO to "전}", Source.PADDLE_KO to "전투"))
+    }
+
+    @Test
+    fun 空白を除いて同じならML_Kit韓国語を採る() {
+        // PP-OCR は字の間の空白を落とすことがある（「두두랑노는」）
+        assertEquals(Source.MLKIT_KO, choose(Source.MLKIT_KO to "두두랑 노는", Source.PADDLE_KO to "두두랑노는"))
+    }
+
+    @Test
+    fun PP_OCR韓国語だけが読めた行も採る() {
+        assertEquals(Source.PADDLE_KO, choose(Source.PADDLE_KO to "업적"))
+    }
+
+    @Test
+    fun PP_OCR韓国語の読みが崩れていればML_Kitを採る() {
+        assertEquals(Source.MLKIT_KO, choose(Source.MLKIT_KO to "상점에 가자", Source.PADDLE_KO to "Otohi그 7>지가igr<그DE가 abc그 x지"))
+    }
+
+    @Test
     fun どれも崩れていれば中国語の読みを返す() {
         assertEquals(Source.MLKIT_ZH, choose(Source.MLKIT_ZH to "<>#{}", Source.MLKIT_JA to "<>#{}"))
     }

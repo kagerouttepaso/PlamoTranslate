@@ -72,7 +72,7 @@ enum class TranslationModel(val label: String, val note: String, val file: Model
  * 一度に取るのは1組だけ（[ModelDownloads]）。画面は、取っている組・失敗した組をこの型で見分ける。
  */
 enum class ModelBundle {
-    /** 初回起動時にそろえる（翻訳0.8B・音声認識・漫画用OCR）。そろうまで「モデルの準備」の画面を出す。 */
+    /** 初回起動時にそろえる（翻訳0.8B・音声認識・PP-OCR の漫画用と韓国語）。そろうまで「モデルの準備」の画面を出す。 */
     REQUIRED,
 
     /** 翻訳モデル2B。設定の画面で選んだときに足す。 */
@@ -100,6 +100,13 @@ object ModelCatalog {
     private const val HF = "https://huggingface.co"
     private const val SENSE_VOICE = "$HF/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07"
     private const val MANGA = "$HF/Kellenok/PP-OCRv6_manga/resolve/de0e793da4e213f4b13c738204fe2a832f16d57c"
+
+    /**
+     * 韓国語の文字の認識（`PaddlePaddle/korean_PP-OCRv5_mobile_rec` を ONNX にしたもの、Apache-2.0）。
+     * 公式は Paddle の形式だけなので、公式から変換して公開されている版を使う。PCで公式の重み（コミット c02ecaf1）を
+     * 変換したものと出力が一致することを確かめた（2026-11-13、docs/判断/2026-11-13_韓国語の飾り文字にPP-OCRの韓国語の認識を足す.md）。
+     */
+    private const val KOREAN_OCR = "$HF/mxaln/docscanner-ocr/resolve/354549cf968c1d8883482a1dc74dde9c762ebf53/korean"
 
     /** 初回起動時にそろえるファイル。翻訳モデルは0.8Bだけで、2Bは選んだときに足す。 */
     val files = listOf(
@@ -145,6 +152,20 @@ object ModelCatalog {
             path = "ocr/manga/dict.txt",
             size = 74_947,
             sha256 = "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d",
+        ),
+        ModelFile(
+            label = "韓国語の文字の認識（PP-OCRv5 korean）",
+            url = "$KOREAN_OCR/rec_model.onnx",
+            path = "ocr/korean/rec.onnx",
+            size = 13_441_299,
+            sha256 = "03525a1dcf74ceff88c9cbe89f100c2a7c7f9567afffb0ee2cdea8303ec5c238",
+        ),
+        ModelFile(
+            label = "韓国語の文字の表",
+            url = "$KOREAN_OCR/charset.json",
+            path = "ocr/korean/dict.json",
+            size = 83_288,
+            sha256 = "e600744eabcf1db6513518f7e09105cdb746ee0504ef110b25478147d9f0aa81",
         ),
     )
 

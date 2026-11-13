@@ -50,6 +50,8 @@ internal class PaddleReader(
             val recognizers = buildMap {
                 PaddleRecognizer.load(File(dir, "manga/rec.onnx"), File(dir, "manga/dict.txt"), options)
                     ?.let { put(Source.PADDLE_ZH_JA, it) }
+                PaddleRecognizer.load(File(dir, "korean/rec.onnx"), File(dir, "korean/dict.json"), options)
+                    ?.let { put(Source.PADDLE_KO, it) }
             }
             if (recognizers.isEmpty()) {
                 detector.close()

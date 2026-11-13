@@ -47,6 +47,19 @@ internal object LineChoice {
         return zh ?: ja ?: koreans.firstOrNull() ?: readings.first()
     }
 
-    /** 崩れていない韓国語の読みから、読み手の並びの順に1つ選ぶ。 */
-    private fun korean(readings: List<Reading>): Reading? = readings.minByOrNull { it.source.ordinal }
+    /**
+     * 崩れていない韓国語の読みから1つ選ぶ。PP-OCR 韓国語を先に採る（飾り文字を ML Kit より読める）。
+     * ただし空白を除いて同じ文字なら、空白を保つ ML Kit 韓国語を採る（PP-OCR は字の間の空白を落とすことがある）。
+     */
+    private fun korean(readings: List<Reading>): Reading? {
+        val paddle = readings.firstOrNull { it.source == Source.PADDLE_KO }
+        val mlkit = readings.firstOrNull { it.source == Source.MLKIT_KO }
+        return when {
+            paddle == null -> mlkit
+            mlkit != null && compact(mlkit.text) == compact(paddle.text) -> mlkit
+            else -> paddle
+        }
+    }
+
+    private fun compact(text: String) = text.filterNot { it.isWhitespace() }
 }

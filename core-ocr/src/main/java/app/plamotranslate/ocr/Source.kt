@@ -24,6 +24,15 @@ internal enum class Source(
     MLKIT_JA,
     MLKIT_KO(korean = true),
 
+    /**
+     * PP-OCRv5 の韓国語の認識（`korean_PP-OCRv5_mobile_rec`。検出は PP-OCR 漫画用と同じ）。
+     * ゲームの飾り文字のハングルを ML Kit より読める（2026-11-13、トリッカルの画面で「업적」「전투」「모집」）。
+     * 画素画の飾りなどを読み違えた行は確信度が低い（0.16）ので、0.8未満は採らない。
+     */
+    PADDLE_KO(paddle = true, korean = true) {
+        override fun accepts(line: Candidate) = ScriptDetector.hasHangul(line.text) && (line.confidence ?: 0f) >= 0.8f
+    },
+
     /** 英字専用。漢字・仮名・ハングルを読めないので、英字だけの行を採る。 */
     MLKIT_LATIN {
         override fun accepts(line: Candidate) = ScriptDetector.detect(line.text) == Script.LATIN
