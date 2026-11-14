@@ -22,13 +22,15 @@ val releaseKey = releaseKeyFile?.let { file -> Properties().apply { file.inputSt
 android {
     namespace = "app.plamotranslate"
     compileSdk = 36
+    // ネイティブライブラリのビルドと同じNDKで、配布APKのデバッグ情報を除去する。
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "app.plamotranslate"
         minSdk = 33  // 性能ヒント（APerformanceHint）がAPI 33から
         targetSdk = 36
-        versionCode = 18
-        versionName = "0.10.0"
+        versionCode = 19
+        versionName = "0.10.1"
         ndk {
             abiFilters += "arm64-v8a"
         }

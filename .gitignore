@@ -23,6 +23,7 @@ keystore.properties
 # Android / Gradle
 local.properties
 .gradle/
+.kotlin/
 build/
 /build-android/
 .idea/
@@ -35,3 +36,7 @@ captures/
 
 # 配る用に控えた正式版のAPK（docs/手順/開発環境.md「配布用のAPK」）
 /dist/
+
+# 個別の診断資料・作業メモは公開しない
+/local-notes/
+/.yomiyasu/

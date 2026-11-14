@@ -4,6 +4,11 @@ project(plamo-llm LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# 配布物の診断文字列やデバッグ情報にビルドPCの絶対パスを残さない。
+get_filename_component(REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../.." ABSOLUTE)
+add_compile_options("-ffile-prefix-map=${REPO_ROOT}=/src"
+                    "-ffile-prefix-map=${CMAKE_ANDROID_NDK}=/android-ndk")
+
 set(THIRD_PARTY ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party)
 
 # --- OpenCL（Adreno GPU）---------------------------------------------------
