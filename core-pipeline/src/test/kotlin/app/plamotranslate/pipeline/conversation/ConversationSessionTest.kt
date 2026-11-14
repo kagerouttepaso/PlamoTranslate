@@ -46,6 +46,30 @@ class ConversationSessionTest {
     }
 
     @Test
+    fun 区切るボタンでその場で書き起こし待ちに並べ確定で入れ替える() {
+        val s = ConversationSession()
+        s.handle(speaking(true))
+        s.handle(partial("こんに"))
+        s.handle(Event.CutRequested)
+        assertEquals(listOf("こんに"), s.queued.map { it.text })
+        assertEquals("", s.live!!.text)
+        // もう一度押すと2枚並ぶ
+        s.handle(Event.CutRequested)
+        assertEquals(2, s.queued.size)
+        // 区切った位置より前の途中結果は、先頭の待ちのカードを更新し、訳さない
+        assertTrue(s.handle(partial("こんにちは")).none { it is Effect.TranslatePartial })
+        assertEquals("こんにちは", s.queued.first().text)
+        // 確定と区切りの完了が届くと、先頭が確定したカードに置き換わる
+        s.handle(final("こんにちは"))
+        s.handle(Event.CutSettled)
+        assertEquals(listOf("こんにちは"), s.turns.map { it.original })
+        assertEquals(1, s.queued.size)
+        // 止めたら待ちのカードは消す（残りは止めるときの確定で出る）
+        s.handle(Event.Stopped)
+        assertTrue(s.queued.isEmpty())
+    }
+
+    @Test
     fun 確定訳の途中はカードに出す() {
         val s = ConversationSession()
         val id = s.handle(final("こんにちは")).filterIsInstance<Effect.TranslateFinal>().single().turn.id

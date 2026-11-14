@@ -18,7 +18,7 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  *
  * 書き起こしが重いモデル（[byPhrase]、Qwen3-ASR）は、カード全体を書き起こし直すと音声の処理が数秒遅れる。そこで、
  * 文が終わるたびにその文を1回書き起こして覚え、途中結果は「覚えた文＋まだ終わっていない文」、確定は「覚えた文＋区切る位置までの残り」
- * にする。言語の見張りは、書き起こさずに言語の識別だけで行う（[SpeechRecognizer.identifies]）。カードの言語は話し始めの1秒で決め、
+ * にする。言語の見張りは、書き起こさずに言語の識別だけで行う（[SpeechRecognizer.identifies]）。カードの言語は話し始めの2秒で決め、
  * 文字より先に知らせる（空の途中結果。画面はカードの向きを先に決められる）。
  *
  * 判断は部品に分ける：言語が話し手の交代の根拠になるかは [LanguageEvidence]、区切る位置は [CutPoint]、
@@ -108,8 +108,8 @@ class SpeechSegmenter(
     /** 書き起こした文の終わり。ここから後ろが、まだ書き起こしていない音声。 */
     private val stitchedEnd: Int get() = phrases.lastOrNull()?.end ?: 0
 
-    /** カードの言語を決める、カードの最初の音声の長さ。重いモデルは文字が遅いので、言語（カードの向き）を早く出す。 */
-    private val cardLangSamples = if (byPhrase) SAMPLE_RATE else CARD_LANG_SAMPLES
+    /** カードの言語を決める、カードの最初の音声の長さ。言語の識別は短いと外れやすい（PC で、1秒の区間の半分近くを誤った）。 */
+    private val cardLangSamples = CARD_LANG_SAMPLES
 
     private var closed = false
 
@@ -453,7 +453,9 @@ class SpeechSegmenter(
         return partialEvent(r)
     }
 
-    private fun recognize(samples: FloatArray): Recognition = TranscriptCleanup.clean(recognizer.recognize(samples, languages))
+    /** 認識する。言語を識別できない区間は、今のカードの言語（無ければ直前の文の言語）として書き起こさせる。 */
+    private fun recognize(samples: FloatArray): Recognition =
+        TranscriptCleanup.clean(recognizer.recognize(samples, languages, cardLang ?: lastPhraseLang))
 
     /**
      * 解放した後に届いた呼び出しは何もしない（画面を閉じると、聞き取りを止めた後始末の [flush] が、

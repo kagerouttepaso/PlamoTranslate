@@ -1,7 +1,9 @@
 package app.plamotranslate.pipeline.speech
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IdentifiedRecognizerTest {
@@ -62,5 +64,22 @@ class IdentifiedRecognizerTest {
         // 文字が合わないものと短すぎるものは根拠にしない
         assertNull(LanguageEvidence.of(Recognition("こんにちは", "ru"), languages))
         assertNull(LanguageEvidence.of(Recognition("Да", "ru"), languages))
+    }
+
+    @Test
+    fun 識別できなければカードの言語として書き起こす() {
+        // 短い区間の識別は外れやすい。言語を指定しないと Qwen3-ASR が中国語で書くことがあるので、カードの言語を渡す
+        val asr = FakeRecognizer("ですね")
+        val r = IdentifiedRecognizer(FakeIdentifier("ko"), asr).recognize(audio, SpeechLanguages(setOf("ja", "ru")), fallback = "ja")
+        assertEquals("ja", asr.requested)
+        assertEquals("ja", r.lang)
+    }
+
+    @Test
+    fun 日本語では使わない漢字があれば日本語とみなさない() {
+        assertTrue(Script.hasChineseOnlyHan("我们说话"))
+        assertFalse(Script.hasChineseOnlyHan("東京駅で会う"))
+        assertNull(ScriptLanguage.guess("我们说话", setOf("ja", "ru")))
+        assertEquals("zh", ScriptLanguage.guess("我们说话", setOf("ja", "zh")))
     }
 }

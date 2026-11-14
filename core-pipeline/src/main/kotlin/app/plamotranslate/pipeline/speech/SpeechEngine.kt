@@ -84,6 +84,12 @@ interface SpeechRecognizer : AutoCloseable {
     /** 会話の言語を添えて認識する（[SpeechSegmenter] が呼ぶ）。言語の識別を前に置く組み立て（[IdentifiedRecognizer]）が使う。 */
     fun recognize(samples: FloatArray, languages: SpeechLanguages): Recognition = recognize(samples)
 
+    /**
+     * 会話の言語に加え、言語を識別できなかったときに使う言語（[fallback]。今のカードの言語）を添えて認識する。
+     * 識別できない区間は「話し手は代わっていない」とみなし、その言語として書き起こす。言語を識別しない認識器は無視する。
+     */
+    fun recognize(samples: FloatArray, languages: SpeechLanguages, fallback: String?): Recognition = recognize(samples, languages)
+
     /** [language]（言語のコード）として書き起こす。言語を指定できない認識器は無視する。null なら指定しない。 */
     fun recognizeAs(samples: FloatArray, language: String?): Recognition = recognize(samples)
 

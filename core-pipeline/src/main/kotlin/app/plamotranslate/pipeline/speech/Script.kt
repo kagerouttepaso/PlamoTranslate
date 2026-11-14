@@ -47,13 +47,25 @@ enum class Script {
             }
             return counts.maxByOrNull { it.value }?.key
         }
+
+        /**
+         * 日本語では使わない漢字（簡体字など）を含むか。日本語の文字コード（Shift_JIS、JIS X 0208）に無い漢字を、
+         * 中国語にしか無い漢字とみなす。漢字だけの文が日本語か中国語かを見分けるのに使う。
+         */
+        fun hasChineseOnlyHan(text: String): Boolean {
+            val japanese = SHIFT_JIS.newEncoder()
+            return text.any { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.HAN && !japanese.canEncode(it) }
+        }
+
+        private val SHIFT_JIS = java.nio.charset.Charset.forName("Shift_JIS")
     }
 }
 
 /**
  * 判定：言語の識別が使えないとき、書き起こした文の文字の種類で言語を決める。
  * 会話の言語（[groups]）のうち、文字の種類が合うものが1つだけならその言語、決まらなければ null。
- * 漢字だけの文は、日本語と中国語の両方に合う（日本語は漢字だけの文もあるため）。
+ * 漢字だけの文は、日本語と中国語の両方に合う（日本語は漢字だけの文もあるため）。ただし日本語では使わない漢字
+ * （[Script.hasChineseOnlyHan]）があれば中国語にだけ合う。
  */
 object ScriptLanguage {
     fun guess(text: String, groups: Set<String>?): String? {
@@ -61,7 +73,7 @@ object ScriptLanguage {
         val script = Script.ofText(text) ?: return null
         val matches = groups.filter { lang ->
             val s = Script.ofLanguage(lang)
-            s == script || (script == Script.HAN && s == Script.JAPANESE)
+            s == script || (script == Script.HAN && s == Script.JAPANESE && !Script.hasChineseOnlyHan(text))
         }
         return matches.singleOrNull()
     }

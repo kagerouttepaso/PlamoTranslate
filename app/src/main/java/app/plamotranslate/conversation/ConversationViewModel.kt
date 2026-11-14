@@ -79,6 +79,8 @@ data class ConversationUiState(
     val lagSeconds: Float = 0f,
     /** 話している最中なら、ここまでの聞き取り（まだ文字になっていなければ空）。 */
     val live: LiveSpeech? = null,
+    /** 区切るボタンで区切ったが、まだ確定していないカード（古い順）。 */
+    val queued: List<LiveSpeech> = emptyList(),
     val error: String? = null,
     /** 会話で選べる言語（設定で選んだ音声認識モデルの言語）。 */
     val languages: List<Language> = SpeechModel.DEFAULT.languages,
@@ -153,37 +155,57 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
      * マイクで聞く。録音と音声認識を別のスレッドに分ける：録音の側で音量を測って画面に出し、音声は上限の無い列で
      * 音声認識のスレッドへ渡す。書き起こしが重いモデル（1回に1〜2秒）でも、音量のバーは止まらず、音声も落とさない
      * （録音の流れの中の詰まりで、話し中にバーが止まった。2026-11-15）。認識の遅れ（列にたまった音声）は画面に出す。
+     *
+     * 区切るボタンは、列の中に区切りの印を入れる（[cut]）。押した時点の音声の位置で区切られ、認識が遅れていても
+     * 音声と同じ順に処理される。停止は録音だけを止め、列にたまった音声を書き起こしてから終わる（[stop]）。
      */
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start() = listen { engine ->
         val recording = recorder()
-        val queue = Channel<FloatArray>(Channel.UNLIMITED)
+        val queue = Channel<MicItem>(Channel.UNLIMITED)
         val queued = AtomicInteger()
+        micQueue = queue
         try {
             coroutineScope {
-                launch(Dispatchers.IO) {
+                micJob = launch(Dispatchers.IO) {
                     try {
                         MicRecorder.stream().collect { raw ->
                             val chunk = muteReadAloud(raw)
                             meter(chunk)
                             queued.addAndGet(chunk.size)
-                            queue.send(chunk)
+                            queue.send(MicItem.Audio(chunk))
                         }
                     } finally {
                         queue.close()
                     }
                 }
-                for (chunk in queue) {
-                    post(engine.accept(chunk))
-                    val behind = queued.addAndGet(-chunk.size).toFloat() / SpeechEngine.SAMPLE_RATE
-                    if (behind != _state.value.lagSeconds) _state.update { it.copy(lagSeconds = behind) }
-                    recording?.write(chunk)
+                for (item in queue) when (item) {
+                    is MicItem.Audio -> {
+                        post(engine.accept(item.chunk))
+                        val behind = queued.addAndGet(-item.chunk.size).toFloat() / SpeechEngine.SAMPLE_RATE
+                        if (behind != _state.value.lagSeconds) _state.update { it.copy(lagSeconds = behind) }
+                        recording?.write(item.chunk)
+                    }
+                    // 区切った分の確定と、区切りを終えた知らせを一緒に渡す（書き起こし待ちのカードと確定が同じ時に入れ替わる）
+                    MicItem.Cut -> post(engine.cut().map(Event::Speech) + Event.CutSettled)
                 }
             }
         } finally {
+            micQueue = null
+            micJob = null
             recording?.close()
         }
     }
+
+    /** 録音から音声認識のスレッドへ渡すもの。音声と、区切るボタンの印を、押した順に並べる。 */
+    private sealed interface MicItem {
+        class Audio(val chunk: FloatArray) : MicItem
+        data object Cut : MicItem
+    }
+
+    /** マイクで聞いている間の、録音の列と録音の作業。 */
+    @Volatile private var micQueue: Channel<MicItem>? = null
+    @Volatile private var micJob: Job? = null
 
     /**
      * デバッグ版だけ、音声認識へ渡した音声を WAV に書く（docs/設計/会話翻訳.md「動作確認」）。[startFromWav] で流し直して、
@@ -227,15 +249,27 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     /** 音量を画面に出す。音声認識のスレッドでは呼ばない（書き起こしの間に止まるため）。 */
     private fun meter(chunk: FloatArray) = _state.update { it.copy(level = level(chunk)) }
 
+    /**
+     * 聞くのを止める。マイクで聞いているときは録音だけを止め、たまった音声を書き起こしてから終わる
+     * （認識が遅れていても、止める前に話した分を落とさない）。
+     */
     fun stop() {
-        listenJob?.cancel()
+        val mic = micJob
+        if (mic?.isActive == true) mic.cancel() else listenJob?.cancel()
     }
 
-    /** 今話している分を確定して次のカードにする（聞くのは続ける）。音声認識は同じスレッドから呼ぶ。 */
+    /**
+     * 今話している分を確定して次のカードにする（聞くのは続ける）。画面はその場でカードを区切って書き起こし待ちに並べ、
+     * 音声認識は押した時点の音声の位置で区切る（認識が遅れていれば、たまった音声を処理した後に区切る）。
+     */
     fun cut() {
         val engine = asr ?: return
         if (listenJob?.isActive != true) return
-        viewModelScope.launch(asrDispatcher) { post(engine.cut()) }
+        handle(Event.CutRequested)
+        val queue = micQueue
+        if (queue != null && queue.trySend(MicItem.Cut).isSuccess) return
+        // 音声ファイルを流しているときは、音声認識のスレッドへ直に頼む
+        viewModelScope.launch(asrDispatcher) { post(engine.cut().map(Event::Speech) + Event.CutSettled) }
     }
 
     fun clear() {
@@ -270,18 +304,21 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     /** 音声認識のスレッドから、出来事を画面のスレッドの制御へ順に渡す（画面のスレッドは届いた順に処理する）。 */
-    private fun post(events: List<SpeechEvent>) {
+    @JvmName("postSpeech")
+    private fun post(events: List<SpeechEvent>) = post(events.map(Event::Speech))
+
+    private fun post(events: List<Event>) {
         if (events.isEmpty()) return
-        viewModelScope.launch { events.forEach { onSpeech(it) } }
+        viewModelScope.launch { events.forEach { onEvent(it) } }
     }
 
-    private fun onSpeech(event: SpeechEvent) {
-        when (event) {
-            is SpeechEvent.Partial -> logText { "途中 [${event.lang}] ${event.text}" }
-            is SpeechEvent.Final -> event.utterance.let { u -> logText { "認識 [${u.lang}] ${u.text} 認識${u.recognizeMs}ms" } }
-            is SpeechEvent.Speaking -> Unit
+    private fun onEvent(event: Event) {
+        when (val speech = (event as? Event.Speech)?.event) {
+            is SpeechEvent.Partial -> logText { "途中 [${speech.lang}] ${speech.text}" }
+            is SpeechEvent.Final -> speech.utterance.let { u -> logText { "認識 [${u.lang}] ${u.text} 認識${u.recognizeMs}ms" } }
+            else -> Unit
         }
-        handle(Event.Speech(event))
+        handle(event)
     }
 
     /** 制御に出来事を渡し、返ってきた作業を行い、画面の状態をそろえる。画面のスレッドから呼ぶ。 */
@@ -306,7 +343,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         // 音声認識が話し手の交代を見る言語は、会話の言語（自分か相手が中国語のときだけ、中国語と日本語を分ける）
         asr?.languages = session.speechLanguages
         _state.update {
-            it.copy(turns = session.turns, live = session.live, self = session.self, mode = session.mode, partner = session.partner)
+            it.copy(turns = session.turns, queued = session.queued, live = session.live, self = session.self, mode = session.mode, partner = session.partner)
         }
     }
 

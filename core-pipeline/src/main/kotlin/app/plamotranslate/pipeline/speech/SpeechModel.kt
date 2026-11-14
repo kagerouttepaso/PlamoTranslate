@@ -63,9 +63,16 @@ class IdentifiedRecognizer(
 ) : SpeechRecognizer {
     override fun recognize(samples: FloatArray): Recognition = recognize(samples, SpeechLanguages.ANY)
 
-    override fun recognize(samples: FloatArray, languages: SpeechLanguages): Recognition {
+    override fun recognize(samples: FloatArray, languages: SpeechLanguages): Recognition = recognize(samples, languages, null)
+
+    /**
+     * 識別できない（会話の言語の外か不明）ときは、言語を指定せずに書き起こさず、[fallback]（今のカードの言語）として書き起こす。
+     * 言語を指定しないと、Qwen3-ASR が中国語で書くことがある。識別は短い区間ほど外れやすい（PC で、1秒の区間の半分近くを
+     * 別の言語と誤った）。
+     */
+    override fun recognize(samples: FloatArray, languages: SpeechLanguages, fallback: String?): Recognition {
         val groups = languages.groups
-        val lang = identify(samples, languages)
+        val lang = identify(samples, languages) ?: fallback?.takeIf { groups == null || it in groups }
         val r = recognizer.recognizeAs(samples, lang)
         return r.copy(lang = lang ?: ScriptLanguage.guess(r.text, groups))
     }

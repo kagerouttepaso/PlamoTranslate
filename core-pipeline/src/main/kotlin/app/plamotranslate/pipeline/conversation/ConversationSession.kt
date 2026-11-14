@@ -30,7 +30,14 @@ data class Turn(
  * [direction] は文字より先に決まることがある（書き起こしの重いモデルは、言語の識別で先に言語を知らせる）。
  * [startedAtMs] は話し始めた時刻（壁時計のミリ秒）。文字がまだ無い間、画面は話し始めからの秒数を出す。
  */
-data class LiveSpeech(val text: String, val direction: Direction?, val translation: String = "", val startedAtMs: Long = 0)
+data class LiveSpeech(
+    val text: String,
+    val direction: Direction?,
+    val translation: String = "",
+    val startedAtMs: Long = 0,
+    /** 書き起こし待ちのカード（[ConversationSession.queued]）の見分け。話し中のカードは0。 */
+    val id: Long = 0,
+)
 
 /**
  * 会話の訳す順番の状態遷移（docs/設計/会話翻訳.md「翻訳への渡し方」）。音声の出来事と訳の結果を [handle] で受け取り、
@@ -65,6 +72,15 @@ class ConversationSession(
 
         data class SelfChanged(val self: Language) : Event
         data class ModeChanged(val mode: PartnerMode) : Event
+
+        /**
+         * 区切るボタンが押された。音声認識より先に、画面の話し中のカードを書き起こし待ちの列へ移し、新しい話し中のカードを始める。
+         * 音声認識が押した位置まで追いついて区切ると、確定（[SpeechEvent.Final]）と [CutSettled] が届く。
+         */
+        data object CutRequested : Event
+
+        /** 音声認識が区切りを終えた（確定の後に届く）。書き起こし待ちの列の先頭を消す（確定したカードに置き換わる）。 */
+        data object CutSettled : Event
 
         /** 聞くのを止めた（聞き取り中の表示を消す）。 */
         data object Stopped : Event
@@ -101,6 +117,15 @@ class ConversationSession(
     /** 話している最中なら、ここまでの聞き取り。 */
     var live: LiveSpeech? = null
         private set
+
+    /**
+     * 区切るボタンで区切ったが、まだ確定していないカード（古い順）。書き起こしの重いモデルは認識が遅れるので、
+     * 押した時にカードが区切られたことを見せる。区切る前の音声の途中結果は、列の先頭のカードを更新する。
+     */
+    var queued: List<LiveSpeech> = emptyList()
+        private set
+
+    private var nextQueuedId = 1L
 
     private var nextTurnId = 0L
     private var nextRequestId = 0L
@@ -147,7 +172,17 @@ class ConversationSession(
             }
             is Event.SelfChanged -> router.self = event.self
             is Event.ModeChanged -> router.mode = event.mode
-            Event.Stopped -> live = null
+            Event.CutRequested -> live?.let {
+                queued = queued + it.copy(id = nextQueuedId++)
+                // 走っている途中訳は区切った前のカードのものなので、新しい話し中のカードには出さない
+                generation++
+                live = LiveSpeech("", null, startedAtMs = clock())
+            }
+            Event.CutSettled -> queued = queued.drop(1)
+            Event.Stopped -> {
+                live = null
+                queued = emptyList()
+            }
             Event.Cleared -> turns = emptyList()
         }
         dispatch(effects)
@@ -162,6 +197,13 @@ class ConversationSession(
             }
             is SpeechEvent.Partial -> {
                 val direction = router.preview(event.text, event.lang)
+                // 区切った位置より前の音声の途中結果は、書き起こし待ちの先頭のカードのもの。訳し直さない
+                queued.firstOrNull()?.let { head ->
+                    if (event.text.isNotEmpty() || head.text.isEmpty()) {
+                        queued = listOf(head.copy(text = event.text.ifEmpty { head.text }, direction = direction)) + queued.drop(1)
+                    }
+                    return
+                }
                 // 前の途中訳は、新しい途中の文字を訳し終わるまで出しておく（ちらつかせない）
                 val keep = live?.takeIf { it.direction == direction }?.translation.orEmpty()
                 live = LiveSpeech(event.text, direction, keep, live?.startedAtMs ?: clock())
@@ -188,8 +230,9 @@ class ConversationSession(
             recognizeMs = utterance.recognizeMs,
         )
         turns = turns + turn
-        // 話し続けていれば次の途中結果が来るので、ここでは聞き取り中の表示だけ空にする
-        live = live?.let { LiveSpeech("", null, startedAtMs = clock()) }
+        // 話し続けていれば次の途中結果が来るので、ここでは聞き取り中の表示だけ空にする。
+        // 書き起こし待ちがあれば、この確定はその分なので、ボタンの後に始めた話し中のカードはそのままにする
+        if (queued.isEmpty()) live = live?.let { LiveSpeech("", null, startedAtMs = clock()) }
         finalQueue.addLast(turn)
     }
 

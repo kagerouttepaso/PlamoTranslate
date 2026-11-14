@@ -138,12 +138,14 @@ private fun ConversationScreen(state: ConversationUiState, model: ModelState, ac
                     // 自分向け：自分の言語を大きく出す
                     FollowingList(state, Modifier.weight(1f).fillMaxWidth()) {
                         items(state.turns, key = { it.id }) { FaceCard(it, reader = Reader.ME) }
+                        items(state.queued, key = { "queued-${it.id}" }) { QueuedCard(it, Reader.ME) }
                         state.live?.let { item(key = LIVE_KEY) { LiveCard(it, Reader.ME, state.level, state.lagSeconds) } }
                     }
                 }
                 ViewMode.SHARED -> {
                     FollowingList(state, Modifier.weight(1f).fillMaxWidth()) {
                         items(state.turns, key = { it.id }) { SharedCard(it) }
+                        items(state.queued, key = { "queued-${it.id}" }) { QueuedCard(it, reader = null) }
                         state.live?.let { item(key = LIVE_KEY) { LiveCard(it, reader = null, level = state.level, lagSeconds = state.lagSeconds) } }
                     }
                     Controls(state, model, actions)
@@ -165,6 +167,7 @@ private fun PartnerHalf(state: ConversationUiState, modifier: Modifier) {
     // 背景は自分側と同じ地の色にする。別の色にすると、カードの色と混ざって見分けにくかった（2026-11-06、作者の指摘）
     FollowingList(state, modifier, reverse = true) {
         items(state.turns, key = { it.id }) { Box(Modifier.rotate(180f)) { FaceCard(it, reader = Reader.PARTNER) } }
+        items(state.queued, key = { "queued-${it.id}" }) { Box(Modifier.rotate(180f)) { QueuedCard(it, Reader.PARTNER) } }
         state.live?.let { item(key = LIVE_KEY) { Box(Modifier.rotate(180f)) { LiveCard(it, Reader.PARTNER, state.level, state.lagSeconds) } } }
     }
 }
@@ -184,7 +187,7 @@ private fun FollowingList(
     reverse: Boolean = false,
     content: LazyListScope.() -> Unit,
 ) {
-    val count = state.turns.size + if (state.live != null) 1 else 0
+    val count = state.turns.size + state.queued.size + if (state.live != null) 1 else 0
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = (count - 1).coerceAtLeast(0))
     var follow by remember { mutableStateOf(true) }
     LaunchedEffect(listState) {
