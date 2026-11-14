@@ -156,6 +156,7 @@ class TranslationEngine private constructor(
             cpu: CpuOptions = CpuOptions(),
         ): TranslationEngine = withContext(dispatcher) {
             if (!model.canRead()) throw TranslationException("モデルが読めません: ${model.path}")
+            app.plamotranslate.log.Logs.i("起動診断: model=${model.name} bytes=${model.length()} preferGpu=$preferGpu n_ctx=$nCtx")
             val hasGpu = LlamaNative.nativeInit(nativeLibDir, preferGpu, cpu.variant)
             var gpu = preferGpu && hasGpu
             val threads = if (cpu.threads > 0) cpu.threads else defaultThreads()

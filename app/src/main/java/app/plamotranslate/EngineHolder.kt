@@ -133,6 +133,7 @@ object EngineHolder {
      */
     private suspend fun warmUp(engine: TranslationEngine) {
         runCatching { engine.run(1, SingleRequest(TranslationRequest("안녕하세요", Language.KO, Language.JA)), maxTokens = 8) }
+            .onFailure { app.plamotranslate.log.Logs.w("起動診断: 準備用の推論が失敗しました", it) }
     }
 
     /** 同時に訳す文の数を保存し、今のエンジンにもすぐ効かせる（読み直さない）。 */

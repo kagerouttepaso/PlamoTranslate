@@ -55,4 +55,6 @@ fun ApplicationExitInfo.toProcessExit(): ProcessExit = ProcessExit(
     mark = ProcessMark.decode(processStateSummary),
     rawReason = reason,
     description = description.orEmpty(),
+    pssKb = pss,
+    rssKb = rss,
 )

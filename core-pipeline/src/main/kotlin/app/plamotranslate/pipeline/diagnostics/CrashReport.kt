@@ -58,6 +58,8 @@ object CrashReports {
             append("時刻：").append(timeText(exit.time)).append('\n')
             append("重要度：").append(exit.importance).append('\n')
             append("OS の説明：").append(exit.description).append('\n')
+            append("OSの最終メモリサンプル（kB、0は未採取）：PSS=").append(exit.pssKb)
+                .append(" RSS=").append(exit.rssKb).append('\n')
             append("記録した時点の").append(device)
         }
         val files = buildMap {
