@@ -120,8 +120,8 @@ fun PerformanceCard(model: ModelState) {
             gpuDisabled?.let { note ->
                 Text(
                     "GPUで読み込む途中でアプリが終わったため、この端末ではCPUで動かしています（$note）。" +
-                        "端末のGPUのドライバーがllama.cppのGPUの処理に合わないと起きます。" +
-                        "読み込み中に強制停止しただけなら、もう一度試してください。",
+                        "アプリやOSを更新してもCPUでの動作を維持します。" +
+                        "GPUを試し直す場合は、下のボタンを押してください。",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
