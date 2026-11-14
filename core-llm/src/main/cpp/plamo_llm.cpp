@@ -87,6 +87,8 @@ struct Engine {
     bool boost = true;
     APerformanceHintSession *hint = nullptr;
     pid_t hint_caller = 0;
+    // 初回推論だけ段階とメモリを残し、通常の翻訳のログ量と処理負荷を増やさない。
+    bool first_run = true;
 };
 
 std::set<int32_t> list_threads() {
@@ -105,6 +107,23 @@ std::string read_first_line(const std::string &path) {
     std::string line;
     std::getline(in, line);
     return line;
+}
+
+// 数値はOSが返す単位（kB）のまま残す。読めない項目は空欄とし、0と誤認させない。
+std::string memory_field(const char *path, const char *key) {
+    std::ifstream in(path);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.rfind(key, 0) == 0) return line.substr(strlen(key));
+    }
+    return "取得不可";
+}
+
+void startup_stage(const char *stage) {
+    LOGI("起動診断: %s RSS=%s available=%s total=%s", stage,
+         memory_field("/proc/self/status", "VmRSS:").c_str(),
+         memory_field("/proc/meminfo", "MemAvailable:").c_str(),
+         memory_field("/proc/meminfo", "MemTotal:").c_str());
 }
 
 // 診断用：自分のプロセスのcpusetと、各コアの現在のクロック（MHz）
@@ -155,6 +174,10 @@ void log_callback(ggml_log_level level, const char *text, void *) {
         emit_log(ANDROID_LOG_ERROR, text);
     } else if (level == GGML_LOG_LEVEL_WARN) {
         emit_log(ANDROID_LOG_WARN, text);
+    } else if (level == GGML_LOG_LEVEL_INFO &&
+               (strstr(text, "ggml_opencl: OpenCL device:") || strstr(text, "ggml_opencl: OpenCL driver:"))) {
+        // 端末による失敗の切り分けに必要な識別情報だけを、既存のログ経路へ渡す。
+        emit_log(ANDROID_LOG_INFO, text);
     }
 }
 
@@ -255,6 +278,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeInit(JNIEnv *env, jobject, jstring
     const std::string cpu_variant = to_std_string(env, jcpu_variant);
     std::call_once(g_backend_once, [&] {
         llama_log_set(log_callback, nullptr);
+        startup_stage("バックエンド初期化 開始");
         if (load_gpu) {
             // OpenCLの無い端末では libggml-opencl.so の読み込みだけが失敗し、CPUの部分は読み込まれる
             ggml_backend_load_all_from_path(lib_dir.c_str());
@@ -293,6 +317,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeInit(JNIEnv *env, jobject, jstring
         find_cpu_functions();
         g_has_gpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) != nullptr;
         LOGI("計算のバックエンド: デバイス%zu個、GPU%s", ggml_backend_dev_count(), g_has_gpu ? "あり" : "なし");
+        startup_stage("バックエンド初期化 完了");
     });
     return g_has_gpu ? JNI_TRUE : JNI_FALSE;
 }
@@ -302,6 +327,8 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
                                                    jint n_gpu_layers, jint poll, jboolean use_pool, jboolean use_mmap,
                                                    jboolean boost, jint n_seq_max) {
     const std::string path = to_std_string(env, jpath);
+    LOGI("起動診断: model=%s gpu_layers=%d n_ctx=%d", path.substr(path.find_last_of('/') + 1).c_str(), n_gpu_layers, n_ctx);
+    startup_stage("モデル読込 開始");
     llama_model_params mparams = llama_model_default_params();
     // false なら、モデルをファイルの写像（mmap）ではなくメモリへ読み込む
     if (!use_mmap) mparams.load_mode = LLAMA_LOAD_MODE_NONE;
@@ -316,6 +343,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
         return 0;
     }
 
+    startup_stage("モデル読込 完了 / コンテキスト作成 開始");
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx = n_ctx;
     cparams.n_batch = n_ctx;  // プロンプトを1回のdecodeで処理する
@@ -334,6 +362,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
         return 0;
     }
 
+    startup_stage("コンテキスト作成 完了");
     auto *engine = new Engine();
     engine->model = model;
     engine->ctx = ctx;
@@ -402,6 +431,9 @@ extern "C" JNIEXPORT jint JNICALL
 Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject, jlong handle, jint jslots,
                                                             jint max_tokens, jobject callback) {
     auto *engine = reinterpret_cast<Engine *>(handle);
+    const bool trace_startup = engine->first_run;
+    engine->first_run = false;
+    if (trace_startup) startup_stage("初回推論 開始");
     const llama_vocab *vocab = llama_model_get_vocab(engine->model);
 
     jclass cb_class = env->GetObjectClass(callback);
@@ -418,7 +450,9 @@ Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject
 
     ensure_hint(engine);
     llama_memory_t memory = llama_get_memory(engine->ctx);
+    if (trace_startup) startup_stage("KVメモリのクリア 開始");
     llama_memory_clear(memory, true);
+    if (trace_startup) startup_stage("KVメモリのクリア 完了 / 入力準備 開始");
     llama_sampler_reset(engine->sampler);
 
     struct Slot {
@@ -455,6 +489,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject
     int n_max_busy = 0;
     int rc = 0;
     bool stop_all = false;
+    int decode_count = 0;
     while (!stop_all) {
         batch.n_tokens = 0;
 
@@ -464,6 +499,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject
             if (q.job < 0 || q.i_logits < 0) continue;
             // 貪欲法（温度0）は状態を持たないので、サンプラーは全部の流れで1つを使う
             const llama_token token = llama_sampler_sample(engine->sampler, engine->ctx, q.i_logits);
+            if (trace_startup && total == 0) startup_stage("最初のトークン選択 完了");
             q.i_logits = -1;
             if (llama_vocab_is_eog(vocab, token) ||
                 std::find(engine->stop_tokens.begin(), engine->stop_tokens.end(), token) != engine->stop_tokens.end()) {
@@ -552,15 +588,20 @@ Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject
         for (const Slot &q : slots) busy += q.job >= 0;
         n_max_busy = std::max(n_max_busy, busy);
         const int64_t t0 = ggml_time_us();
+        if (trace_startup && decode_count < 2) startup_stage(decode_count == 0 ? "入力準備 完了 / 最初の入力計算 開始" : "最初の生成計算 開始");
         if (decode(engine, batch) != 0) {
+            if (trace_startup) startup_stage("初回推論 計算エラー");
             rc = ERR_DECODE;
             break;
         }
+        if (trace_startup && decode_count < 2) startup_stage(decode_count == 0 ? "最初の入力計算 完了" : "最初の生成計算 完了");
+        ++decode_count;
         t_decode += ggml_time_us() - t0;
     }
     llama_batch_free(batch);
     if (env->ExceptionCheck()) return ERR_CALLBACK;
     if (rc != 0) return rc;
+    if (trace_startup) startup_stage("初回推論 完了");
     const int64_t t_end = ggml_time_us();
     LOGI("翻訳（同時%d本）: %d件、プロンプト %d トークン、生成 %d トークン、%.0fms（合計 %.1f トークン/秒、最大%d本が同時） ヒント=%s threads=%d %s",
          n_slots, n_jobs, n_prompt, total, (t_end - t_start) / 1000.0,

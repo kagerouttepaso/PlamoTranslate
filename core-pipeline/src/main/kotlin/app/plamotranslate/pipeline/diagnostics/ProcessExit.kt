@@ -101,6 +101,9 @@ data class ProcessExit(
     val mark: ProcessMark? = null,
     val rawReason: Int = 0,
     val description: String = "",
+    /** OSの最終サンプル。終了直前の厳密値ではなく、0は未採取。単位はkB。 */
+    val pssKb: Long = 0,
+    val rssKb: Long = 0,
 ) {
     /** 同じプロセスの記録を見分ける鍵（[keyOf]）。 */
     val processKey: String get() = keyOf(mark, pid)
