@@ -242,6 +242,81 @@ class SpeechSegmenterTest {
         assertTrue(s.flush().isEmpty())
     }
 
+    /**
+     * 書き起こしの重いモデル（Qwen3-ASR）の代わり。言語だけの識別（[SpeechRecognizer.identify]）ができ、
+     * 書き起こした音声の長さと識別の回数を覚える。
+     */
+    private inner class HeavyRecognizer : SpeechRecognizer {
+        private val inner = FakeRecognizer(::soundOf)
+        val transcribed = mutableListOf<Int>()
+        var identified = 0
+        override fun recognize(samples: FloatArray): Recognition {
+            transcribed += samples.size
+            return inner.recognize(samples)
+        }
+
+        override val identifies get() = true
+        override fun identify(samples: FloatArray, languages: SpeechLanguages): String? {
+            identified++
+            return inner.recognize(samples).lang?.takeIf { languages.groups == null || it in languages.groups }
+        }
+
+        override fun close() = Unit
+    }
+
+    private fun phraseSegmenter(asr: SpeechRecognizer) = SpeechSegmenter(
+        FakeVad((profile.phraseSilenceSeconds * 10).toInt()),
+        asr,
+        profile,
+        byPhrase = true,
+    ).apply { languages = SpeechLanguages(setOf("ja", "ko")) }
+
+    @Test
+    fun 重いモデルは文ごとに書き起こし確定でカード全体を書き起こし直さない() {
+        val asr = HeavyRecognizer()
+        val events = phraseSegmenter(asr).feed(Sound.JA to 1.5, Sound.SILENCE to 1.0, Sound.JA to 1.5, Sound.SILENCE to 3.0)
+        val card = finals(events).single()
+        assertEquals("ja", card.lang)
+        assertTrue(card.text, card.text.length >= 25 && card.text.all { it == 'あ' })
+        // カードは4秒あるが、1回に書き起こすのは1つの文（前に足した音声と区切りの無音を入れても3秒未満）だけ
+        assertTrue("${asr.transcribed}", asr.transcribed.max() < SAMPLE_RATE * 3)
+        // 言語の見張りは識別だけで行う
+        assertTrue(asr.identified > 0)
+    }
+
+    @Test
+    fun 重いモデルは文字より先にカードの言語を知らせる() {
+        val partials = phraseSegmenter(HeavyRecognizer()).feed(Sound.KO to 2.5, Sound.SILENCE to 3.0)
+            .filterIsInstance<SpeechEvent.Partial>()
+        assertEquals(SpeechEvent.Partial("", "ko"), partials.first())
+        assertTrue(partials.drop(1).any { it.text.isNotEmpty() })
+    }
+
+    @Test
+    fun 重いモデルでも話し手の交代で区切る() {
+        val gap = finals(phraseSegmenter(HeavyRecognizer()).feed(Sound.JA to 1.5, Sound.SILENCE to 1.0, Sound.KO to 1.5, Sound.SILENCE to 3.0))
+        assertEquals(listOf("ja", "ko"), gap.map { it.lang })
+        assertTrue(gap[1].text.all { it == '가' })
+        val live = finals(phraseSegmenter(HeavyRecognizer()).feed(Sound.JA to 3.0, Sound.KO to 4.0, Sound.SILENCE to 3.0))
+        assertEquals(listOf("ja", "ko"), live.map { it.lang })
+    }
+
+    @Test
+    fun 重いモデルで文の途中を手で区切ると残りだけ書き起こす() {
+        val s = phraseSegmenter(HeavyRecognizer())
+        s.feed(Sound.JA to 1.5, Sound.SILENCE to 1.0, Sound.JA to 1.0)
+        val card = finals(s.cut()).single()
+        assertTrue(card.text, card.text.length >= 22 && card.text.all { it == 'あ' })
+    }
+
+    @Test
+    fun 書き起こしは文字の種類でつなぎ方を変える() {
+        assertEquals("Hello world", TranscriptJoin.join("Hello", "world"))
+        assertEquals("こんにちは。元気です", TranscriptJoin.join("こんにちは。", "元気です"))
+        assertEquals("Привет мир", TranscriptJoin.join("Привет", "мир"))
+        assertEquals("ok", TranscriptJoin.stitch(listOf(Recognition("", "ja"), Recognition("ok", "en"))).text)
+    }
+
     companion object {
         private const val FRAME = SAMPLE_RATE / 10
     }

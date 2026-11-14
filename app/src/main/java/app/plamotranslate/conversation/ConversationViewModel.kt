@@ -9,7 +9,8 @@ import androidx.lifecycle.viewModelScope
 import app.plamotranslate.EngineHolder
 import app.plamotranslate.ModelState
 import app.plamotranslate.ReadAloud
-import app.plamotranslate.asr.SenseVoiceAsr
+import app.plamotranslate.RecognitionPreferences
+import app.plamotranslate.asr.SpeechEngines
 import app.plamotranslate.asr.WavFile
 import app.plamotranslate.audio.MicRecorder
 import app.plamotranslate.llm.Language
@@ -23,6 +24,7 @@ import app.plamotranslate.pipeline.conversation.LiveSpeech
 import app.plamotranslate.pipeline.conversation.PartnerMode
 import app.plamotranslate.pipeline.conversation.Turn
 import app.plamotranslate.pipeline.speech.SegmentationProfile
+import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechEvent
 import app.plamotranslate.pipeline.translation.SegmentUpdate
@@ -34,10 +36,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -70,9 +75,13 @@ data class ConversationUiState(
     val turns: List<Turn> = emptyList(),
     /** マイクの音量（0〜1）。聞いている間だけ動く。 */
     val level: Float = 0f,
+    /** 音声認識が録音からどれだけ遅れているか（秒。認識を待っている音声の長さ）。 */
+    val lagSeconds: Float = 0f,
     /** 話している最中なら、ここまでの聞き取り（まだ文字になっていなければ空）。 */
     val live: LiveSpeech? = null,
     val error: String? = null,
+    /** 会話で選べる言語（設定で選んだ音声認識モデルの言語）。 */
+    val languages: List<Language> = SpeechModel.DEFAULT.languages,
 )
 
 /**
@@ -89,7 +98,10 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     /** 表示モードと自分の言語は次に開いたときも同じにする。init より前に置く（init で読む）。 */
     private val preferences = ConversationPreferences(app)
 
-    private val session = ConversationSession(self = preferences.self ?: Language.JA)
+    /** 音声認識モデル（設定の画面で前もって選ぶ）。会話で選べる言語はこのモデルの言語。画面を開いたときに読む。 */
+    private val speechModel = RecognitionPreferences(app).model
+
+    private val session = ConversationSession(self = preferences.self(speechModel.languages) ?: Language.JA)
 
     private var asr: SpeechEngine? = null
     private var listenJob: Job? = null
@@ -99,6 +111,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
 
     init {
         preferences.viewMode?.let { mode -> _state.update { it.copy(viewMode = mode) } }
+        _state.update { it.copy(languages = speechModel.languages) }
         sync()
         EngineHolder.ensureLoaded(app)
         loadAsr()
@@ -106,14 +119,16 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
 
     fun loadAsr() {
         val dir = ModelCatalog.asrDir(app)
-        val missing = SenseVoiceAsr.missingFiles(dir)
+        val missing = SpeechEngines.missingFiles(speechModel, dir)
         if (missing.isNotEmpty()) {
             _state.update { it.copy(asr = AsrState.Missing(missing)) }
             return
         }
         _state.update { it.copy(asr = AsrState.Loading) }
         viewModelScope.launch {
-            val result = withContext(asrDispatcher) { runCatching { SenseVoiceAsr.load(dir, PROFILE) } }
+            val begin = System.nanoTime()
+            val result = withContext(asrDispatcher) { runCatching { SpeechEngines.load(speechModel, dir, PROFILE) } }
+            log("音声認識を読み込みました: $speechModel ${(System.nanoTime() - begin) / 1_000_000}ms")
             result.onSuccess { asr = it.also { engine -> engine.languages = session.speechLanguages } }
             _state.update {
                 it.copy(asr = result.fold({ AsrState.Ready }, { e -> AsrState.Failed(e.message ?: e.toString()) }))
@@ -125,7 +140,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
 
     /** 自分の言語を変える。相手が同じ言語なら、相手は自動に戻る。 */
     fun setSelf(self: Language) {
-        preferences.self = self
+        preferences.saveSelf(self)
         handle(Event.SelfChanged(self))
     }
 
@@ -134,13 +149,36 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         _state.update { it.copy(viewMode = mode) }
     }
 
+    /**
+     * マイクで聞く。録音と音声認識を別のスレッドに分ける：録音の側で音量を測って画面に出し、音声は上限の無い列で
+     * 音声認識のスレッドへ渡す。書き起こしが重いモデル（1回に1〜2秒）でも、音量のバーは止まらず、音声も落とさない
+     * （録音の流れの中の詰まりで、話し中にバーが止まった。2026-11-15）。認識の遅れ（列にたまった音声）は画面に出す。
+     */
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start() = listen { engine ->
         val recording = recorder()
+        val queue = Channel<FloatArray>(Channel.UNLIMITED)
+        val queued = AtomicInteger()
         try {
-            MicRecorder.stream().collect { chunk ->
-                val fed = feed(engine, chunk)
-                recording?.write(fed)
+            coroutineScope {
+                launch(Dispatchers.IO) {
+                    try {
+                        MicRecorder.stream().collect { raw ->
+                            val chunk = muteReadAloud(raw)
+                            meter(chunk)
+                            queued.addAndGet(chunk.size)
+                            queue.send(chunk)
+                        }
+                    } finally {
+                        queue.close()
+                    }
+                }
+                for (chunk in queue) {
+                    post(engine.accept(chunk))
+                    val behind = queued.addAndGet(-chunk.size).toFloat() / SpeechEngine.SAMPLE_RATE
+                    if (behind != _state.value.lagSeconds) _state.update { it.copy(lagSeconds = behind) }
+                    recording?.write(chunk)
+                }
             }
         } finally {
             recording?.close()
@@ -171,21 +209,23 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         val padded = samples + FloatArray(silence)
         for (from in padded.indices step chunk) {
             val begin = System.nanoTime()
-            feed(engine, padded.copyOfRange(from, minOf(from + chunk, padded.size)))
+            val part = muteReadAloud(padded.copyOfRange(from, minOf(from + chunk, padded.size)))
+            meter(part)
+            post(engine.accept(part))
             val spentMs = (System.nanoTime() - begin) / 1_000_000
             Thread.sleep((100 - spentMs).coerceAtLeast(0))
         }
         log("音声ファイルの認識が終わりました: ${File(path).name}")
     }
 
-    /** 音声を音声認識に渡し、渡した音声を返す（読み上げの間は無音に置き換えたもの）。音声認識のスレッドで呼ぶ。 */
-    private fun feed(engine: SpeechEngine, raw: FloatArray): FloatArray {
-        // 訳文を読み上げている間とその直後は、マイクの音を無音に置き換える。読み上げの声を発話として拾わないため（2026-11-08）
-        val chunk = if (ReadAloud.isAudible()) FloatArray(raw.size) else raw
-        _state.update { it.copy(level = level(chunk)) }
-        post(engine.accept(chunk))
-        return chunk
-    }
+    /**
+     * 訳文を読み上げている間とその直後は、マイクの音を無音に置き換える。読み上げの声を発話として拾わないため（2026-11-08）。
+     * 録音した時点で判定する（認識が遅れていても、読み上げと重なった音声だけを消す）。
+     */
+    private fun muteReadAloud(raw: FloatArray): FloatArray = if (ReadAloud.isAudible()) FloatArray(raw.size) else raw
+
+    /** 音量を画面に出す。音声認識のスレッドでは呼ばない（書き起こしの間に止まるため）。 */
+    private fun meter(chunk: FloatArray) = _state.update { it.copy(level = level(chunk)) }
 
     fun stop() {
         listenJob?.cancel()
@@ -223,7 +263,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message ?: e.toString()) }
             } finally {
-                _state.update { it.copy(listening = false, level = 0f) }
+                _state.update { it.copy(listening = false, level = 0f, lagSeconds = 0f) }
                 handle(Event.Stopped)
             }
         }

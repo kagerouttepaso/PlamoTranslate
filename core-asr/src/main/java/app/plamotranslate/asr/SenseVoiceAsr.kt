@@ -1,12 +1,9 @@
 package app.plamotranslate.asr
 
-import app.plamotranslate.log.Logs
 import app.plamotranslate.pipeline.speech.Recognition
-import app.plamotranslate.pipeline.speech.SegmentationProfile
 import app.plamotranslate.pipeline.speech.SpeechBreak
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechRecognizer
-import app.plamotranslate.pipeline.speech.SpeechSegmenter
 import app.plamotranslate.pipeline.speech.VoiceActivity
 import app.plamotranslate.pipeline.speech.VoiceSignal
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
@@ -19,32 +16,10 @@ import com.k2fsa.sherpa.onnx.VadModelConfig
 import java.io.File
 
 /**
- * 音声認識の組み立て（docs/設計/会話翻訳.md「音声認識」）。中核の区切り（[SpeechSegmenter]）に、
- * sherpa-onnx の Silero VAD（[SileroVoiceActivity]）と SenseVoice Small（[SenseVoiceRecognizer]）を差す。
- *
- * [modelDir] には次を置く（docs/手順/開発環境.md「モデルの取得と置き場」）。
- * - `sense-voice/model.int8.onnx`、`sense-voice/tokens.txt`
- * - `silero_vad.onnx`
+ * SenseVoice Small のファイル（docs/手順/開発環境.md「モデルの取得と置き場」）。組み立ては [SpeechEngines]。
  */
 object SenseVoiceAsr {
-    private val FILES = listOf("sense-voice/model.int8.onnx", "sense-voice/tokens.txt", "silero_vad.onnx")
-
-    /** モデルが揃っていなければ、足りないファイルのパスを返す。 */
-    fun missingFiles(modelDir: File): List<String> =
-        FILES.map { File(modelDir, it) }.filterNot { it.canRead() }.map { it.path }
-
-    /** モデルを読み込む。数秒かかるので画面を開いたときに1回だけ呼ぶ。[profile] は用途ごとの区切り方。 */
-    fun load(modelDir: File, profile: SegmentationProfile = SegmentationProfile.CONVERSATION): SpeechEngine {
-        val missing = missingFiles(modelDir)
-        require(missing.isEmpty()) { "音声認識のモデルがありません: ${missing.joinToString()}" }
-        return SpeechSegmenter(
-            SileroVoiceActivity.load(File(modelDir, "silero_vad.onnx"), profile.phraseSilenceSeconds),
-            SenseVoiceRecognizer.load(modelDir),
-            profile,
-            // 区切りの経過は話した言葉を含むので、デバッグ版だけに出る（Logs.text）
-            trace = { message -> Logs.text { "会話の認識: ${message()}" } },
-        )
-    }
+    val MODEL_FILES = listOf("sense-voice/model.int8.onnx", "sense-voice/tokens.txt")
 }
 
 /**

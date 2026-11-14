@@ -15,6 +15,12 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  * - 利用者が区切った（[cut]）
  *
  * 話している間は、ためた音声全体を0.5秒ごとに認識し直して途中結果を出す（疑似ストリーミング）。
+ *
+ * 書き起こしが重いモデル（[byPhrase]、Qwen3-ASR）は、カード全体を書き起こし直すと音声の処理が数秒遅れる。そこで、
+ * 文が終わるたびにその文を1回書き起こして覚え、途中結果は「覚えた文＋まだ終わっていない文」、確定は「覚えた文＋区切る位置までの残り」
+ * にする。言語の見張りは、書き起こさずに言語の識別だけで行う（[SpeechRecognizer.identifies]）。カードの言語は話し始めの1秒で決め、
+ * 文字より先に知らせる（空の途中結果。画面はカードの向きを先に決められる）。
+ *
  * 判断は部品に分ける：言語が話し手の交代の根拠になるかは [LanguageEvidence]、区切る位置は [CutPoint]、
  * 認識した文字の聞き違いの判定は [TranscriptCleanup]。
  *
@@ -26,6 +32,8 @@ class SpeechSegmenter(
     private val vad: VoiceActivity,
     private val recognizer: SpeechRecognizer,
     private val profile: SegmentationProfile = SegmentationProfile.CONVERSATION,
+    /** 文ごとに書き起こしてつなぐ（書き起こしの重いモデル。[SpeechModel.byPhrase]）。 */
+    private val byPhrase: Boolean = false,
     private val trace: (() -> String) -> Unit = {},
     private val clock: () -> Long = System::nanoTime,
 ) : SpeechEngine {
@@ -89,6 +97,20 @@ class SpeechSegmenter(
     /** 直前に認識し直した結果（後処理の後。出さなかったものも）。カードの最初の文の言語として使い、認識し直しを省く。 */
     private var lastPartial: Recognition? = null
 
+    /** [lastPartial] が、ためた音声の何サンプル目から書き起こしたものか（[byPhrase] のときは、まだ終わっていない文の始まり）。 */
+    private var lastPartialStart = 0
+
+    /** 書き起こした文（[byPhrase] のときだけ）。[end] は buffer の中の文の終わり。前の文の終わりから [end] までを書き起こした。 */
+    private class Phrase(val end: Int, val recognition: Recognition)
+
+    private val phrases = mutableListOf<Phrase>()
+
+    /** 書き起こした文の終わり。ここから後ろが、まだ書き起こしていない音声。 */
+    private val stitchedEnd: Int get() = phrases.lastOrNull()?.end ?: 0
+
+    /** カードの言語を決める、カードの最初の音声の長さ。重いモデルは文字が遅いので、言語（カードの向き）を早く出す。 */
+    private val cardLangSamples = if (byPhrase) SAMPLE_RATE else CARD_LANG_SAMPLES
+
     private var closed = false
 
     override fun accept(samples: FloatArray): List<SpeechEvent> {
@@ -120,7 +142,12 @@ class SpeechSegmenter(
             val end = (buffer.size - phraseTailDrop).coerceAtLeast(phraseStart)
             // 中身のない文（雑音の聞き違い）は言語が無い。その場合は前の文の言語を引き継ぎ、
             // 雑音を挟んだ後の本当の話し手の交代も見分けられるようにする
-            val phrase = if (phraseStart == 0 && lastPartial?.lang != null) lastPartial else recognizeRange(phraseStart, end, "文の終わり")
+            val phrase = when {
+                // 文ごとに書き起こすモデルは、終わった文をここで1回だけ書き起こして覚え、すぐ途中結果に出す
+                byPhrase -> rememberPhrase(end)?.also { stitchedPartial()?.let(out::add) }
+                phraseStart == 0 && lastPartial?.lang != null -> lastPartial
+                else -> recognizeRange(phraseStart, end, "文の終わり")
+            }
             lastPhraseLang = evidence(phrase) ?: lastPhraseLang
             lastPhraseEnd = end
             inGap = true
@@ -137,7 +164,8 @@ class SpeechSegmenter(
                 if (gapSamples >= cardEndGapSamples) {
                     // 話し終わり：ためた音声の全体を確定させる。後ろは無音なので文の終わりで切る理由が無く、
                     // VADが話していないとみなした小さい声の語尾も入る（最後の途中結果と同じ音声になる）
-                    finalOf(buffer.snapshot(), "話し終わり")?.let(out::add)
+                    // 文ごとに書き起こすモデルは、書き起こした文をつなぐだけにする（後ろは無音。重い書き起こしで確定を待たせない）
+                    finalOf(buffer.snapshot(), "話し終わり", transcribeRest = !byPhrase)?.let(out::add)
                     buffer.clear()
                     out += SpeechEvent.Speaking(false)
                     return out
@@ -147,7 +175,7 @@ class SpeechSegmenter(
 
         if (!switchChecked && buffer.size - phraseStart >= SWITCH_CHECK_SAMPLES) {
             switchChecked = true
-            val lang = evidence(recognizeRange(phraseStart, buffer.size, "次の文の頭"))
+            val lang = languageOf(phraseStart, buffer.size, "次の文の頭")
             if (lang != null && lastPhraseLang != null && lang != lastPhraseLang) {
                 // 話し手が代わった：前の文までを確定させ、今の文から新しいカードにする
                 cut(lastPhraseEnd, "言語の交代（間あり：$lastPhraseLang→$lang）")?.let(out::add)
@@ -164,43 +192,64 @@ class SpeechSegmenter(
                 breakFrom = buffer.size - SPLIT_BREAK_SEARCH_SAMPLES,
                 quietFrom = buffer.size - SPLIT_SEARCH_SAMPLES,
                 to = buffer.size - MIN_TAIL_SAMPLES,
-                breaks = lastPartial?.breaks.orEmpty(),
+                breaks = cutBreaks(),
             )
             cut(at, "長い発話")?.let(out::add)
         } else {
             sinceLastPartial += samples.size
             if (sinceLastPartial >= partialInterval && buffer.size - speechStart >= MIN_PARTIAL_SAMPLES) {
                 sinceLastPartial = 0
-                watchLanguage()?.let(out::add)
-                partial()?.let(out::add)
+                val tickStart = clock()
+                if (watchLanguage(out)) {
+                    // カードの言語を待っているか、知らせた。言語が重い書き起こしより先に画面へ届くよう、途中結果は次の音声で出す
+                    sinceLastPartial = partialInterval
+                } else {
+                    partial(tickStart)?.let(out::add)
+                }
             }
         }
         return out
     }
 
     /**
+     * 長い発話を区切る位置の候補（文の切れ目）。直前の途中結果の切れ目を、ためた音声の中の位置に直す。
+     * 文ごとに書き起こすモデルは、書き起こした文の終わり（VAD の文の区切り）も候補にする。
+     */
+    private fun cutBreaks(): List<SpeechBreak> {
+        val partialBreaks = lastPartial?.breaks.orEmpty().map { it.copy(at = it.at + lastPartialStart) }
+        return if (byPhrase) phrases.map { SpeechBreak(it.end, sentence = true) } + partialBreaks else partialBreaks
+    }
+
+    /**
      * 間を空けずに話し手が代わったときのため、話している最中も言語を見張る。
      * 直近1.5秒の言語が [SegmentationProfile.liveSwitchChecks] 回続けてカードの言語と違えば、話し手が代わったとみなし、
      * 言語の継ぎ目で区切る。1回だけで区切らないのは、外来語や固有名詞で言語の判定が一瞬揺れるため。
+     * 区切ったら確定を [out] に足す。文ごとに書き起こすモデルで、まだ文字の出ていないカードの言語を決めたら、
+     * 空の途中結果で言語を知らせて true を返す。言語を決められる長さがたまるまでも true を返し、重い書き起こしを待たせる
+     * （先に書き起こすと、言語の知らせがその分遅れる）。
      */
-    private fun watchLanguage(): SpeechEvent.Final? {
+    private fun watchLanguage(out: MutableList<SpeechEvent>): Boolean {
         if (cardLang == null) {
-            if (buffer.size >= speechStart + CARD_LANG_SAMPLES) {
-                cardLang = evidence(recognizeRange(speechStart, speechStart + CARD_LANG_SAMPLES, "カードの頭"))
+            if (buffer.size < speechStart + cardLangSamples) return byPhrase && lastPartialText.isEmpty()
+            val lang = languageOf(speechStart, speechStart + cardLangSamples, "カードの頭")
+            cardLang = lang
+            if (byPhrase && lang != null && lastPartialText.isEmpty()) {
+                out += SpeechEvent.Partial("", lang)
+                return true
             }
-            return null
+            return false
         }
-        if (buffer.size < speechStart + CARD_LANG_SAMPLES + LANG_WINDOW_SAMPLES) return null
-        val recent = evidence(recognizeRange(buffer.size - LANG_WINDOW_SAMPLES, buffer.size, "直近（カード $cardLang）"))
+        if (buffer.size < speechStart + cardLangSamples + LANG_WINDOW_SAMPLES) return false
+        val recent = languageOf(buffer.size - LANG_WINDOW_SAMPLES, buffer.size, "直近（カード $cardLang）")
         if (recent == null || recent == cardLang) {
             mismatches = 0
-            return null
+            return false
         }
-        if (++mismatches < profile.liveSwitchChecks) return null
+        if (++mismatches < profile.liveSwitchChecks) return false
         val at = switchPoint(buffer.size - SWITCH_SEARCH_SAMPLES, buffer.size - SWITCH_SEARCH_END_SAMPLES, recent)
-        val final = cut(at, "言語の交代（話し中：$cardLang→$recent）")
+        cut(at, "言語の交代（話し中：$cardLang→$recent）")?.let(out::add)
         cardLang = recent
-        return final
+        return false
     }
 
     /**
@@ -214,8 +263,12 @@ class SpeechSegmenter(
         val start = from.coerceAtLeast(0)
         var s = start
         while (s <= to) {
-            val probe = recognizeRange(s, s + LANG_PROBE_SAMPLES, "継ぎ目探し")
-            if (LanguageEvidence.group(probe?.lang, languages.separateChinese) == newLang) {
+            val probe = if (recognizer.identifies) {
+                identifyRange(s, s + LANG_PROBE_SAMPLES, "継ぎ目探し")
+            } else {
+                LanguageEvidence.group(recognizeRange(s, s + LANG_PROBE_SAMPLES, "継ぎ目探し")?.lang, languages.separateChinese)
+            }
+            if (probe == newLang) {
                 return CutPoint.languageSeam(buffer, s - CutPoint.FRAME_SAMPLES * 2, s + CutPoint.FRAME_SAMPLES * 6)
             }
             s += LANG_PROBE_STEP_SAMPLES
@@ -228,6 +281,8 @@ class SpeechSegmenter(
         sinceLastPartial = 0
         lastPartialText = ""
         lastPartial = null
+        lastPartialStart = 0
+        phrases.clear()
         phraseStart = 0
         lastPhraseEnd = -1
         lastPhraseLang = null
@@ -251,7 +306,49 @@ class SpeechSegmenter(
         sinceLastPartial = 0
         lastPartialText = ""
         lastPartial = null
+        lastPartialStart = 0
+        // 区切った後ろの文は、次のカードで書き起こし直す（区切る位置が文の途中のこともあるため）
+        phrases.clear()
         return final
+    }
+
+    /**
+     * ためた音声の [from]〜[to] の言語（[LanguageEvidence] の組）。言語だけを判定できる認識器は書き起こさずに判定し、
+     * できない認識器は書き起こした結果を根拠にする。短すぎて分からなければ null。[purpose] はログに出す目的。
+     */
+    private fun languageOf(from: Int, to: Int, purpose: String): String? =
+        if (recognizer.identifies) identifyRange(from, to, purpose) else evidence(recognizeRange(from, to, purpose))
+
+    /** ためた音声の [from]〜[to] の言語を、書き起こさずに判定する（[SpeechRecognizer.identifies] の認識器だけ）。 */
+    private fun identifyRange(from: Int, to: Int, purpose: String): String? {
+        if (to - from < MIN_PARTIAL_SAMPLES) return null
+        val lang = recognizer.identify(buffer.slice(from, to), languages)
+        trace { "言語の識別（$purpose）${at(from)}〜${at(to)}: $lang" }
+        return lang
+    }
+
+    /** 書き起こしていない音声のうち、[end] までを1つの文として書き起こして覚える（[byPhrase]）。短すぎれば次の文に回す。 */
+    private fun rememberPhrase(end: Int): Recognition? {
+        val from = stitchedEnd
+        if (end - from < MIN_PARTIAL_SAMPLES) return null
+        val r = recognize(buffer.slice(from, end))
+        trace { "文の書き起こし ${at(from)}〜${at(end)}: [${r.lang}] ${r.text}" }
+        phrases += Phrase(end, r)
+        return r
+    }
+
+    /** 書き起こした文をつないだ途中結果（文が終わった直後に出す）。変わっていなければ null。 */
+    private fun stitchedPartial(): SpeechEvent.Partial? {
+        lastPartial = null
+        lastPartialStart = stitchedEnd
+        return partialEvent(TranscriptJoin.stitch(phrases.map { it.recognition }))
+    }
+
+    /** 途中結果を知らせる。同じ文字を続けて出さない（話し終わってから区切るまでの無音の間は同じ文字が続く）。 */
+    private fun partialEvent(r: Recognition): SpeechEvent.Partial? {
+        if (r.text.isEmpty() || r.text == lastPartialText) return null
+        lastPartialText = r.text
+        return SpeechEvent.Partial(r.text, r.lang)
     }
 
     /** ためた音声の [from]〜[to] を認識する（言語の判定に使う）。短すぎて分からなければ null。[purpose] はログに出す目的。 */
@@ -292,8 +389,12 @@ class SpeechSegmenter(
         speechStart = 0
     }
 
-    /** ためた音声の先頭 [samples] を確定した発話として認識する。[reason] はログに出す区切りの理由。 */
-    private fun finalOf(samples: FloatArray, reason: String): SpeechEvent.Final? {
+    /**
+     * ためた音声の先頭 [samples] を確定した発話として認識する。[reason] はログに出す区切りの理由。
+     * 文ごとに書き起こすモデルは、書き起こした文をつなぎ、残り（区切る位置が文の途中なら、その文の頭から）だけを書き起こす。
+     * [transcribeRest] が false なら残りは書き起こさない（後ろが無音と分かっているとき）。
+     */
+    private fun finalOf(samples: FloatArray, reason: String, transcribeRest: Boolean = true): SpeechEvent.Final? {
         val startedAt = bufferStart
         bufferStart += samples.size
         val range = "%.2f〜%.2f秒".format(startedAt.coerceAtLeast(0) / SAMPLE_RATE.toDouble(), bufferStart / SAMPLE_RATE.toDouble())
@@ -302,7 +403,14 @@ class SpeechSegmenter(
             return null
         }
         val start = clock()
-        val r = recognize(samples)
+        val r = if (byPhrase) {
+            val done = phrases.filter { it.end <= samples.size }
+            val from = done.lastOrNull()?.end ?: 0
+            val rest = if (transcribeRest && samples.size - from >= MIN_PARTIAL_SAMPLES) recognize(samples.copyOfRange(from, samples.size)) else null
+            TranscriptJoin.stitch(done.map { it.recognition } + listOfNotNull(rest))
+        } else {
+            recognize(samples)
+        }
         // 確定の文と、直前の途中の文を並べる（途中は合っていたのに確定で変わった例を見分けるため）
         trace { "区切り（$reason）$range: 確定 [${r.lang}] ${r.text} ／ 直前の途中 [${lastPartial?.lang}] $lastPartialText" }
         if (r.text.isEmpty()) return null
@@ -317,20 +425,35 @@ class SpeechSegmenter(
         )
     }
 
-    /** 話し始めからここまでの音声を認識し直す。 */
-    private fun partial(): SpeechEvent.Partial? {
+    /**
+     * 話し始めからここまでの途中結果。ためた音声全体を認識し直す。文ごとに書き起こすモデルは、まだ終わっていない文だけを
+     * 書き起こし、書き起こした文につなぐ。
+     *
+     * 次の途中結果までの間隔は、手間の何倍かにする（認識で音声の処理が遅れないように）。今までのモデルは認識の3倍。
+     * 文ごとに書き起こすモデルは、言語の見張りを含めた1回の手間（[tickStart] から）の2倍にし、文字を早く出す
+     * （音声は録音の側でためるので、少し遅れても落ちない）。
+     */
+    private fun partial(tickStart: Long): SpeechEvent.Partial? {
         val start = clock()
-        val r = recognize(buffer.snapshot())
-        val costSamples = ((clock() - start) / 1_000_000 * SAMPLE_RATE / 1000).toInt()
-        partialInterval = maxOf(MIN_PARTIAL_INTERVAL, costSamples * 3)
-        lastPartial = r
-        // 話し終わってから区切るまでの無音の間は同じ文字が続くので、変わったときだけ知らせる
-        if (r.text.isEmpty() || r.text == lastPartialText) return null
-        lastPartialText = r.text
-        return SpeechEvent.Partial(r.text, r.lang)
+        val r = if (byPhrase) {
+            val from = stitchedEnd
+            val rest = if (buffer.size - from >= MIN_PARTIAL_SAMPLES) recognize(buffer.slice(from, buffer.size)) else null
+            lastPartial = rest
+            lastPartialStart = from
+            TranscriptJoin.stitch(phrases.map { it.recognition } + listOfNotNull(rest))
+        } else {
+            recognize(buffer.snapshot()).also {
+                lastPartial = it
+                lastPartialStart = 0
+            }
+        }
+        val costMs = (clock() - if (byPhrase) tickStart else start) / 1_000_000
+        val costSamples = (costMs * SAMPLE_RATE / 1000).toInt()
+        partialInterval = maxOf(MIN_PARTIAL_INTERVAL, costSamples * if (byPhrase) 2 else 3)
+        return partialEvent(r)
     }
 
-    private fun recognize(samples: FloatArray): Recognition = TranscriptCleanup.clean(recognizer.recognize(samples))
+    private fun recognize(samples: FloatArray): Recognition = TranscriptCleanup.clean(recognizer.recognize(samples, languages))
 
     /**
      * 解放した後に届いた呼び出しは何もしない（画面を閉じると、聞き取りを止めた後始末の [flush] が、

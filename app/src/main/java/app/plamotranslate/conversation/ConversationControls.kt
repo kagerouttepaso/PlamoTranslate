@@ -1,6 +1,5 @@
 package app.plamotranslate.conversation
 
-import app.plamotranslate.pipeline.conversation.CONVERSATION_LANGUAGES
 import app.plamotranslate.pipeline.conversation.PartnerMode
 import app.plamotranslate.pipeline.conversation.conversationLabel
 import androidx.compose.animation.core.animateFloatAsState
@@ -77,8 +76,8 @@ internal fun Controls(state: ConversationUiState, model: ModelState, actions: Co
                 } else {
                     Button(onClick = actions.start, enabled = ready, modifier = Modifier.fillMaxWidth()) { Text("開始") }
                 }
-                SelfMenu(state.self, actions.self)
-                PartnerMenu(state.mode, state.self, actions.partnerMode)
+                SelfMenu(state.self, state.languages, actions.self)
+                PartnerMenu(state.mode, state.self, state.languages, actions.partnerMode)
             }
             CutButton(state, actions.cut)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.End) {
@@ -114,17 +113,17 @@ internal fun Controls(state: ConversationUiState, model: ModelState, actions: Co
 
 /**
  * 自分の言語の選択（2026-11-08、作者の要望で日本語以外も選べるようにした）。
- * 選べるのは音声認識が聞き分けられる言語だけ（[CONVERSATION_LANGUAGES]）。
+ * 選べるのは、設定で選んだ音声認識モデルが聞ける言語だけ（[app.plamotranslate.pipeline.speech.SpeechModel.languages]）。
  */
 @Composable
-private fun SelfMenu(self: Language, onSelect: (Language) -> Unit) {
+private fun SelfMenu(self: Language, languages: List<Language>, onSelect: (Language) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxWidth()) {
         OutlinedButton(onClick = { open = true }, contentPadding = MenuButtonPadding, modifier = Modifier.fillMaxWidth()) {
             Text("自分：${PartnerMode(self).short()} ▾", maxLines = 1)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            CONVERSATION_LANGUAGES.forEach { lang ->
+            languages.forEach { lang ->
                 DropdownMenuItem(
                     text = { Text(if (lang == self) "✓ ${lang.conversationLabel}" else lang.conversationLabel) },
                     onClick = { open = false; onSelect(lang) },
@@ -139,14 +138,14 @@ private fun SelfMenu(self: Language, onSelect: (Language) -> Unit) {
  * 自分と同じ言語は出さない（[PartnerMode.choices]）。
  */
 @Composable
-private fun PartnerMenu(mode: PartnerMode, self: Language, onSelect: (PartnerMode) -> Unit) {
+private fun PartnerMenu(mode: PartnerMode, self: Language, languages: List<Language>, onSelect: (PartnerMode) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxWidth()) {
         OutlinedButton(onClick = { open = true }, contentPadding = MenuButtonPadding, modifier = Modifier.fillMaxWidth()) {
             Text("相手：${mode.short()} ▾", maxLines = 1)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            PartnerMode.choices(self).forEach { m ->
+            PartnerMode.choices(self, languages).forEach { m ->
                 val label = m.label(self)
                 DropdownMenuItem(
                     text = { Text(if (m == mode) "✓ $label" else label) },
@@ -219,12 +218,18 @@ private fun CutButton(state: ConversationUiState, onCut: () -> Unit) {
 
 /**
  * 区切るボタンの、その言語での名前。相手も押すので、自分と相手の両方の言語で出す（作者の要望）。
- * 「今話し終えたので次へ」が伝わる短い語にする。会話で選べる言語（[app.plamotranslate.pipeline.conversation.CONVERSATION_LANGUAGES]）だけを持つ。
+ * 「今話し終えたので次へ」が伝わる短い語にする。表に無い言語は英語の「Done」で代える。
  */
 private fun cutLabel(language: Language): String = when (language) {
+    Language.JA -> "区切る"
     Language.KO -> "여기까지"
     Language.EN -> "Done"
     Language.ZH -> "说完了"
     Language.ZH_HANT -> "說完了"
-    else -> "区切る"
+    Language.RU -> "Готово"
+    Language.HI -> "हो गया"
+    Language.FR -> "Terminé"
+    Language.ES -> "Listo"
+    Language.DE -> "Fertig"
+    else -> "Done"
 }

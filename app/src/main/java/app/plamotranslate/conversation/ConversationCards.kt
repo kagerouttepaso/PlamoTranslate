@@ -3,12 +3,17 @@ package app.plamotranslate.conversation
 import app.plamotranslate.pipeline.conversation.Direction
 import app.plamotranslate.pipeline.conversation.LiveSpeech
 import app.plamotranslate.pipeline.conversation.Turn
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -16,8 +21,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -197,9 +208,17 @@ private fun UtteranceCard(
  * 話している最中の聞き取りと途中訳。2人が注視して読むものなので、確定したカードと同じ大きさ・濃さで出し、
  * 枠線で囲って「話し中（まだ変わる）」ことを示す。1画面は見出しも出し、対面は確定したカードと同じく見出しを出さず
  * もう一方の言語を小さくする。話し終わると確定したカードに置き換わる。
+ *
+ * 書き起こしの重いモデルは文字が出るまで数秒かかるので、待っている間も「聞いている」ことが両方の面から分かるようにする
+ * （2026-11-15、作者の試用）。カードの下に音量のバー（[level]）を出し、文字がまだ無い間は話し始めからの秒数を出す。
+ * 音声認識が録音から1秒以上遅れていれば（[lagSeconds]）、その秒数も出す。言語が先に分かれば、文字より先にカードの向きが決まる。
+ *
+ * 見出しに、誰が何語で話しているかを出し、枠・見出し・音量のバーを話した人の色（確定したカードと同じ）にする。
+ * 話し手が代わると色が変わるので、カードが替わったことがひと目で分かる（2026-11-15、作者の要望）。話し手が分かる前は中立の色。
+ * 相手の面は相手が読むので、言語をその言語自身の名前で出す（例：한국어）。
  */
 @Composable
-internal fun LiveCard(live: LiveSpeech, reader: Reader?) {
+internal fun LiveCard(live: LiveSpeech, reader: Reader?, level: Float, lagSeconds: Float) {
     val d = live.direction
     val c = MaterialTheme.colorScheme
     val right = when {
@@ -208,8 +227,33 @@ internal fun LiveCard(live: LiveSpeech, reader: Reader?) {
         else -> d.mine == (reader == Reader.ME)
     }
     val readerLanguage = if (d == null || reader == null) null else readerLanguage(d, reader)
-    val original = live.text.ifEmpty { "…" }
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    if (live.text.isEmpty()) {
+        LaunchedEffect(live.startedAtMs) {
+            while (true) {
+                now = System.currentTimeMillis()
+                delay(250)
+            }
+        }
+    }
+    val seconds = ((now - live.startedAtMs) / 1000).coerceAtLeast(0)
+    // 相手の面は相手が読むので、言語に依らない書き方にする
+    val waiting = if (reader == Reader.PARTNER) "… ${seconds}s" else "書き起こし中… ${seconds}秒"
+    val original = live.text.ifEmpty { waiting }
     val translation = live.translation.ifEmpty { "…" }
+    val lag = if (lagSeconds >= 1f && reader != Reader.PARTNER) "認識が%.0f秒遅れています".format(lagSeconds) else null
+    val shownLevel by animateFloatAsState(level, label = "liveLevel")
+    val accent = when {
+        d == null -> c.outline
+        d.mine -> c.primary
+        else -> c.secondary
+    }
+    val status = liveStatus(d, reader)
+    val levelBar = @Composable {
+        Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.surfaceVariant)) {
+            Box(Modifier.fillMaxWidth(shownLevel).fillMaxHeight().background(accent))
+        }
+    }
     // 1画面は確定したカードと同じく「原文の下に訳」。対面は読む人の言語を上に
     val originalFirst = reader == null || d == null || d.source == readerLanguage
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (right) Arrangement.End else Arrangement.Start) {
@@ -218,20 +262,42 @@ internal fun LiveCard(live: LiveSpeech, reader: Reader?) {
             shape = RoundedCornerShape(16.dp),
             color = c.surfaceContainerHigh,
             contentColor = c.onSurface,
-            border = BorderStroke(2.dp, c.primary),
+            border = BorderStroke(2.dp, accent),
         ) {
             if (reader == null) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("● 話し中", style = MaterialTheme.typography.labelLarge, color = c.primary)
+                    Text(status, style = MaterialTheme.typography.labelLarge, color = accent)
                     Text(original, style = ConversationType.sub)
                     Text(translation, style = ConversationType.main)
+                    lag?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = c.onSurfaceVariant) }
+                    levelBar()
                 }
             } else {
                 Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(status, style = MaterialTheme.typography.labelMedium, color = accent)
                     Text(if (originalFirst) original else translation, style = ConversationType.main)
                     Text(if (originalFirst) translation else original, style = ConversationType.faceSub, color = c.onSurfaceVariant)
+                    lag?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = c.onSurfaceVariant) }
+                    levelBar()
                 }
             }
         }
     }
+}
+
+/**
+ * 話し中のカードの見出し：誰が何語で話しているか。自分の面と1画面は「● 相手・韓国語」、相手の面は相手が読めるよう
+ * 言語をその言語自身の名前で出す（「● 한국어」）。話し手がまだ分からなければ「● 話し中」（相手の面は「●」）。
+ */
+private fun liveStatus(d: Direction?, reader: Reader?): String = when {
+    d == null -> if (reader == Reader.PARTNER) "●" else "● 話し中"
+    reader == Reader.PARTNER -> "● ${ownName(d.source)}"
+    else -> "● ${if (d.mine) "自分" else "相手"}・${d.source.label}"
+}
+
+/** 言語の、その言語自身での名前（例：韓国語は「한국어」）。端末が名前を持たなければ言語のコード。 */
+private fun ownName(language: Language): String {
+    val locale = java.util.Locale.forLanguageTag(language.code)
+    return locale.getDisplayName(locale).ifBlank { language.code }
+        .replaceFirstChar { if (it.isLowerCase()) it.titlecase(locale) else it.toString() }
 }

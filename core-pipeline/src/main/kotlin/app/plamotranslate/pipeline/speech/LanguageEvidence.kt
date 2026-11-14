@@ -30,9 +30,27 @@ object LanguageEvidence {
         val group = group(lang, languages.separateChinese) ?: return null
         if (languages.groups != null && group !in languages.groups) return null
         val letters = Letters.of(recognition.text)
-        if (!letters.matches(lang)) return null
-        if (!letters.enough(lang)) return null
+        if (lang in Letters.LANGS) {
+            if (!letters.matches(lang)) return null
+            if (!letters.enough(lang)) return null
+        } else if (!otherLanguageMatches(recognition.text, lang)) {
+            return null
+        }
         return group
+    }
+
+    /**
+     * 日・韓・英・中の外の言語（Qwen3-ASR で聞く言語）：文の多数派の文字が言語の文字と合い、中身が1語より多い
+     * （英字の言語は2語以上、ほかは3文字以上）。
+     */
+    private fun otherLanguageMatches(text: String, lang: String): Boolean {
+        val script = Script.ofLanguage(lang)
+        if (Script.ofText(text) != script) return false
+        return if (script == Script.LATIN) {
+            text.split(NON_LETTER).count { it.isNotEmpty() } >= MIN_WORDS
+        } else {
+            text.count { it.isLetter() } >= MIN_CHARS
+        }
     }
 
     /** 言語のコードを、比べるための組にまとめる（根拠かどうかは見ない。言語の継ぎ目探しはこれで比べる）。 */
@@ -57,6 +75,9 @@ object LanguageEvidence {
         fun enough(lang: String): Boolean = if (lang == "en") latinWords >= MIN_WORDS else total >= MIN_CHARS
 
         companion object {
+            /** この数え方で判定する言語。ほかの言語は [Script] で判定する。 */
+            val LANGS = setOf("ko", "en", "ja", "zh", "yue")
+
             fun of(text: String): Letters {
                 var hangul = 0
                 var latin = 0
@@ -75,6 +96,8 @@ object LanguageEvidence {
             private val NON_LATIN = Regex("[^A-Za-z]+")
         }
     }
+
+    private val NON_LETTER = Regex("[^\\p{L}]+")
 
     /** 英語の判定を根拠にする語の数。 */
     private const val MIN_WORDS = 2

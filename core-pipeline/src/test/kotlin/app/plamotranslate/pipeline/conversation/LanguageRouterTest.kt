@@ -1,5 +1,6 @@
 package app.plamotranslate.pipeline.conversation
 
+import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.isChinese
 import org.junit.Assert.assertEquals
@@ -72,8 +73,8 @@ class LanguageRouterTest {
 
     @Test
     fun 自分と同じ言語は相手に選べず固定していたら自動に戻る() {
-        assertEquals(false, PartnerMode.choices(Language.EN).contains(PartnerMode.ENGLISH))
-        assertEquals(false, PartnerMode.choices(Language.ZH).any { it.fixed?.isChinese == true })
+        assertEquals(false, PartnerMode.choices(Language.EN, SpeechModel.SENSE_VOICE.languages).contains(PartnerMode.ENGLISH))
+        assertEquals(false, PartnerMode.choices(Language.ZH, SpeechModel.SENSE_VOICE.languages).any { it.fixed?.isChinese == true })
         val router = LanguageRouter(PartnerMode.ENGLISH)
         router.self = Language.EN
         assertEquals(PartnerMode.AUTO, router.mode)

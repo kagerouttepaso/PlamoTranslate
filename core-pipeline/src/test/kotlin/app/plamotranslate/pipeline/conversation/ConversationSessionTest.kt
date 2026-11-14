@@ -32,6 +32,20 @@ class ConversationSessionTest {
     }
 
     @Test
+    fun 文字の無い途中結果はカードの向きだけ決めて訳さない() {
+        var now = 1_000L
+        val s = ConversationSession(clock = { now })
+        s.handle(speaking(true))
+        now = 2_000L
+        assertTrue(s.handle(partial("", lang = "ko")).none { it is Effect.TranslatePartial })
+        val live = s.live!!
+        assertEquals("", live.text)
+        assertEquals(Language.KO, live.direction?.source)
+        // 話し始めの時刻は、言語の知らせでは変えない（画面は話し始めからの秒数を出す）
+        assertEquals(1_000L, live.startedAtMs)
+    }
+
+    @Test
     fun 確定訳の途中はカードに出す() {
         val s = ConversationSession()
         val id = s.handle(final("こんにちは")).filterIsInstance<Effect.TranslateFinal>().single().turn.id

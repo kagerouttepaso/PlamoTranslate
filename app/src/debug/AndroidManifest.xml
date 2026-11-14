@@ -9,6 +9,10 @@
         <activity
             android:name=".TranslateBenchActivity"
             android:exported="true" />
+        <!-- 音声認識の比べ（デバッグビルドだけ）。adb shell am start -S -n app.plamotranslate/.AsrBenchActivity -->
+        <activity
+            android:name=".AsrBenchActivity"
+            android:exported="true" />
         <!-- 会話翻訳の動作確認用：デバッグ版だけadbから音声ファイルを渡して開ける（docs/設計/会話翻訳.md「動作確認」） -->
         <activity
             android:name=".conversation.ConversationActivity"

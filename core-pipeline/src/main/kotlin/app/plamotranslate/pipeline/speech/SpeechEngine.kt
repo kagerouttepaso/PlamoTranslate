@@ -77,7 +77,22 @@ data class Recognition(val text: String, val lang: String?, val breaks: List<Spe
 /** 認識した文の切れ目。[sentence] が true なら文の終わり（句点・疑問符・感嘆符）、false なら読点。 */
 data class SpeechBreak(val at: Int, val sentence: Boolean)
 
-/** 差し込み口：音声を文字にし、言語を判定する。実装は `core-asr`（SenseVoice）。 */
+/** 差し込み口：音声を文字にし、言語を判定する。実装は `core-asr`（SenseVoice・Qwen3-ASR）。 */
 interface SpeechRecognizer : AutoCloseable {
     fun recognize(samples: FloatArray): Recognition
+
+    /** 会話の言語を添えて認識する（[SpeechSegmenter] が呼ぶ）。言語の識別を前に置く組み立て（[IdentifiedRecognizer]）が使う。 */
+    fun recognize(samples: FloatArray, languages: SpeechLanguages): Recognition = recognize(samples)
+
+    /** [language]（言語のコード）として書き起こす。言語を指定できない認識器は無視する。null なら指定しない。 */
+    fun recognizeAs(samples: FloatArray, language: String?): Recognition = recognize(samples)
+
+    /**
+     * 書き起こさずに言語だけを判定できるか。できる認識器（言語の識別を前に置く組み立て）は、区切りが言語の見張りに
+     * [identify] を使い、重い書き起こしを省く。できない認識器（SenseVoice）は、書き起こした結果の言語で見張る。
+     */
+    val identifies: Boolean get() = false
+
+    /** 言語だけを判定する（[identifies] が true の認識器）。会話の言語（[SpeechLanguages.groups]）の外か、判定できなければ null。 */
+    fun identify(samples: FloatArray, languages: SpeechLanguages): String? = null
 }

@@ -90,6 +90,7 @@ private enum class SettingsPage(
     val content: @Composable () -> Unit,
 ) {
     MODEL("翻訳モデル", SettingsGroup.TRANSLATION, { modelSummary() }, { ModelPage() }),
+    RECOGNITION("音声認識モデル", SettingsGroup.TRANSLATION, { recognitionSummary() }, { RecognitionCard() }),
     SCREEN("画面翻訳", SettingsGroup.FEATURES, { screenTranslateSummary() }, { ScreenTranslateSettings() }),
     SPEECH("読み上げ", SettingsGroup.FEATURES, { speechSummary() }, { SpeechCard() }),
     PERFORMANCE("性能", SettingsGroup.DETAIL, { "同時に訳す数、スレッド、速さを測る" }, {

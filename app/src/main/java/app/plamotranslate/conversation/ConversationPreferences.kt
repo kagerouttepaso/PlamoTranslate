@@ -2,7 +2,6 @@ package app.plamotranslate.conversation
 
 import android.content.Context
 import app.plamotranslate.llm.Language
-import app.plamotranslate.pipeline.conversation.CONVERSATION_LANGUAGES
 
 /** 会話翻訳の設定（表示モード・自分の言語）。次に開いたときも同じにする。 */
 internal class ConversationPreferences(context: Context) {
@@ -13,10 +12,11 @@ internal class ConversationPreferences(context: Context) {
         get() = prefs.getString(KEY_VIEW_MODE, null)?.let { name -> ViewMode.entries.firstOrNull { it.name == name } }
         set(mode) = prefs.edit().putString(KEY_VIEW_MODE, mode?.name).apply()
 
-    /** 自分の言語。保存が無い・会話翻訳で選べない言語なら null。 */
-    var self: Language?
-        get() = Language.ofCode(prefs.getString(KEY_SELF, null).orEmpty())?.takeIf { it in CONVERSATION_LANGUAGES }
-        set(language) = prefs.edit().putString(KEY_SELF, language?.code).apply()
+    /** 自分の言語。保存が無い・[languages]（選んだ音声認識モデルの言語）に無いなら null。 */
+    fun self(languages: List<Language>): Language? =
+        Language.ofCode(prefs.getString(KEY_SELF, null).orEmpty())?.takeIf { it in languages }
+
+    fun saveSelf(language: Language) = prefs.edit().putString(KEY_SELF, language.code).apply()
 
     private companion object {
         const val KEY_VIEW_MODE = "view_mode"

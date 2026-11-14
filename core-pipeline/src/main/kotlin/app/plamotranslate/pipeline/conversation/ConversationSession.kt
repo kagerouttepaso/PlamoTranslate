@@ -27,8 +27,10 @@ data class Turn(
 /**
  * 話している最中の聞き取り。話し終わると [Turn] に置き換わる。
  * [translation] は途中の文字の訳（途中訳）。新しい途中の文字を訳し終わるまで、前の訳を出しておく。
+ * [direction] は文字より先に決まることがある（書き起こしの重いモデルは、言語の識別で先に言語を知らせる）。
+ * [startedAtMs] は話し始めた時刻（壁時計のミリ秒）。文字がまだ無い間、画面は話し始めからの秒数を出す。
  */
-data class LiveSpeech(val text: String, val direction: Direction?, val translation: String = "")
+data class LiveSpeech(val text: String, val direction: Direction?, val translation: String = "", val startedAtMs: Long = 0)
 
 /**
  * 会話の訳す順番の状態遷移（docs/設計/会話翻訳.md「翻訳への渡し方」）。音声の出来事と訳の結果を [handle] で受け取り、
@@ -156,14 +158,15 @@ class ConversationSession(
         when (event) {
             is SpeechEvent.Speaking -> {
                 generation++
-                live = if (event.speaking) LiveSpeech("", null) else null
+                live = if (event.speaking) LiveSpeech("", null, startedAtMs = clock()) else null
             }
             is SpeechEvent.Partial -> {
                 val direction = router.preview(event.text, event.lang)
                 // 前の途中訳は、新しい途中の文字を訳し終わるまで出しておく（ちらつかせない）
                 val keep = live?.takeIf { it.direction == direction }?.translation.orEmpty()
-                live = LiveSpeech(event.text, direction, keep)
-                partialPending = PartialRequest(nextRequestId++, generation, event.text, direction)
+                live = LiveSpeech(event.text, direction, keep, live?.startedAtMs ?: clock())
+                // 文字の無い途中結果は言語の知らせ（カードの向きだけ決める）。訳すものは無い
+                if (event.text.isNotEmpty()) partialPending = PartialRequest(nextRequestId++, generation, event.text, direction)
             }
             is SpeechEvent.Final -> {
                 // 確定訳を優先する：古い発話の途中訳は要らないので止める
@@ -186,7 +189,7 @@ class ConversationSession(
         )
         turns = turns + turn
         // 話し続けていれば次の途中結果が来るので、ここでは聞き取り中の表示だけ空にする
-        live = live?.let { LiveSpeech("", null) }
+        live = live?.let { LiveSpeech("", null, startedAtMs = clock()) }
         finalQueue.addLast(turn)
     }
 

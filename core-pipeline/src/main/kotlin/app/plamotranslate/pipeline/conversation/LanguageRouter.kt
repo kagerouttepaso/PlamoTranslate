@@ -5,14 +5,6 @@ import app.plamotranslate.llm.isChinese
 import app.plamotranslate.llm.sameAs
 import app.plamotranslate.pipeline.speech.SpeechLanguages
 
-/**
- * 会話で使える言語。音声認識（SenseVoice）が聞き分けられる日本語・韓国語・英語・中国語・広東語で決まる
- * （翻訳モデルは53言語を訳せるが、ほかの言語は聞き取れない）。2026-11-08、作者の要望で中国語を相手に足し、
- * 自分の言語も日本語以外を選べるようにした。広東語はPLaMoの言語に無いので、繁体字の中国語として訳す
- * （話し言葉の広東語ではなく書き言葉の中国語になる）。
- */
-val CONVERSATION_LANGUAGES = listOf(Language.JA, Language.KO, Language.EN, Language.ZH, Language.ZH_HANT)
-
 /** 会話の画面に出す言語名。中国語は繁体字に広東語も含むことを示す。 */
 val Language.conversationLabel: String
     get() = when (this) {
@@ -50,9 +42,12 @@ data class PartnerMode(val fixed: Language?) {
         val CHINESE = PartnerMode(Language.ZH)
         val CHINESE_TRADITIONAL = PartnerMode(Language.ZH_HANT)
 
-        /** 自分が [self] のときに選べる相手。自分と同じ言語は除く。 */
-        fun choices(self: Language): List<PartnerMode> =
-            listOf(AUTO) + CONVERSATION_LANGUAGES.filterNot { it.sameAs(self) }.map(::PartnerMode)
+        /**
+         * 自分が [self] のときに選べる相手。[languages] は会話で使える言語（選んだ音声認識モデルの言語、[SpeechModel.languages]）。
+         * 自分と同じ言語は除く。広東語はPLaMoの言語に無いので、繁体字の中国語として訳す。
+         */
+        fun choices(self: Language, languages: List<Language>): List<PartnerMode> =
+            listOf(AUTO) + languages.filterNot { it.sameAs(self) }.map(::PartnerMode)
     }
 }
 
@@ -126,7 +121,8 @@ class LanguageRouter(mode: PartnerMode = PartnerMode.AUTO, self: Language = Lang
             "en" -> Language.EN
             "zh" -> if (chinese && !hasKana(text)) Language.ZH else byScript(text)
             "yue" -> if (chinese && !hasKana(text)) Language.ZH_HANT else byScript(text)
-            else -> byScript(text)
+            // 日・韓・英・中の外の言語は、言語の識別（Whisper）か文字の種類で決めた言語をそのまま使う
+            else -> langCode?.let(Language::ofCode) ?: byScript(text)
         }
 
         private fun hasKana(text: String) = text.any { it in '぀'..'ヿ' }
