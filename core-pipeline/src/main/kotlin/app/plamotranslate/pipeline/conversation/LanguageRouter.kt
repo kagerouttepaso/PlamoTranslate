@@ -71,10 +71,18 @@ class LanguageRouter(mode: PartnerMode = PartnerMode.AUTO, self: Language = Lang
         set(value) {
             field = value
             lastPartner = null
+            confirmedPartner = null
         }
 
-    /** 自動のときに覚えている相手の言語。 */
+    /** 自動のときに覚えている相手の言語（自分の発話の訳す先）。相手の確定のたびに覚え直す。 */
     private var lastPartner: Language? = null
+
+    /**
+     * 自動のときに、相手の言語と確かめた言語（会話の言語を絞る基準）。相手の確定が同じ言語で2回続いたら確かめたとする。
+     * 1回で絞ると、自分の発話の聞き違い（日本語を英語）1回で相手を英語と覚えて絞り、言語の識別が本当の相手の言語を
+     * 会話の外として捨てるので、話しても覚え直せなくなる。
+     */
+    private var confirmedPartner: Language? = null
 
     /** 今、自分の発話を訳す先の言語。自動でまだ相手が話していなければ、候補の先頭（日本語の自分なら韓国語）。 */
     val partner: Language
@@ -88,20 +96,23 @@ class LanguageRouter(mode: PartnerMode = PartnerMode.AUTO, self: Language = Lang
 
     /**
      * 会話の言語（音声認識が話し手の交代の根拠に使い、書き起こす言語を選ぶ範囲）。自分の言語と、相手の言語。
-     * 相手の言語は、固定ならその言語、自動なら覚えた相手の言語、まだ覚えていなければ自動の候補。
+     * 相手の言語は、固定ならその言語、自動なら確かめた相手の言語（[confirmedPartner]）、まだなら自動の候補。
      * 自動でも相手が決まったら2言語に絞る：候補を残すと、言語の識別の誤りで会話の外の言語（日本語の話を英語）に
-     * 書き起こしてしまう。覚えた相手が誤っていたら、利用者が相手の言語を選び直す（2026-11-15、作者の判断）。
+     * 書き起こしてしまう。確かめた相手が誤っていたら、利用者が相手の言語を選び直す（2026-11-15、作者の判断）。
      */
     val speechLanguages: SpeechLanguages
         get() {
-            val learned = lastPartner?.takeUnless { it.sameAs(self) }
+            val learned = confirmedPartner?.takeUnless { it.sameAs(self) }
             val partners = mode.fixed?.let { listOf(it) } ?: learned?.let { listOf(it) } ?: mode.autoCandidates(self)
             return SpeechLanguages((partners + self).mapTo(HashSet()) { speechGroup(it) }, separateChinese = chinese, primary = speechGroup(self))
         }
 
     /** 確定した発話の方向を決め、自動なら相手の言語を覚える。 */
     fun route(text: String, langCode: String?): Direction = preview(text, langCode).also {
-        if (mode.auto && !it.mine) lastPartner = it.source
+        if (mode.auto && !it.mine) {
+            confirmedPartner = it.source.takeIf { source -> lastPartner?.sameAs(source) == true }
+            lastPartner = it.source
+        }
     }
 
     /** 話している最中の途中結果の方向。相手の言語は覚えない（判定が揺れやすいため）。 */
