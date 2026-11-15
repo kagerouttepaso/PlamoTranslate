@@ -50,6 +50,11 @@ android {
             isMinifyEnabled = false
             signingConfig = signingConfigs.findByName("release")
         }
+        debug {
+            // 配った版が入っている端末に、データとモデルを残したままデバッグ版を上書きするとき（録音の流し直しなど）だけ、
+            // 配布の鍵で署名する（-Pplamo.debugWithReleaseKey。docs/手順/開発環境.md「会話の録音を流し直す」）
+            if (project.hasProperty("plamo.debugWithReleaseKey")) signingConfig = signingConfigs.findByName("release")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
