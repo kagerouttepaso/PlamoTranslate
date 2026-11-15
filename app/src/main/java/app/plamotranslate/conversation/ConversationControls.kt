@@ -77,7 +77,7 @@ internal fun Controls(state: ConversationUiState, model: ModelState, actions: Co
                     Button(onClick = actions.start, enabled = ready, modifier = Modifier.fillMaxWidth()) { Text("開始") }
                 }
                 SelfMenu(state.self, state.languages, actions.self)
-                PartnerMenu(state.mode, state.self, state.languages, actions.partnerMode)
+                PartnerMenu(state.mode, state.partner.takeIf { state.partnerFound }, state.self, state.languages, actions.partnerMode)
             }
             CutButton(state, actions.cut)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.End) {
@@ -135,14 +135,16 @@ private fun SelfMenu(self: Language, languages: List<Language>, onSelect: (Langu
 
 /**
  * 相手の言語の選択。中国語を足して5つになり1行に並ばないので、チップからメニューにした（2026-11-08）。
- * 自分と同じ言語は出さない（[PartnerMode.choices]）。
+ * 自分と同じ言語は出さない（[PartnerMode.choices]）。自動で見つけた相手（[found]）は「英語（自動）」のように出す。
  */
 @Composable
-private fun PartnerMenu(mode: PartnerMode, self: Language, languages: List<Language>, onSelect: (PartnerMode) -> Unit) {
+private fun PartnerMenu(mode: PartnerMode, found: Language?, self: Language, languages: List<Language>, onSelect: (PartnerMode) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxWidth()) {
         OutlinedButton(onClick = { open = true }, contentPadding = MenuButtonPadding, modifier = Modifier.fillMaxWidth()) {
-            Text("相手：${mode.short()} ▾", maxLines = 1)
+            // 自動で相手を見つけたら、何に決まったかをボタンに出す（自動のままだと利用者から見えない。2026-11-15、作者の指摘）
+            val label = found?.let { "${PartnerMode(it).short()}（自動）" } ?: mode.short()
+            Text("相手：$label ▾", maxLines = 1)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             PartnerMode.choices(self, languages).forEach { m ->
