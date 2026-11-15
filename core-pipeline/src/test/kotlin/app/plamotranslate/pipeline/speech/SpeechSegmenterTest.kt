@@ -338,8 +338,12 @@ class SpeechSegmenterTest {
             return inner.recognize(samples)
         }
 
+        /** 言語を指定せずに書き起こしを頼まれたときの、識別できなかったときの言語（null なら言語の無い書き起こしになる）。 */
+        val fallbacks = mutableListOf<String?>()
+
         override fun recognize(samples: FloatArray, languages: SpeechLanguages, fallback: String?): Recognition {
             unspecified++
+            fallbacks += fallback
             return recognize(samples)
         }
 
@@ -431,10 +435,13 @@ class SpeechSegmenterTest {
     fun 一番広い窓でも判定できなければ自分の言語として書き起こす() {
         val asr = HeavyRecognizer { _, _ -> null }
         val s = Harness(asr, profile, byPhrase = true, languages = SpeechLanguages(setOf("ja", "ko"), primary = "ja"))
-        val events = s.feed(Sound.JA to 7.0, Sound.SILENCE to 3.0)
+        // 最初の文はカードの言語が決まる前に終わる（言語を指定せずに書き起こしを頼む）
+        val events = s.feed(Sound.JA to 2.5, Sound.SILENCE to 1.0, Sound.JA to 5.0, Sound.SILENCE to 3.0)
         // 文字は話し終わる前に出る（言語が決まらないまま待たない）
         assertTrue(events.takeWhile { it !is SpeechEvent.Final }.any { it is SpeechEvent.Partial && it.text.isNotEmpty() })
         assertEquals("ja", finals(events).single().lang)
+        // 言語の手がかりが無くても、言語を決めずに書き起こさない（会話に無い言語の文を作り出すため）
+        assertTrue("${asr.fallbacks}", asr.fallbacks.isNotEmpty() && asr.fallbacks.none { it == null })
     }
 
     @Test
