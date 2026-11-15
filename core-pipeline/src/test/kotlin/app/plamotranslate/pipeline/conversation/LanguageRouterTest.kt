@@ -99,4 +99,17 @@ class LanguageRouterTest {
         assertEquals(setOf("ja", "zh"), chinese.speechLanguages.groups)
         assertTrue(chinese.speechLanguages.separateChinese)
     }
+
+    @Test
+    fun 自動は相手の言語を覚えたら自分と相手の2言語に絞り_選び直すと候補に戻す() {
+        val router = LanguageRouter()
+        router.route("안녕하세요", "ko")
+        assertEquals(setOf("ja", "ko"), router.speechLanguages.groups)
+        // 自分の発話では相手を覚え直さない
+        router.route("こんにちは", "ja")
+        assertEquals(setOf("ja", "ko"), router.speechLanguages.groups)
+        router.mode = PartnerMode.AUTO
+        assertEquals(setOf("ja", "ko", "en"), router.speechLanguages.groups)
+        assertEquals(Language.KO, router.partner)
+    }
 }

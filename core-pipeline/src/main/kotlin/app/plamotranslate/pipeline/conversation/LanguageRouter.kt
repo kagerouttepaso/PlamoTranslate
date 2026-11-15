@@ -66,7 +66,12 @@ class LanguageRouter(mode: PartnerMode = PartnerMode.AUTO, self: Language = Lang
             if (mode.fixed?.sameAs(value) == true) mode = PartnerMode.AUTO
         }
 
+    /** 相手の言語の決め方。選び直したら覚えた相手の言語を忘れる（自動を選び直すと、相手の言語を覚え直す）。 */
     var mode: PartnerMode = mode
+        set(value) {
+            field = value
+            lastPartner = null
+        }
 
     /** 自動のときに覚えている相手の言語。 */
     private var lastPartner: Language? = null
@@ -82,12 +87,15 @@ class LanguageRouter(mode: PartnerMode = PartnerMode.AUTO, self: Language = Lang
     val chinese: Boolean get() = self.isChinese || mode.fixed?.isChinese == true
 
     /**
-     * 会話の言語（音声認識の区切りが、話し手の交代の根拠に使う言語）。自分の言語と、相手の言語（固定ならその言語、
-     * 自動なら候補と覚えた相手の言語）。
+     * 会話の言語（音声認識が話し手の交代の根拠に使い、書き起こす言語を選ぶ範囲）。自分の言語と、相手の言語。
+     * 相手の言語は、固定ならその言語、自動なら覚えた相手の言語、まだ覚えていなければ自動の候補。
+     * 自動でも相手が決まったら2言語に絞る：候補を残すと、言語の識別の誤りで会話の外の言語（日本語の話を英語）に
+     * 書き起こしてしまう。覚えた相手が誤っていたら、利用者が相手の言語を選び直す（2026-11-15、作者の判断）。
      */
     val speechLanguages: SpeechLanguages
         get() {
-            val partners = mode.fixed?.let { listOf(it) } ?: (mode.autoCandidates(self) + listOfNotNull(lastPartner))
+            val learned = lastPartner?.takeUnless { it.sameAs(self) }
+            val partners = mode.fixed?.let { listOf(it) } ?: learned?.let { listOf(it) } ?: mode.autoCandidates(self)
             return SpeechLanguages((partners + self).mapTo(HashSet()) { speechGroup(it) }, separateChinese = chinese, primary = speechGroup(self))
         }
 
