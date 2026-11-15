@@ -84,6 +84,8 @@ class SpeechSegmenterTest {
         private val latencyChunks: Int = 0,
         /** 言語の判定（[RecognitionJob.Language]・[RecognitionJob.Seam]）の結果を返すまでの音声の個数。 */
         private val languageLatencyChunks: Int = 0,
+        /** 継ぎ目探し（[RecognitionJob.Seam]）の結果を返すまでの音声の個数。 */
+        private val seamLatencyChunks: Int = languageLatencyChunks,
     ) {
         val events = mutableListOf<SpeechEvent>()
 
@@ -112,7 +114,11 @@ class SpeechSegmenterTest {
             while (true) {
                 while (true) {
                     val job = queue.take(RecognitionLane.IDENTIFY) ?: queue.take(RecognitionLane.TRANSCRIBE) ?: break
-                    val delay = if (job is RecognitionJob.Transcribe) latencyChunks else languageLatencyChunks
+                    val delay = when (job) {
+                        is RecognitionJob.Transcribe -> latencyChunks
+                        is RecognitionJob.Seam -> seamLatencyChunks
+                        else -> languageLatencyChunks
+                    }
                     waiting.addLast(Triple(chunks + delay, job.id, runner.run(job)))
                 }
                 val due = waiting.filter { all || it.first <= chunks }.minByOrNull { it.first } ?: return
@@ -476,9 +482,11 @@ class SpeechSegmenterTest {
 
     @Test
     fun 話し始めの窓が誤っても話し手が確かになる前は区切らず仮の言語を替える() {
-        // 話し始めの2.5秒だけ、日本語を韓国語と判定する識別（PC で、日本語の頭の窓を韓国語 0.95 と判定した）。
-        // 文の全体（3.5秒より長い）では正しく判定する
-        val asr = HeavyRecognizer { samples, lang -> if (samples <= SAMPLE_RATE * 5 / 2 && lang == "ja") "ko" else lang }
+        // 話し始めの窓（2〜2.5秒の音声）だけ、日本語を韓国語と判定する識別（PC で、日本語の頭の窓を韓国語 0.95 と判定した）。
+        // 続く窓（1.5秒）と文の全体では正しく判定する
+        val asr = HeavyRecognizer { samples, lang ->
+            if (samples > SAMPLE_RATE * 3 / 2 && samples <= SAMPLE_RATE * 5 / 2 && lang == "ja") "ko" else lang
+        }
         val events = phraseSegmenter(asr).feed(Sound.JA to 6.0, Sound.SILENCE to 3.0)
         val card = finals(events).single()
         assertEquals("ja", card.lang)
@@ -486,11 +494,21 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun 継ぎ目の後ろが新しい言語と決まらなければ話し中に区切らない() {
-        // 窓（1.5秒以下）だけ韓国語と誤り、長い音声では日本語と判定する識別。カードは文の判定で日本語と確か
-        val asr = HeavyRecognizer { samples, lang -> if (samples <= SAMPLE_RATE * 3 / 2 && lang == "ja") "ko" else lang }
-        val s = phraseSegmenter(asr)
-        val cards = finals(s.feed(Sound.JA to 3.0, Sound.SILENCE to 1.0, Sound.JA to 6.0, Sound.SILENCE to 3.0))
+    fun 継ぎ目を探している間に話し終わり次の人が話し始めても話し終わりで分ける() {
+        // 継ぎ目の結果が5秒遅れて届くので、その前に話し終わりの無音（3秒）が過ぎ、次の発話が始まる
+        val s = Harness(HeavyRecognizer(), profile, heavy = true, languages = SpeechLanguages(setOf("ja", "ko")), seamLatencyChunks = 50)
+        val cards = finals(s.feed(Sound.JA to 5.0, Sound.KO to 2.5, Sound.SILENCE to 3.5, Sound.JA to 4.0, Sound.SILENCE to 6.0))
+        assertEquals(listOf("ja", "ko", "ja"), cards.map { it.lang })
+    }
+
+    @Test
+    fun 継ぎ目を探す窓で新しい言語が見つからなければ話し中に区切らない() {
+        // 日本語だけの話で、話し中の窓（1.5秒）が続けて4回、韓国語と聞き違える識別。継ぎ目を探す短い窓は正しい
+        var windows = 0
+        val asr = HeavyRecognizer { samples, lang ->
+            if (samples == SAMPLE_RATE * 3 / 2 && ++windows in 5..8) "ko" else lang
+        }
+        val cards = finals(phraseSegmenter(asr).feed(Sound.JA to 10.0, Sound.SILENCE to 3.0))
         assertEquals(listOf("ja"), cards.map { it.lang })
     }
 

@@ -60,7 +60,7 @@ sealed interface RecognitionJob {
     /**
      * 言語の継ぎ目を探す。[samples] の中で、[probe] の長さの窓を [step] ずつずらし、[newLang] に変わった最初の窓の
      * 頭の位置（[samples] の中のサンプル数）を返す。前は元の言語、後ろは新しい言語と見て、二分探索で窓の数を減らす。
-     * 見つけた継ぎ目から後ろの音声の全体が [newLang] と決まらなければ、継ぎ目は無いとする（短い窓の聞き違いで区切らない）。
+     * どの窓も [newLang] でなければ、継ぎ目は無いとする。
      */
     class Seam(
         override val id: Long,

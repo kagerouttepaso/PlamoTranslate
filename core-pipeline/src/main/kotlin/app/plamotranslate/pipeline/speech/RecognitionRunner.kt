@@ -39,8 +39,8 @@ class RecognitionRunner(private val recognizer: SpeechRecognizer) {
 
     /**
      * 言語の継ぎ目：窓を [RecognitionJob.Seam.step] ずつずらし、新しい言語になった最初の窓を二分探索で探す
-     * （前は元の言語、後ろは新しい言語と見る。10個の窓を4回ほどの判定で済ませる）。見つけたら、継ぎ目から後ろの全体を
-     * 文の全体と同じ確からしさ（[SpeakerJudge.PHRASE]）で確かめる。短い窓は外れやすいので、窓だけで区切らない。
+     * （前は元の言語、後ろは新しい言語と見る。10個の窓を4回ほどの判定で済ませる）。交代かどうかは頼んだ側（話し手の時系列の
+     * 窓の連なり）が決めているので、ここは位置を探すだけにする。
      */
     private fun seam(job: RecognitionJob.Seam): Int? {
         val count = (job.samples.size - job.probe) / job.step + 1
@@ -57,9 +57,7 @@ class RecognitionRunner(private val recognizer: SpeechRecognizer) {
             if (matches(mid)) hi = mid else lo = mid + 1
         }
         if (lo >= count) return null
-        val at = lo * job.step
-        val after = job.samples.copyOfRange(at, job.samples.size)
-        return at.takeIf { decide(after, job.languages, strict = true, SpeakerJudge.PHRASE) == job.newLang }
+        return lo * job.step
     }
 
     companion object {

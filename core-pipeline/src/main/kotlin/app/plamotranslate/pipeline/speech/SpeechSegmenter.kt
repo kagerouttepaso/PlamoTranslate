@@ -15,12 +15,14 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  * カードは次のどれかで確定する。
  * - 文が終わってから無音が続き、合わせて [SegmentationProfile.endSilenceSeconds] になった（話し終わり）
  * - 文の全体の話し手が、カードの確かな話し手と違った（話し手の交代。その文の頭で区切る）
- * - 話している最中に、直近の窓が続けてカードの確かな話し手と違い、継ぎ目の後ろの音声もそう決まった（話し手の交代・話し中）
+ * - 話している最中に、カードの確かな話し手と違う言語の窓が [SegmentationProfile.minTurnSeconds] 以上の音声にわたって続き、
+ *   継ぎ目の後ろの音声もそう決まった（話し手の交代・話し中）
  * - [SegmentationProfile.splitAfterSeconds] 話し続けた（長い発話）
  * - 利用者が区切った（[cut]）
- * カードの話し手が確かになるのは、文の全体で決まったときか、窓が [SegmentationProfile.liveSwitchChecks] 回続けて同じ言語と
- * 決まったとき。確かになる前に窓が別の言語に続けて決まったら、カードの全体の点数で、話し始めの窓の誤り（仮の言語を替える）か
- * 話し手の交代（継ぎ目で区切る）かを分ける（話し始めの短い窓は外れやすい）。
+ * カードの話し手と交代は、窓と文の根拠から話し手の時系列（[SpeakerTrack]）が決める。継ぎ目を探している間は、話し終わりと
+ * 長い発話でカードを閉じない（閉じると、見つかった交代を区切れず、新しい話し手の音声が前の話し手の言語で書き起こされる）。
+ * 話し終わりは位置を覚えておき、継ぎ目の結果を受けてから閉じる（[closeAfterSeam]）。文の判定は、届いていない窓があれば
+ * その窓の後に渡す（判定の担当では文の点数が窓より先に処理されるので、届く順で使う根拠が変わらないようにする）。
  *
  * 認識は待たない：書き起こしと点数は仕事（[RecognitionJob]）として [submit] に出し、結果を [onResult] で受け取ってから
  * 次を決める。音声の処理（VAD・区切り）は、重い書き起こしの間も止まらない（2026-11-15、作者の試用で、書き起こし中の表示が
@@ -59,6 +61,9 @@ class SpeechSegmenter(
 
     /** 文の終わりから、カードを確定させるまでに待つ無音。文の区切りと合わせて話し終わりの無音になる。 */
     private val cardEndGapSamples = ((profile.endSilenceSeconds - profile.phraseSilenceSeconds) * SAMPLE_RATE).toInt()
+
+    /** 話し手が話したとみなす、同じ言語の根拠が続く音声の長さ（[SpeakerTrack]）。 */
+    private val minTurnSamples = (profile.minTurnSeconds * SAMPLE_RATE).toLong()
 
     /** カードの言語を最初に判定する、話し始めからの音声の長さ。 */
     private val cardLangSamples = (profile.cardLanguageSeconds * SAMPLE_RATE).toInt().coerceAtLeast(MIN_PARTIAL_SAMPLES)
@@ -132,7 +137,7 @@ class SpeechSegmenter(
     )
 
     /** カード。[start] は聞き始めからの位置。 */
-    private class Card(val id: Long, val start: Long, switchChecks: Int) {
+    private class Card(val id: Long, val start: Long, minTurn: Long) {
         val phrases = mutableListOf<Phrase>()
 
         /** 前のカードが終わるまで待たせている出来事。 */
@@ -144,7 +149,7 @@ class SpeechSegmenter(
         var done = false
 
         /** 話し手の時系列。カードの話し手と、話し手が代わった位置は、ここだけが決める。 */
-        val track = SpeakerTrack(start, switchChecks)
+        val track = SpeakerTrack(start, minTurn)
 
         /** 話し手の言語（[SpeakerJudge] の組）。決まるまで null。 */
         val lang: String? get() = track.lang
@@ -158,6 +163,12 @@ class SpeechSegmenter(
         var partialInFlight = false
         var watchPending = false
         var seamPending = false
+
+        /** 届いていない窓の後に渡す文の判定。 */
+        var afterWatch: (() -> Unit)? = null
+
+        /** 継ぎ目を探している間に話し終わった位置（聞き始めから）。継ぎ目の結果を受けてから閉じる。 */
+        var speakingEndAt: Long? = null
     }
 
     /** まだ終わっていないカード（話した順）。先頭のカードの出来事だけを出す。 */
@@ -207,7 +218,9 @@ class SpeechSegmenter(
                 inGap = false
             } else {
                 gapSamples += samples.size
-                if (gapSamples >= cardEndGapSamples) {
+                if (gapSamples >= cardEndGapSamples && card.seamPending) {
+                    if (card.speakingEndAt == null) card.speakingEndAt = abs(buffer.size)
+                } else if (gapSamples >= cardEndGapSamples) {
                     // 話し終わり：書き起こした文をつなぐ（後ろは無音。重い書き起こしで確定を待たせない）。
                     // 短すぎて文として書き起こさなかった最後の文だけは、残りとして書き起こす
                     close(card, buffer.size, "話し終わり", restEnd = lastPhraseEnd, speakingEnd = true)
@@ -218,7 +231,7 @@ class SpeechSegmenter(
         }
 
         // 長さは話し始めから数える（前に足した音声の分だけ早く区切らない）
-        if (buffer.size - speechStart >= splitAfterSamples) {
+        if (buffer.size - speechStart >= splitAfterSamples && !card.seamPending) {
             // 長く話し続けている：文の切れ目（無ければ静かなところ）で区切り、後ろの音声は次のカードの頭として残す。話し手は同じ
             val at = CutPoint.longUtterance(
                 buffer,
@@ -316,7 +329,7 @@ class SpeechSegmenter(
         lastPartialStart = 0
     }
 
-    private fun openCard(): Card = Card(nextCard++, bufferStart, profile.liveSwitchChecks).also {
+    private fun openCard(): Card = Card(nextCard++, bufferStart, minTurnSamples).also {
         cards.addLast(it)
         open = it
     }
@@ -339,7 +352,15 @@ class SpeechSegmenter(
         }
         scores(card, phrase.from, phrase.end, RecognitionPriority.PHRASE_LANGUAGE, PURPOSE_PHRASE) { scores, recognition ->
             if (phrase !in card.phrases) return@scores
-            judgePhrase(card, phrase, SpeakerJudge.decide(scores, languages, SpeakerJudge.PHRASE), recognition)
+            val judge = {
+                if (phrase in card.phrases) judgePhrase(card, phrase, SpeakerJudge.decide(scores, languages, SpeakerJudge.PHRASE), recognition)
+            }
+            val waiting = card.afterWatch
+            when {
+                !card.watchPending -> judge()
+                waiting == null -> card.afterWatch = judge
+                else -> card.afterWatch = { waiting(); judge() }
+            }
         }
     }
 
@@ -350,7 +371,7 @@ class SpeechSegmenter(
      */
     private fun judgePhrase(card: Card, phrase: Phrase, judged: String?, recognition: Recognition?) {
         val before = card.lang
-        when (val verdict = card.track.phrase(phrase.from, judged)) {
+        when (val verdict = card.track.phrase(phrase.from, phrase.end, judged)) {
             is SpeakerTrack.Verdict.Cut -> {
                 // 決めた話し手を文に持たせて次のカードへ渡す（同じ音声をもう一度判定しない）
                 phrase.lang = verdict.lang
@@ -386,9 +407,8 @@ class SpeechSegmenter(
 
     /**
      * 話している最中の窓の点数で、カードの言語を決め、話し手の交代を見張る。カードの言語がまだ無ければ、話し始めからの音声
-     * （[SegmentationProfile.cardLanguageSeconds] から）で決める。決まったら直近1.5秒を見て、決まった言語がカードの言語と
-     * [SegmentationProfile.liveSwitchChecks] 回続けて違えば、カードの話し手が確かなら継ぎ目を探して区切り（[findSeam]）、
-     * まだ確かでなければカードの仮の言語を替える。決められない窓は、交代の根拠にも反証にもしない。
+     * （[SegmentationProfile.cardLanguageSeconds] から）で決める。決まったら直近1.5秒を見る。窓の言語から、カードの言語・
+     * 交代（継ぎ目を探す [findSeam]）を決めるのは話し手の時系列（[SpeakerTrack.window]）。
      * 話し始めから長く話してもカードの言語が決まらなければ、前の話し手の言語を仮に使う（決まらないと途中結果を出せない）。
      */
     private fun watchLanguage(card: Card) {
@@ -406,8 +426,11 @@ class SpeechSegmenter(
             card.watchPending = false
             val costSamples = ((clock() - submittedAt) / 1_000_000 * SAMPLE_RATE / 1000).toInt()
             watchInterval = maxOf(WATCH_INTERVAL_SAMPLES, costSamples * WATCH_COST_RATIO)
-            if (card !== open) return@scores
-            follow(card, card.track.window(fromAbs, SpeakerJudge.decide(scores, languages, SpeakerJudge.WINDOW)))
+            if (card === open) follow(card, card.track.window(fromAbs, toAbs, SpeakerJudge.decide(scores, languages, SpeakerJudge.WINDOW)))
+            card.afterWatch?.let {
+                card.afterWatch = null
+                it()
+            }
         }
     }
 
@@ -415,23 +438,8 @@ class SpeechSegmenter(
     private fun follow(card: Card, verdict: SpeakerTrack.Verdict) {
         when (verdict) {
             is SpeakerTrack.Verdict.Assign -> langChanged(card)
-            is SpeakerTrack.Verdict.Recheck -> recheckCard(card, verdict.lang)
             is SpeakerTrack.Verdict.Seek -> findSeam(card, verdict)
             is SpeakerTrack.Verdict.Cut, SpeakerTrack.Verdict.Keep -> Unit
-        }
-    }
-
-    /**
-     * まだ確かでないカードの言語と違う窓が続いた。カードの全体の点数を出し、話し始めの窓の誤りか話し手の交代かは
-     * 話し手の時系列（[SpeakerTrack.recheck]）が分ける（PC で、作者の日本語の頭の1.5秒を韓国語 0.95〜0.99 と判定した）。
-     */
-    private fun recheckCard(card: Card, newLang: String) {
-        card.seamPending = true
-        val previous = card.lang
-        scores(card, abs(speechStart), abs(buffer.size), RecognitionPriority.LANGUAGE, PURPOSE_CARD) { scores, _ ->
-            card.seamPending = false
-            if (card !== open || card.lang != previous) return@scores
-            follow(card, card.track.recheck(newLang, SpeakerJudge.decide(scores, languages, SpeakerJudge.PHRASE)))
         }
     }
 
@@ -453,22 +461,25 @@ class SpeechSegmenter(
     }
 
     /**
-     * 言語が代わった位置を探して区切る。話し手の時系列が示した位置（カードの話し手だと分かっている最後の根拠）から今までを0.25秒ずつずらした
-     * 1秒の窓のうち、最初に新しい言語になったところを継ぎ目とみなし、継ぎ目の後ろの音声の全体も新しい言語と決まれば、
-     * その前後の区切る位置（[CutPoint.languageSeam]）で区切る。
-     * 窓は二分探索で選ぶ（[RecognitionJob.Seam]）。後ろの音声が [newLang] と決まらなければ区切らない（短い窓の聞き違い）。
-     * 静かさだけで探すと、話し手の継ぎ目に間が無いとき、新しい言語の文の中の小さな間を選び、新しい言語の最初の語が前のカードに入って消えた。
+     * 言語が代わった位置を探して区切る。話し手の時系列が示した範囲（カードの話し手だと分かっている最後の根拠から、新しい言語の
+     * 連なりの最初の窓の終わりの、調べる窓1つ分後ろまで）を0.25秒ずつずらした1秒の窓のうち、最初に新しい言語になったところを継ぎ目とみなし、
+     * その前後の区切る位置（[CutPoint.languageSeam]）で区切る。窓は二分探索で選ぶ（[RecognitionJob.Seam]）。見つからなければ
+     * 区切らない（窓の聞き違い）。静かさだけで探すと、話し手の継ぎ目に間が無いとき、新しい言語の文の中の小さな間を選び、
+     * 新しい言語の最初の語が前のカードに入って消えた。
      */
     private fun findSeam(card: Card, seek: SpeakerTrack.Verdict.Seek) {
         val newLang = seek.lang
         card.seamPending = true
         val from = rel(seek.from).coerceIn(0, (buffer.size - LANG_PROBE_SAMPLES).coerceAtLeast(0))
+        // 交代は連なりの最初の窓の終わりより前にある。新しい言語の最初の窓は、新しい言語が後ろ半分だけでもそう決まるので、
+        // 調べる窓が交代の後ろに丸ごと入るよう、窓1つ分だけ後ろまで調べる
+        val to = (rel(seek.to) + LANG_PROBE_SAMPLES).coerceIn(minOf(from + LANG_PROBE_SAMPLES, buffer.size), buffer.size)
         val fromAbs = abs(from)
         val previous = card.lang
         job(
             { id ->
                 RecognitionJob.Seam(
-                    id, card.id, languageLane, buffer.slice(from, buffer.size), abs(buffer.size),
+                    id, card.id, languageLane, buffer.slice(from, to), abs(to),
                     PURPOSE_SEAM, languages, newLang, LANG_PROBE_SAMPLES, LANG_PROBE_STEP_SAMPLES,
                 )
             },
@@ -479,12 +490,25 @@ class SpeechSegmenter(
             trace { "継ぎ目 ${seam?.let { at(fromAbs + it) } ?: "なし"}（$previous→$newLang）" }
             if (seam == null) {
                 card.track.seamMissed()
-                return@job
+            } else {
+                val s = rel(fromAbs) + seam
+                val at = CutPoint.languageSeam(buffer, s - CutPoint.FRAME_SAMPLES * 2, s + CutPoint.FRAME_SAMPLES * 6)
+                // 後ろの話し手は、確かな連なりで決まっている
+                cutAt(at, "話し手の交代（話し中：$previous→$newLang）", manual = false, lang = newLang, sure = true)
             }
-            val s = rel(fromAbs) + seam
-            val at = CutPoint.languageSeam(buffer, s - CutPoint.FRAME_SAMPLES * 2, s + CutPoint.FRAME_SAMPLES * 6)
-            cutAt(at, "話し手の交代（話し中：$previous→$newLang）", manual = false, lang = newLang, sure = false)
+            closeAfterSeam(card)
         }
+    }
+
+    /**
+     * 継ぎ目を探している間に話し終わっていたら、その位置で閉じる。まだ無音が続いていれば、次の音声の処理で話し終わりとして閉じる。
+     * もう次の発話が始まっていれば、話し終わりの位置で区切り、次の発話は次のカードにする。
+     */
+    private fun closeAfterSeam(card: Card) {
+        val endAt = card.speakingEndAt ?: return
+        card.speakingEndAt = null
+        if (inGap || open == null) return
+        cutAt(rel(endAt).coerceIn(0, buffer.size), "話し終わり", manual = false)
     }
 
     /**
@@ -532,7 +556,7 @@ class SpeechSegmenter(
                     finishIfReady(card)
                 }
             } else scores(card, rest.from, rest.end, RecognitionPriority.PHRASE_LANGUAGE, PURPOSE_REST) { scores, recognition ->
-                card.track.phrase(rest.from, SpeakerJudge.decide(scores, languages, SpeakerJudge.PHRASE))
+                card.track.phrase(rest.from, rest.end, SpeakerJudge.decide(scores, languages, SpeakerJudge.PHRASE))
                 rest.lang = card.lang ?: fallbackLang(card)
                 if (recognition != null) {
                     rest.recognition = recognition
@@ -771,7 +795,6 @@ class SpeechSegmenter(
 
         /** 点数を頼む目的（ログに出す）。窓の点数はカードごとに1件ずつ頼む。 */
         private const val PURPOSE_WATCH = "話し中の窓"
-        private const val PURPOSE_CARD = "カードの全体"
         private const val PURPOSE_PHRASE = "文の全体"
         private const val PURPOSE_REST = "区切った残り"
         private const val PURPOSE_SEAM = "継ぎ目探し"
