@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.plamotranslate.pipeline.diagnostics.CrashArchive
+import app.plamotranslate.AdvancedPreferences
 import app.plamotranslate.pipeline.diagnostics.CrashReports
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -65,9 +66,12 @@ fun DiagnosticsSettings() {
                     "のときは次にアプリを開いたときに記録します。どこにも送りません。",
                 style = MaterialTheme.typography.bodySmall,
             )
+            val detailed = remember { AdvancedPreferences(context).detailedRecords }
             Text(
                 "書き出すと、記録と、今のアプリのログを1つの zip にします。ログには、アプリの動き（訳した件数や時間、" +
-                    "失敗など）が入り、訳した文や話した言葉は入りません。",
+                    "失敗など）が入ります。" +
+                    if (detailed) "詳細設定で「詳しい記録を残す」を選んでいるので、話した言葉・読み取った文字・訳も入ります。"
+                    else "訳した文や話した言葉は入りません。",
                 style = MaterialTheme.typography.bodySmall,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

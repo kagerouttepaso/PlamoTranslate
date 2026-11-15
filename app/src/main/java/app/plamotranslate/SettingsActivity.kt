@@ -88,6 +88,8 @@ private enum class SettingsPage(
     val group: SettingsGroup,
     val summary: @Composable () -> String,
     val content: @Composable () -> Unit,
+    /** 「詳細設定を表示」を選んだときだけトップに出す。 */
+    val advanced: Boolean = false,
 ) {
     MODEL("翻訳モデル", SettingsGroup.TRANSLATION, { modelSummary() }, { ModelPage() }),
     RECOGNITION("音声認識モデル", SettingsGroup.TRANSLATION, { recognitionSummary() }, { RecognitionCard() }),
@@ -97,6 +99,7 @@ private enum class SettingsPage(
         PerformanceCard(EngineHolder.state.collectAsStateWithLifecycle().value)
     }),
     DIAGNOSTICS("不具合の記録", SettingsGroup.DETAIL, { diagnosticsSummary() }, { DiagnosticsSettings() }),
+    ADVANCED("詳細設定", SettingsGroup.DETAIL, { advancedSummary() }, { AdvancedPage() }, advanced = true),
     APPEARANCE("画面の色", SettingsGroup.APP, { ThemePreferences.mode.collectAsStateWithLifecycle().value.label }, { AppearancePage() }),
     ABOUT("このアプリについて", SettingsGroup.APP, { "版と更新、通信とプライバシー" }, { AboutPage() }),
     LICENSES("ライセンス", SettingsGroup.APP, { "使っているモデルとソフトウェア" }, { LicensesCard() }),
@@ -128,7 +131,10 @@ private fun SettingsScreen(onBack: () -> Unit) {
 /** 設定のトップ。まとまりごとに見出しを付け、各ページを1行で、今の状態の一言と並べる。 */
 @Composable
 private fun SettingsHome(open: (SettingsPage) -> Unit) {
-    SettingsPage.entries.groupBy { it.group }.forEach { (group, pages) ->
+    val context = LocalContext.current
+    val advanced = remember { AdvancedPreferences(context) }
+    var showAdvanced by remember { mutableStateOf(advanced.shown) }
+    SettingsPage.entries.filter { showAdvanced || !it.advanced }.groupBy { it.group }.forEach { (group, pages) ->
         Text(group.label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         Card(modifier = Modifier.fillMaxWidth()) {
             pages.forEachIndexed { i, p ->
@@ -142,6 +148,11 @@ private fun SettingsHome(open: (SettingsPage) -> Unit) {
             }
         }
     }
+    // ふつうは触らない調整は、下の方から頑張れば出せる形にする
+    TextButton(onClick = {
+        showAdvanced = !showAdvanced
+        advanced.shown = showAdvanced
+    }) { Text(if (showAdvanced) "詳細設定を隠す" else "詳細設定を表示") }
 }
 
 /** トップの「翻訳モデル」の行に添える一言。 */

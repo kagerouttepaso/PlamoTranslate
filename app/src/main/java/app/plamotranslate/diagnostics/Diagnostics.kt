@@ -1,8 +1,8 @@
 package app.plamotranslate.diagnostics
 
 import android.content.Context
-import android.content.pm.ApplicationInfo
 import android.os.Process
+import app.plamotranslate.AdvancedPreferences
 import app.plamotranslate.log.Logs
 import app.plamotranslate.pipeline.diagnostics.CrashJournal
 import app.plamotranslate.pipeline.diagnostics.CrashReports
@@ -39,16 +39,16 @@ object Diagnostics {
      */
     fun install(context: Context) {
         val app = context.applicationContext
-        // 利用者の文はデバッグ版だけログに書く（Logs.text）
-        val debuggable = (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        // 利用者の文は、詳しい記録を残すとき（デバッグ版の既定、正式版は詳細設定で本人が選ぶ）だけログに書く（Logs.text）
+        val userText = runCatching { AdvancedPreferences(app).detailedRecords }.getOrDefault(false)
         // まず logcat を差す。印を預けるときのログも残すため。ファイルは、プロセスの鍵が決まってから足す
-        Logs.install(listOf(LogcatSink), userText = debuggable)
+        Logs.install(listOf(LogcatSink), userText = userText)
         ProcessMarks.begin(app)
         val key = ProcessExit.keyOf(ProcessMarks.current, Process.myPid())
         val logDir = File(app.filesDir, LOGS_DIR)
         runCatching {
             val file = ProcessLogFile(logDir, key).also { processLog = it }
-            Logs.install(listOf(LogcatSink, file), userText = debuggable)
+            Logs.install(listOf(LogcatSink, file), userText = userText)
         }.onFailure { Logs.w("ログのファイルを用意できませんでした", it) }
         // 記録の部品の失敗では、ログの書き先を外さない
         runCatching {

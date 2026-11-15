@@ -13,8 +13,9 @@ fun interface LogSink {
  * 書き先へは呼んだスレッドで1行ずつ渡して戻る（落ちても、渡した行がファイルに残るように）。
  *
  * - 書き先は app が起動時に [install] で差す。差す前（単体テストなど）は、どこにも書かない。
- * - 利用者の文（原文・訳・読み取った文字・話した言葉）を含む行は [text] で渡す。[install] の userText が false
- *   （正式版）なら書かない。書き出した不具合の記録に、利用者の文が入らないようにするため。
+ * - 利用者の文（原文・訳・読み取った文字・話した言葉）を含む行は [text] で渡す。userText が false なら書かない。
+ *   書き出した不具合の記録に、本人が選ばないかぎり利用者の文が入らないようにするため。
+ *   true にするのは、デバッグ版と、本人が詳細設定で「詳しい記録を残す」を選んだとき（[allowUserText]）。
  */
 object Logs {
     /** アプリのログの名前（logcat のタグ）。 */
@@ -32,6 +33,11 @@ object Logs {
         this.userText = userText
     }
 
+    /** 利用者の文を書くかを変える（詳細設定で選び直したとき。書き先はそのまま）。 */
+    fun allowUserText(enabled: Boolean) {
+        userText = enabled
+    }
+
     fun d(message: String) = write(LogLevel.DEBUG, message, null)
 
     fun i(message: String) = write(LogLevel.INFO, message, null)
@@ -40,7 +46,7 @@ object Logs {
 
     fun e(message: String, error: Throwable? = null) = write(LogLevel.ERROR, message, error)
 
-    /** 利用者の文を含む行。正式版では書かない（作らないよう、文は関数で受け取る）。 */
+    /** 利用者の文を含む行。許していなければ書かない（作らないよう、文は関数で受け取る）。 */
     fun text(message: () -> String) {
         if (userText) write(LogLevel.DEBUG, message(), null)
     }

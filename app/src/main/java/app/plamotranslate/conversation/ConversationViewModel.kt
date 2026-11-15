@@ -2,13 +2,13 @@ package app.plamotranslate.conversation
 
 import android.Manifest
 import android.app.Application
-import android.content.pm.ApplicationInfo
 import androidx.annotation.RequiresPermission
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.plamotranslate.EngineHolder
 import app.plamotranslate.ModelState
 import app.plamotranslate.ReadAloud
+import app.plamotranslate.AdvancedPreferences
 import app.plamotranslate.RecognitionPreferences
 import app.plamotranslate.TranslationPreferences
 import app.plamotranslate.asr.SpeechEngines
@@ -199,11 +199,12 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     /**
-     * デバッグ版だけ、音声認識へ渡した音声を WAV に書く（docs/設計/会話翻訳.md「動作確認」）。[startFromWav] で流し直して、
-     * 区切りと確定の文を前後で比べるため。会話の中身なので、端末の外部ファイルの `asr-rec/` にだけ置き、区切りで消す。
+     * 詳しい記録を残すとき（デバッグ版の既定。正式版は詳細設定で本人が選ぶ）だけ、音声認識へ渡した音声を WAV に書く
+     * （docs/設計/会話翻訳.md「動作確認」）。[startFromWav] で流し直して、区切りと確定の文を前後で比べるため。
+     * 会話の中身なので、端末の外部ファイルの `asr-rec/` にだけ置き、調べ終えたら消す。
      */
     private fun recorder(): WavFile.Writer? {
-        if (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return null
+        if (!AdvancedPreferences(app).detailedRecords) return null
         val dir = app.getExternalFilesDir(RECORDING_DIR) ?: return null
         val file = File(dir, "conv_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.wav")
         log("会話の音声を書く: ${file.path}")
