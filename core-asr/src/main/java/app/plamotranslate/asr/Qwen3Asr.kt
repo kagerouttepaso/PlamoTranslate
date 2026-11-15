@@ -30,7 +30,7 @@ class Qwen3Recognizer private constructor(private val recognizer: OfflineRecogni
             recognizer.decode(stream)
             // 終わりの印（<|endoftext|> など）の後ろは、モデルが作り出した続き（2026-11-15のベータで、日本語の後に英語の記事の文を出した）
             val text = recognizer.getResult(stream).text.substringBefore("<|").trim()
-            return Recognition(text, lang = null)
+            return Recognition(if (isRoleLeak(text)) "" else text, lang = null)
         } finally {
             stream.release()
         }
@@ -40,6 +40,21 @@ class Qwen3Recognizer private constructor(private val recognizer: OfflineRecogni
 
     companion object {
         const val DIR = "qwen3-asr"
+
+        /**
+         * 話していない短い音声（息・語尾の残り）に、モデルが会話の型の役の名前（「system」）を、指定した言語で書いて返したもの
+         * （「システム」「시스템」も）。役の名前だけの結果は、何も話していないものとして空にする（2026-11-15 の会話の録音で、
+         * 0.4〜1.7秒の音声から41回出て、確定の文の頭や末尾につながっていた）。文の中の「system」は残す。
+         */
+        internal fun isRoleLeak(text: String): Boolean {
+            val words = text.lowercase().split(NON_WORD).filter { it.isNotEmpty() }
+            return words.isNotEmpty() && words.any { it in ROLE_WORDS } && words.all { it in ROLE_WORDS || it == "the" }
+        }
+
+        /** 会話の型の役の名前が、言語ごとに書かれた形。 */
+        private val ROLE_WORDS = setOf("system", "システム", "시스템", "系统")
+        private val NON_WORD = Regex("[^\\p{L}\\p{N}]+")
+
         val FILES = listOf("conv_frontend.onnx", "encoder.int8.onnx", "decoder.int8.onnx", "tokenizer/vocab.json")
 
         /**
