@@ -29,8 +29,8 @@ android {
         applicationId = "app.plamotranslate"
         minSdk = 33  // 性能ヒント（APerformanceHint）がAPI 33から
         targetSdk = 36
-        versionCode = 20
-        versionName = "0.11.0-beta.1"
+        versionCode = 21
+        versionName = "0.11.0-beta.2"
         ndk {
             abiFilters += "arm64-v8a"
         }
