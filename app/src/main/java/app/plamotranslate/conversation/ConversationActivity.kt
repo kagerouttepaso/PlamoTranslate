@@ -84,7 +84,12 @@ class ConversationActivity : ComponentActivity() {
                 // 実際に話すときと同じく、翻訳モデルの準備が済んでから流す（途中訳も確かめるため）
                 val ready = state.asr == AsrState.Ready && model is ModelState.Ready
                 LaunchedEffect(ready, wav) {
-                    if (wav != null && ready && isDebuggable()) vm.startFromWav(wav)
+                    if (wav != null && ready && isDebuggable()) {
+                        // 相手の言語は保存しないので、流す前に決めたいときは渡す（言語のコード。無ければ自動）
+                        intent.getStringExtra(EXTRA_PARTNER)?.let { code -> Language.entries.firstOrNull { it.code == code } }
+                            ?.let { vm.setMode(PartnerMode(it)) }
+                        vm.startFromWav(wav)
+                    }
                 }
             }
         }
@@ -109,6 +114,7 @@ class ConversationActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_WAV = "wav"
+        const val EXTRA_PARTNER = "partner"
     }
 }
 
