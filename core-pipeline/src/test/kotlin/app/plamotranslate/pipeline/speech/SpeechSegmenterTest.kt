@@ -86,6 +86,8 @@ class SpeechSegmenterTest {
         private val languageLatencyChunks: Int = 0,
         /** 継ぎ目探し（[RecognitionJob.Seam]）の結果を返すまでの音声の個数。 */
         private val seamLatencyChunks: Int = languageLatencyChunks,
+        /** 担当ごとに1件ずつ処理する（端末と同じく、処理中の仕事の後ろに次の仕事が待ち行列で待つ）。 */
+        private val oneJobPerLane: Boolean = false,
     ) {
         val events = mutableListOf<SpeechEvent>()
 
@@ -93,7 +95,9 @@ class SpeechSegmenterTest {
         val languagePurposes = mutableListOf<String>()
         private val queue = RecognitionQueue()
         private val runner = RecognitionRunner(recognizer)
-        private val waiting = ArrayDeque<Triple<Int, Long, RecognitionOutput>>()
+        private class Pending(val due: Int, val lane: RecognitionLane, val id: Long, val output: RecognitionOutput)
+
+        private val waiting = ArrayDeque<Pending>()
         private var chunks = 0
         val segmenter = SpeechSegmenter(
             FakeVad((profile.phraseSilenceSeconds * 10).toInt()),
@@ -112,18 +116,26 @@ class SpeechSegmenterTest {
 
         private fun run(all: Boolean) {
             while (true) {
+                // 端末と同じく、閉じたカードの要らない仕事は捨て、空の結果を返す
                 while (true) {
-                    val job = queue.take(RecognitionLane.IDENTIFY) ?: queue.take(RecognitionLane.TRANSCRIBE) ?: break
+                    val stale = queue.dropStale(segmenter.openCardId)
+                    if (stale.isEmpty()) break
+                    stale.forEach { segmenter.onResult(it.id, RecognitionRunner.empty(it)) }
+                }
+                while (true) {
+                    val job = listOf(RecognitionLane.IDENTIFY, RecognitionLane.TRANSCRIBE)
+                        .filter { lane -> !oneJobPerLane || waiting.none { it.lane == lane } }
+                        .firstNotNullOfOrNull { queue.take(it) } ?: break
                     val delay = when (job) {
                         is RecognitionJob.Transcribe -> latencyChunks
                         is RecognitionJob.Seam -> seamLatencyChunks
                         else -> languageLatencyChunks
                     }
-                    waiting.addLast(Triple(chunks + delay, job.id, runner.run(job)))
+                    waiting.addLast(Pending(chunks + delay, job.lane, job.id, runner.run(job)))
                 }
-                val due = waiting.filter { all || it.first <= chunks }.minByOrNull { it.first } ?: return
+                val due = waiting.filter { all || it.due <= chunks }.minByOrNull { it.due } ?: return
                 waiting.remove(due)
-                segmenter.onResult(due.second, due.third)
+                segmenter.onResult(due.id, due.output)
             }
         }
 
@@ -499,6 +511,27 @@ class SpeechSegmenterTest {
         val s = Harness(HeavyRecognizer(), profile, heavy = true, languages = SpeechLanguages(setOf("ja", "ko")), seamLatencyChunks = 50)
         val cards = finals(s.feed(Sound.JA to 5.0, Sound.KO to 2.5, Sound.SILENCE to 3.5, Sound.JA to 4.0, Sound.SILENCE to 6.0))
         assertEquals(listOf("ja", "ko", "ja"), cards.map { it.lang })
+    }
+
+    @Test
+    fun 待ち行列で窓の判定を待っている間にカードを閉じても確定が出る() {
+        // 識別の担当が1件ずつ処理し、判定に0.7秒かかる。文が終わった直後に話し、窓の判定が文の判定の後ろの待ち行列に
+        // 残ったまま（その後ろに次の文の判定が控えたまま）手で区切る。捨てた窓に結果を返さないと、カードが確定しなかった
+        val s = Harness(
+            HeavyRecognizer(), profile, heavy = true, languages = SpeechLanguages(setOf("ja", "ko")),
+            languageLatencyChunks = 7, oneJobPerLane = true,
+        )
+        fun Harness.play(vararg parts: Pair<Sound, Double>) =
+            parts.forEach { (sound, seconds) -> repeat((seconds * 10).toInt()) { accept(FloatArray(FRAME) { sound.value }) } }
+
+        val events = s.collect { play(Sound.JA to 4.0, Sound.SILENCE to 0.6, Sound.JA to 0.6) }
+        val cut = events + s.cut()
+        assertEquals(listOf("ja"), finals(cut).map { it.lang })
+        assertTrue(cut.last() is SpeechEvent.CutDone)
+
+        val flushed = s.collect { play(Sound.KO to 4.0, Sound.SILENCE to 0.6, Sound.KO to 0.6) } + s.flush()
+        assertEquals(listOf("ko"), finals(flushed).map { it.lang })
+        assertTrue(flushed.last() is SpeechEvent.Flushed)
     }
 
     @Test

@@ -105,6 +105,8 @@ enum class RecognitionPriority {
  * 判定：認識の仕事の待ち行列（担当ごと）。次に処理する仕事と、要らなくなった仕事を決める。スレッドに依らない。
  * - 優先順位の高いものから、同じ順位は頼んだ順に出す（文の書き起こしは、つなぐ順に届く）。
  * - 閉じたカードの途中結果と話し中の窓の判定は捨てる（[dropStale]）。確定に要る仕事は捨てない。
+ *   捨てた仕事は返し、呼び手は空の結果（[RecognitionRunner.empty]）を区切りに渡す。頼んだ仕事には、処理しても捨てても
+ *   必ず1回だけ結果が返る（結果を待って次を決める区切りが、捨てられた仕事を待ち続けて止まらないようにする）。
  * 途中結果と言語の見張りは、区切りがカードごとに1件ずつしか頼まないので、ここでは間引かない。
  */
 class RecognitionQueue {
@@ -123,9 +125,11 @@ class RecognitionQueue {
         return next
     }
 
-    /** [openCard] 以外のカードの、途中結果と話し中の窓の判定を捨てる（確定に要る仕事は残す）。 */
-    fun dropStale(openCard: Long?) {
-        jobs.removeAll { it.card != openCard && it.priority >= RecognitionPriority.LANGUAGE }
+    /** [openCard] 以外のカードの、途中結果と話し中の窓の判定を捨てて返す（確定に要る仕事は残す）。 */
+    fun dropStale(openCard: Long?): List<RecognitionJob> {
+        val stale = jobs.filter { it.card != openCard && it.priority >= RecognitionPriority.LANGUAGE }
+        jobs.removeAll(stale)
+        return stale
     }
 
     /** 確定に要る仕事（確定・文の書き起こし・文の話し手の判定）が残っているか。 */

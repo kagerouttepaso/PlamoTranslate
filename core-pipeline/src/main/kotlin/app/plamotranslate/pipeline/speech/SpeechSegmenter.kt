@@ -16,7 +16,7 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  * - 文が終わってから無音が続き、合わせて [SegmentationProfile.endSilenceSeconds] になった（話し終わり）
  * - 文の全体の話し手が、カードの確かな話し手と違った（話し手の交代。その文の頭で区切る）
  * - 話している最中に、カードの確かな話し手と違う言語の窓が [SegmentationProfile.minTurnSeconds] 以上の音声にわたって続き、
- *   継ぎ目の後ろの音声もそう決まった（話し手の交代・話し中）
+ *   その交代の継ぎ目が見つかった（話し手の交代・話し中。継ぎ目の位置で区切る）
  * - [SegmentationProfile.splitAfterSeconds] 話し続けた（長い発話）
  * - 利用者が区切った（[cut]）
  * カードの話し手と交代は、窓と文の根拠から話し手の時系列（[SpeakerTrack]）が決める。継ぎ目を探している間は、話し終わりと

@@ -157,9 +157,29 @@ class SpeechPipeline(
             } catch (e: Throwable) {
                 timing("区切りで失敗: $e")
             }
-            // 閉じたカードの途中結果と言語の判定は、もう要らない
-            synchronized(lock) { queue.dropStale(segmenter.openCardId) }
+            dropStale()
             publishLoad()
+        }
+    }
+
+    /**
+     * 閉じたカードの途中結果と言語の判定は、もう要らないので捨てる。捨てた仕事にも空の結果を渡す（区切りは結果を受けてから
+     * 次を決めるので、知らせないとその仕事を待ち続ける）。渡した結果で区切りが仕事を足し、また捨てられることがあるので、
+     * 捨てるものが無くなるまで繰り返す。
+     */
+    private fun dropStale() {
+        while (true) {
+            val stale = synchronized(lock) {
+                queue.dropStale(segmenter.openCardId).onEach { submittedAt.remove(it.id) }
+            }
+            if (stale.isEmpty()) return
+            stale.forEach { job ->
+                try {
+                    segmenter.onResult(job.id, RecognitionRunner.empty(job))
+                } catch (e: Throwable) {
+                    timing("区切りで失敗: $e")
+                }
+            }
         }
     }
 

@@ -61,7 +61,7 @@ class RecognitionRunner(private val recognizer: SpeechRecognizer) {
     }
 
     companion object {
-        /** 失敗した仕事の結果（空）。確定を待たせ続けないため。 */
+        /** 失敗した仕事・捨てた仕事の結果（空）。確定を待たせ続けないため。 */
         fun empty(job: RecognitionJob): RecognitionOutput = when (job) {
             is RecognitionJob.Transcribe -> RecognitionOutput.Transcribed(Recognition("", null))
             is RecognitionJob.Language -> RecognitionOutput.Scored(null)

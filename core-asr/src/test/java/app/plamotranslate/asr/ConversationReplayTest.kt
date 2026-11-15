@@ -158,12 +158,20 @@ class ConversationReplayTest {
                 running[lane] = Triple(job, output, now + DeviceTiming.millis(job) * SAMPLE_RATE / 1000)
             }
         }
+        // 端末と同じく、閉じたカードの要らない仕事は捨て、空の結果を返す（SpeechPipeline）
+        fun dropStale() {
+            while (true) {
+                val stale = queue.dropStale(segmenter.openCardId)
+                if (stale.isEmpty()) return
+                stale.forEach { segmenter.onResult(it.id, RecognitionRunner.empty(it)) }
+            }
+        }
         fun deliverDone() {
             while (true) {
                 val (lane, done) = running.entries.filter { it.value.third <= now }.minByOrNull { it.value.third }?.toPair() ?: return
                 running.remove(lane)
                 segmenter.onResult(done.first.id, done.second)
-                queue.dropStale(segmenter.openCardId)
+                dropStale()
                 startJobs()
             }
         }
@@ -179,7 +187,7 @@ class ConversationReplayTest {
                 segmenter.cut()
             }
             segmenter.accept(audio.copyOfRange(pos, end))
-            queue.dropStale(segmenter.openCardId)
+            dropStale()
             startJobs()
             pos = end
         }
