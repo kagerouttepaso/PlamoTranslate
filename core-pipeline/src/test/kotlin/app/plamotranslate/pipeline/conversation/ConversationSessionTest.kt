@@ -21,7 +21,7 @@ class ConversationSessionTest {
 
     @Test
     fun 確定訳は話した順に1件ずつ渡す() {
-        val s = ConversationSession()
+        val s = ConversationSession(PartnerMode.KOREAN)
         val first = s.handle(final("こんにちは")).filterIsInstance<Effect.TranslateFinal>()
         assertEquals(listOf("こんにちは"), first.map { it.turn.original })
         assertTrue(s.handle(final("元気です")).none { it is Effect.TranslateFinal })
@@ -34,7 +34,7 @@ class ConversationSessionTest {
     @Test
     fun 文字の無い途中結果はカードの向きだけ決めて訳さない() {
         var now = 1_000L
-        val s = ConversationSession(clock = { now })
+        val s = ConversationSession(PartnerMode.KOREAN, clock = { now })
         s.handle(speaking(true))
         now = 2_000L
         assertTrue(s.handle(partial("", lang = "ko")).none { it is Effect.TranslatePartial })
@@ -47,7 +47,7 @@ class ConversationSessionTest {
 
     @Test
     fun 区切るボタンでその場で書き起こし待ちに並べ確定で入れ替える() {
-        val s = ConversationSession()
+        val s = ConversationSession(PartnerMode.KOREAN)
         s.handle(speaking(true))
         s.handle(partial("こんに"))
         s.handle(Event.CutRequested)
@@ -71,7 +71,7 @@ class ConversationSessionTest {
 
     @Test
     fun 音声認識が確定を書き起こしている間は途中訳を待たせ空いたら最新を訳す() {
-        val s = ConversationSession()
+        val s = ConversationSession(PartnerMode.KOREAN)
         s.handle(speaking(true))
         s.handle(Event.RecognitionBusy(true))
         assertTrue(s.handle(partial("こんに")).none { it is Effect.TranslatePartial })
@@ -82,7 +82,7 @@ class ConversationSessionTest {
 
     @Test
     fun 確定訳の途中はカードに出す() {
-        val s = ConversationSession()
+        val s = ConversationSession(PartnerMode.KOREAN)
         val id = s.handle(final("こんにちは")).filterIsInstance<Effect.TranslateFinal>().single().turn.id
         s.handle(Event.FinalProgress(id, "안녕"))
         assertEquals("안녕", s.turns.single().translation)
@@ -91,7 +91,7 @@ class ConversationSessionTest {
 
     @Test
     fun 確定が来たら走っている途中訳を取り消す() {
-        val s = ConversationSession()
+        val s = ConversationSession(PartnerMode.KOREAN)
         s.handle(speaking(true))
         val request = s.handle(partial("こんに")).filterIsInstance<Effect.TranslatePartial>().single()
         val effects = s.handle(final("こんにちは"))
@@ -101,7 +101,7 @@ class ConversationSessionTest {
 
     @Test
     fun 確定訳が残っている間は途中訳を始めない() {
-        val s = ConversationSession()
+        val s = ConversationSession(PartnerMode.KOREAN)
         val id = s.handle(final("こんにちは")).filterIsInstance<Effect.TranslateFinal>().single().turn.id
         assertTrue(s.handle(partial("元気")).none { it is Effect.TranslatePartial })
         // 確定訳が終わっても、捨てた途中の文字は訳さない（次の途中の文字を待つ）
@@ -111,7 +111,7 @@ class ConversationSessionTest {
 
     @Test
     fun 途中訳の間に届いた途中の文字は最新のものだけを次に訳す() {
-        val s = ConversationSession()
+        val s = ConversationSession(PartnerMode.KOREAN)
         s.handle(speaking(true))
         val first = s.handle(partial("こん")).filterIsInstance<Effect.TranslatePartial>().single()
         assertTrue(s.handle(partial("こんに")).isEmpty())
@@ -123,7 +123,7 @@ class ConversationSessionTest {
 
     @Test
     fun 古い発話の途中訳は出さない() {
-        val s = ConversationSession()
+        val s = ConversationSession(PartnerMode.KOREAN)
         s.handle(speaking(true))
         val request = s.handle(partial("こんに")).filterIsInstance<Effect.TranslatePartial>().single()
         // 話し終わって次の発話が始まった
@@ -135,7 +135,7 @@ class ConversationSessionTest {
 
     @Test
     fun 新しい途中の文字を訳し終わるまで前の途中訳を出しておく() {
-        val s = ConversationSession()
+        val s = ConversationSession(PartnerMode.KOREAN)
         s.handle(speaking(true))
         val r = s.handle(partial("こんに")).filterIsInstance<Effect.TranslatePartial>().single()
         s.handle(Event.PartialDone(r.requestId, "안녕"))
@@ -153,8 +153,73 @@ class ConversationSessionTest {
     }
 
     @Test
+    fun 相手が分かる前の自分の発話は原文だけを出し相手が決まったらさかのぼって訳す() {
+        val s = ConversationSession(self = Language.JA)
+        // 相手不明：訳さず、途中訳もしない
+        assertTrue(s.handle(final("こんにちは")).none { it is Effect.TranslateFinal })
+        s.handle(speaking(true))
+        assertTrue(s.handle(partial("元気")).none { it is Effect.TranslatePartial })
+        assertEquals(null, s.turns.single().direction.target)
+        // 相手が英語で話した：さかのぼって自分の発話を英語へ訳し、相手の発話を訳す（話した順に）
+        val first = s.handle(final("Hello", "en")).filterIsInstance<Effect.TranslateFinal>().single()
+        assertEquals("こんにちは", first.turn.original)
+        assertEquals(Language.EN, s.turns[0].direction.target)
+        val next = s.handle(Event.FinalDone(first.turn.id, "Hi", 100)).filterIsInstance<Effect.TranslateFinal>()
+        assertEquals(listOf("Hello"), next.map { it.turn.original })
+    }
+
+    @Test
+    fun 相手の言語を選び直したら自分の発話を新しい相手の言語へ訳し直す() {
+        val s = ConversationSession(PartnerMode.ENGLISH)
+        val id = s.handle(final("こんにちは")).filterIsInstance<Effect.TranslateFinal>().single().turn.id
+        s.handle(Event.FinalDone(id, "Hello", 100))
+        val again = s.handle(Event.ModeChanged(PartnerMode.KOREAN)).filterIsInstance<Effect.TranslateFinal>().single()
+        assertEquals(Direction(Language.JA, Language.KO), again.turn.direction)
+        assertEquals("", s.turns.single().translation)
+        assertTrue(!s.turns.single().translated)
+    }
+
+    @Test
+    fun 自動を選び直して相手が見つかっても訳した自分の発話は訳し直さない() {
+        val s = ConversationSession(PartnerMode.ENGLISH)
+        val id = s.handle(final("こんにちは")).filterIsInstance<Effect.TranslateFinal>().single().turn.id
+        s.handle(Event.FinalDone(id, "Hello", 100))
+        s.handle(Event.ModeChanged(PartnerMode.AUTO))
+        // 自動で相手が韓国語と分かる：訳すのは相手の発話だけ
+        val next = s.handle(final("안녕하세요", "ko")).filterIsInstance<Effect.TranslateFinal>()
+        assertEquals(listOf("안녕하세요"), next.map { it.turn.original })
+        assertEquals("Hello", s.turns[0].translation)
+        assertEquals(Language.EN, s.turns[0].direction.target)
+    }
+
+    @Test
+    fun 訳している最中に相手を選び直したら古い言語の訳を発話に書かない() {
+        val s = ConversationSession(PartnerMode.ENGLISH)
+        val id = s.handle(final("こんにちは")).filterIsInstance<Effect.TranslateFinal>().single().turn.id
+        // 英語へ訳している途中で韓国語を選ぶ：走っている訳が終わるまで次は渡さない
+        assertTrue(s.handle(Event.ModeChanged(PartnerMode.KOREAN)).none { it is Effect.TranslateFinal })
+        s.handle(Event.FinalProgress(id, "Hel"))
+        assertEquals("", s.turns.single().translation)
+        val again = s.handle(Event.FinalDone(id, "Hello", 100)).filterIsInstance<Effect.TranslateFinal>().single()
+        assertEquals(Language.KO, again.turn.direction.target)
+        assertEquals("", s.turns.single().translation)
+        assertTrue(!s.turns.single().translated)
+        s.handle(Event.FinalDone(id, "안녕하세요", 100))
+        assertEquals("안녕하세요", s.turns.single().translation)
+    }
+
+    @Test
+    fun 消去したらまだ渡していない訳も捨てる() {
+        val s = ConversationSession(PartnerMode.KOREAN)
+        val id = s.handle(final("一")).filterIsInstance<Effect.TranslateFinal>().single().turn.id
+        s.handle(final("二"))
+        s.handle(Event.Cleared)
+        assertTrue(s.handle(Event.FinalDone(id, "하나", 100)).none { it is Effect.TranslateFinal })
+    }
+
+    @Test
     fun 止めたら聞き取り中の表示を消し消去で発話を消す() {
-        val s = ConversationSession()
+        val s = ConversationSession(PartnerMode.KOREAN)
         s.handle(speaking(true))
         s.handle(Event.Stopped)
         assertNull(s.live)
@@ -165,7 +230,7 @@ class ConversationSessionTest {
 
     @Test
     fun 確定訳が失敗したら理由を持って次へ進む() {
-        val s = ConversationSession()
+        val s = ConversationSession(PartnerMode.KOREAN)
         val id = s.handle(final("一")).filterIsInstance<Effect.TranslateFinal>().single().turn.id
         s.handle(final("二"))
         val next = s.handle(Event.FinalDone(id, "", 0, failure = "エンジンが無い"))
@@ -176,7 +241,7 @@ class ConversationSessionTest {
 
     @Test
     fun 取り消した途中訳が終わったら次の途中の文字を訳す() {
-        val s = ConversationSession()
+        val s = ConversationSession(PartnerMode.KOREAN)
         s.handle(speaking(true))
         val r = s.handle(partial("こんに")).filterIsInstance<Effect.TranslatePartial>().single()
         val id = s.handle(final("こんにちは")).filterIsInstance<Effect.TranslateFinal>().single().turn.id
@@ -187,7 +252,7 @@ class ConversationSessionTest {
 
     @Test
     fun カードは発話の時刻とかかった時間を数値で持つ() {
-        val s = ConversationSession(clock = { 1_000L })
+        val s = ConversationSession(PartnerMode.KOREAN, clock = { 1_000L })
         val id = s.handle(final("こんにちは")).filterIsInstance<Effect.TranslateFinal>().single().turn.id
         s.handle(Event.FinalDone(id, "안녕하세요", 300))
         val t = s.turns.single()
@@ -195,16 +260,5 @@ class ConversationSessionTest {
         assertEquals(1000L, t.durationMs)
         assertEquals(100L, t.recognizeMs)
         assertEquals(300L, t.translateMs)
-    }
-
-    @Test
-    fun 消しても待っている確定訳は訳し続ける() {
-        // 今の振る舞いを固定する（消したカードの訳は出す先が無いが、確定訳の順番は崩さない）
-        val s = ConversationSession()
-        val id = s.handle(final("一")).filterIsInstance<Effect.TranslateFinal>().single().turn.id
-        s.handle(final("二"))
-        s.handle(Event.Cleared)
-        val next = s.handle(Event.FinalDone(id, "하나", 100))
-        assertEquals(listOf("二"), next.filterIsInstance<Effect.TranslateFinal>().map { it.turn.original })
     }
 }

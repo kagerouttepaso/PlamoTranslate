@@ -4,6 +4,7 @@ import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.isChinese
 import app.plamotranslate.llm.sameAs
 import app.plamotranslate.pipeline.speech.SpeechLanguages
+import app.plamotranslate.pipeline.speech.SpeechModel
 
 /** 会話の画面に出す言語名。中国語は繁体字に広東語も含むことを示す。 */
 val Language.conversationLabel: String
@@ -12,21 +13,14 @@ val Language.conversationLabel: String
         else -> label
     }
 
-/** 自動の相手の候補。中国語は自動判定に入れない（漢字の多い日本語の聞き違いで、自分の発話が中国語として扱われるため）。 */
-private val AUTO_PARTNERS = listOf(Language.JA, Language.KO, Language.EN)
-
 /**
- * 相手の言語の決め方。自動は、相手が話した言語を覚えて、自分の発話をその言語へ訳す。
+ * 相手の言語の決め方。自動は、相手が話した言語を見つけて、自分の発話をその言語へ訳す。
  * [fixed] が null なら自動。
  */
 data class PartnerMode(val fixed: Language?) {
     val auto: Boolean get() = fixed == null
 
-    /** 自動で相手とみなす言語。自分の言語は除く。 */
-    fun autoCandidates(self: Language): List<Language> = AUTO_PARTNERS.filterNot { it.sameAs(self) }
-
-    fun label(self: Language): String =
-        fixed?.conversationLabel ?: "自動（${autoCandidates(self).joinToString("・") { it.label }}）"
+    fun label(): String = fixed?.conversationLabel ?: "自動（相手が話した言語）"
 
     fun short(): String = when (fixed) {
         null -> "自動"
@@ -51,71 +45,77 @@ data class PartnerMode(val fixed: Language?) {
     }
 }
 
-/** 1つの発話を、どの言語からどの言語へ訳すか。[mine] は自分の発話。 */
-data class Direction(val source: Language, val target: Language, val mine: Boolean = source == Language.JA)
+/** 1つの発話を、どの言語からどの言語へ訳すか。[mine] は自分の発話。[target] が null なら、相手の言語がまだ分からない（訳さない）。 */
+data class Direction(val source: Language, val target: Language?, val mine: Boolean = source == Language.JA)
 
 /**
- * 発話ごとに訳す方向を決める（docs/設計/会話翻訳.md「言語の判定と訳す方向」）。
- * 自分の言語の発話は相手の言語へ、それ以外は自分の言語へ訳す。
+ * 言語の状態と、発話ごとの訳す方向（docs/作業中/会話翻訳の流れを重いモデルの前提から組み直す.md「言語の状態」）。
+ * 会話の話し手は自分と相手の2人なので、状態は2段だけにする。
+ * - 相手不明（自動の始まり）：音声認識は、自分の言語か、聞けるほかの言語（[heard]）のどれかを決める。
+ * - 相手確定：相手を固定したときは最初から。自動では、相手の発話が1回確定したら、その言語を相手にする。音声認識は自分と相手の2択。
+ * 相手確定の後は、利用者が相手の言語を選び直すときだけ変わる（誤って決まったら選び直す。2026-11-15、作者の判断）。
+ * 自分の言語の発話は相手の言語へ、それ以外は自分の言語へ訳す。相手不明の間の自分の発話は訳さない（相手が決まったら、会話の側がさかのぼって訳す）。
+ *
+ * 自動の相手を探す候補から、自分が日本語なら中国語を、自分が中国語なら日本語を除く（漢字の多い日本語を中国語と聞き違えて、
+ * 自分の発話を相手と決めてしまうため）。その組み合わせの相手は、相手の言語を選んで話す。
  */
-class LanguageRouter(mode: PartnerMode = PartnerMode.AUTO, self: Language = Language.JA) {
+class LanguageRouter(
+    mode: PartnerMode = PartnerMode.AUTO,
+    self: Language = Language.JA,
+    /** 音声認識が聞ける言語（[SpeechModel.languages]）。自動の相手を探す候補。 */
+    private val heard: List<Language> = SpeechModel.DEFAULT.languages,
+) {
     /** 自分の言語。変えたとき、相手が同じ言語なら自動に戻す。 */
     var self: Language = self
         set(value) {
             field = value
             if (mode.fixed?.sameAs(value) == true) mode = PartnerMode.AUTO
+            if (found?.sameAs(value) == true) found = null
         }
 
-    /** 相手の言語の決め方。選び直したら覚えた相手の言語を忘れる（自動を選び直すと、相手の言語を覚え直す）。 */
+    /** 相手の言語の決め方。選び直したら見つけた相手の言語を忘れる（自動を選び直すと、相手不明から始める）。 */
     var mode: PartnerMode = mode
         set(value) {
             field = value
-            lastPartner = null
-            confirmedPartner = null
+            found = null
         }
 
-    /** 自動のときに覚えている相手の言語（自分の発話の訳す先）。相手の確定のたびに覚え直す。 */
-    private var lastPartner: Language? = null
+    /** 自動のときに見つけた相手の言語。 */
+    private var found: Language? = null
+
+    /** 相手の言語。自動でまだ見つけていなければ null（相手不明）。 */
+    val partner: Language? get() = mode.fixed ?: found
+
+    /** 相手の言語を自動で見つけたか（画面に「自動で判定」と出す）。 */
+    val partnerFound: Boolean get() = mode.auto && found != null
 
     /**
-     * 自動のときに、相手の言語と確かめた言語（会話の言語を絞る基準）。相手の確定が同じ言語で2回続いたら確かめたとする。
-     * 1回で絞ると、自分の発話の聞き違い（日本語を英語）1回で相手を英語と覚えて絞り、言語の識別が本当の相手の言語を
-     * 会話の外として捨てるので、話しても覚え直せなくなる。
-     */
-    private var confirmedPartner: Language? = null
-
-    /** 今、自分の発話を訳す先の言語。自動でまだ相手が話していなければ、候補の先頭（日本語の自分なら韓国語）。 */
-    val partner: Language
-        get() = mode.fixed ?: lastPartner?.takeUnless { it.sameAs(self) } ?: mode.autoCandidates(self).first()
-
-    /**
-     * 中国語を日本語の聞き違いとみなさず、中国語として扱うか。自分か相手が中国語のときだけ。
+     * 中国語を日本語の聞き違いとみなさず、中国語として扱うか。自分か相手が中国語のときと、相手不明で中国語を探しているとき。
      * 音声認識が話し手の交代で区切るときも、このときだけ中国語を日本語と別に扱う。
      */
-    val chinese: Boolean get() = self.isChinese || mode.fixed?.isChinese == true
+    val chinese: Boolean
+        get() = self.isChinese || partner?.isChinese == true || (partner == null && candidates.any { it.isChinese })
 
-    /**
-     * 会話の言語（音声認識が話し手の交代の根拠に使い、書き起こす言語を選ぶ範囲）。自分の言語と、相手の言語。
-     * 相手の言語は、固定ならその言語、自動なら確かめた相手の言語（[confirmedPartner]）、まだなら自動の候補。
-     * 自動でも相手が決まったら2言語に絞る：候補を残すと、言語の識別の誤りで会話の外の言語（日本語の話を英語）に
-     * 書き起こしてしまう。確かめた相手が誤っていたら、利用者が相手の言語を選び直す（2026-11-15、作者の判断）。
-     */
+    /** 相手不明の間に、相手として探す言語。 */
+    private val candidates: List<Language>
+        get() = heard.filterNot { it.sameAs(self) || confusable(it) }
+
+    private fun confusable(language: Language): Boolean =
+        (self == Language.JA && language.isChinese) || (self.isChinese && language == Language.JA)
+
+    /** 会話の言語（音声認識が話し手を決める範囲）。相手不明なら自分と探す候補、相手確定なら自分と相手。 */
     val speechLanguages: SpeechLanguages
         get() {
-            val learned = confirmedPartner?.takeUnless { it.sameAs(self) }
-            val partners = mode.fixed?.let { listOf(it) } ?: learned?.let { listOf(it) } ?: mode.autoCandidates(self)
+            val partners = partner?.let { listOf(it) } ?: candidates
             return SpeechLanguages((partners + self).mapTo(HashSet()) { speechGroup(it) }, separateChinese = chinese, primary = speechGroup(self))
         }
 
-    /** 確定した発話の方向を決め、自動なら相手の言語を覚える。 */
+    /** 確定した発話の方向を決める。自動で相手不明なら、相手の発話の言語を相手にする。 */
     fun route(text: String, langCode: String?): Direction = preview(text, langCode).also {
-        if (mode.auto && !it.mine) {
-            confirmedPartner = it.source.takeIf { source -> lastPartner?.sameAs(source) == true }
-            lastPartner = it.source
-        }
+        if (mode.auto && found == null && !it.mine) found = it.source
     }
 
-    /** 話している最中の途中結果の方向。相手の言語は覚えない（判定が揺れやすいため）。 */
+    /** 話している最中の途中結果の方向。相手の言語は決めない（判定が揺れやすいため）。 */
     fun preview(text: String, langCode: String?): Direction {
         val spoken = spokenLanguage(text, langCode, chinese)
         // 中国語なら、簡体字か繁体字（広東語）かは聞き取った言語に従う
@@ -124,7 +124,6 @@ class LanguageRouter(mode: PartnerMode = PartnerMode.AUTO, self: Language = Lang
         val source = if (fixed == null || (fixed.isChinese && spoken.isChinese)) spoken else fixed
         return Direction(source, self, mine = false)
     }
-
     companion object {
         /** 音声認識の言語の組（`LanguageEvidence.group`）での言語。中国語は字体によらず1つの組。 */
         private fun speechGroup(language: Language): String = if (language.isChinese) "zh" else language.code

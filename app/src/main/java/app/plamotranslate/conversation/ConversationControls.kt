@@ -100,8 +100,8 @@ internal fun Controls(state: ConversationUiState, model: ModelState, actions: Co
             model is ModelState.Loading -> "翻訳モデルを準備中…"
             state.error != null -> state.error
             state.live != null -> "聞き取り中…（話し終わると訳が確定します）"
-            state.listening -> "聞いています（${state.self.label} ⇄ ${state.partner.label}）"
-            else -> "「開始」を押して話してください（${state.self.label} ⇄ ${state.partner.label}）"
+            state.listening -> "聞いています（${state.self.label} ⇄ ${partnerLabel(state)}）"
+            else -> "「開始」を押して話してください（${state.self.label} ⇄ ${partnerLabel(state)}）"
         }
         Text(status, style = MaterialTheme.typography.labelMedium)
         if (state.asr is AsrState.Missing || state.asr is AsrState.Failed) {
@@ -146,7 +146,7 @@ private fun PartnerMenu(mode: PartnerMode, self: Language, languages: List<Langu
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             PartnerMode.choices(self, languages).forEach { m ->
-                val label = m.label(self)
+                val label = m.label()
                 DropdownMenuItem(
                     text = { Text(if (m == mode) "✓ $label" else label) },
                     onClick = { open = false; onSelect(m) },
@@ -200,7 +200,7 @@ private fun CutButton(state: ConversationUiState, onCut: () -> Unit) {
             colors = IconButtonDefaults.filledIconButtonColors(containerColor = c.primary, contentColor = c.onPrimary),
         ) {
             val self = cutLabel(state.self)
-            val partner = cutLabel(state.partner)
+            val partner = state.partner?.let(::cutLabel) ?: "Done"
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 if (state.viewMode == ViewMode.FACE_TO_FACE) {
                     // 対面では相手が向かいから読むので、相手の言語を上に逆さに出す
@@ -214,6 +214,15 @@ private fun CutButton(state: ConversationUiState, onCut: () -> Unit) {
             }
         }
     }
+}
+
+/**
+ * 相手の言語の表示。自動で見つけた相手は、誤っていたら選び直せるように「自動で判定」と出す。まだ相手が話していなければ判定中。
+ */
+private fun partnerLabel(state: ConversationUiState): String = when {
+    state.partner == null -> "相手の言語は話したら判定"
+    state.partnerFound -> "${state.partner.label}（自動で判定）"
+    else -> state.partner.label
 }
 
 /**

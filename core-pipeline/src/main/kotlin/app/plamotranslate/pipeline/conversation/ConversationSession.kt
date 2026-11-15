@@ -3,6 +3,7 @@ package app.plamotranslate.pipeline.conversation
 import app.plamotranslate.llm.Language
 import app.plamotranslate.pipeline.speech.SpeechEvent
 import app.plamotranslate.pipeline.speech.SpeechLanguages
+import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.pipeline.speech.Utterance
 
 /**
@@ -42,6 +43,8 @@ data class LiveSpeech(
 /**
  * 会話の訳す順番の状態遷移（docs/設計/会話翻訳.md「翻訳への渡し方」）。音声の出来事と訳の結果を [handle] で受け取り、
  * 訳す方向を決め（[LanguageRouter]）、カードと聞き取り中の表示を持ち、翻訳の流れに渡す作業（[Effect]）を返す。
+ * 相手の言語が分かる前の自分の発話は訳さずに持ち、相手が決まったらさかのぼって訳す。利用者が相手の言語を選び直したら、
+ * 自分の発話を新しい相手の言語へ訳し直す。
  *
  * 翻訳エンジンは1本のスレッドで1件ずつ動くので、確定訳を優先する。
  * - 確定訳は、話した順に1件ずつ渡す。
@@ -55,6 +58,8 @@ data class LiveSpeech(
 class ConversationSession(
     mode: PartnerMode = PartnerMode.AUTO,
     self: Language = Language.JA,
+    /** 音声認識が聞ける言語（自動の相手を探す候補）。 */
+    heard: List<Language> = SpeechModel.DEFAULT.languages,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     sealed interface Event {
@@ -103,13 +108,16 @@ class ConversationSession(
         data class CancelPartial(val requestId: Long) : Effect
     }
 
-    private val router = LanguageRouter(mode, self)
+    private val router = LanguageRouter(mode, self, heard)
 
     val self: Language get() = router.self
     val mode: PartnerMode get() = router.mode
 
-    /** 今、自分の発話を訳す先の言語。 */
-    val partner: Language get() = router.partner
+    /** 今、自分の発話を訳す先の言語。自動でまだ相手が話していなければ null。 */
+    val partner: Language? get() = router.partner
+
+    /** 相手の言語を自動で見つけたか。 */
+    val partnerFound: Boolean get() = router.partnerFound
 
     /** 会話の言語（音声認識の区切りに渡す。話し手の交代は、この言語の間でだけ見る）。 */
     val speechLanguages: SpeechLanguages get() = router.speechLanguages
@@ -144,6 +152,14 @@ class ConversationSession(
     /** 渡している確定訳。 */
     private var finalRunning: Long? = null
 
+    /**
+     * 渡している確定訳が、訳す先を替える前の言語のものか（[retarget]）。そうなら、その訳の知らせは発話に書かない。
+     * 訳し直しは同じ発話の番号で列に入るが、走っている訳が終わるまで渡さないので、知らせの取り違えは起きない。
+     */
+    private var finalStale = false
+
+    private fun isStaleFinal(turnId: Long): Boolean = finalStale && finalRunning == turnId
+
     /** 次に渡す途中訳（最新の1件だけ）。 */
     private var partialPending: PartialRequest? = null
 
@@ -157,16 +173,19 @@ class ConversationSession(
         val effects = mutableListOf<Effect>()
         when (event) {
             is Event.Speech -> onSpeech(event.event, effects)
-            is Event.FinalProgress -> updateTurn(event.turnId) { it.copy(translation = event.text) }
+            is Event.FinalProgress -> if (!isStaleFinal(event.turnId)) updateTurn(event.turnId) { it.copy(translation = event.text) }
             is Event.FinalDone -> {
-                updateTurn(event.turnId) {
+                if (!isStaleFinal(event.turnId)) updateTurn(event.turnId) {
                     if (event.failure != null) {
                         it.copy(translated = true, failure = event.failure)
                     } else {
                         it.copy(translation = event.text, translated = true, translateMs = event.millis)
                     }
                 }
-                if (finalRunning == event.turnId) finalRunning = null
+                if (finalRunning == event.turnId) {
+                    finalRunning = null
+                    finalStale = false
+                }
             }
             is Event.PartialDone -> {
                 val request = partialRunning?.takeIf { it.id == event.requestId }
@@ -177,7 +196,10 @@ class ConversationSession(
                 }
             }
             is Event.SelfChanged -> router.self = event.self
-            is Event.ModeChanged -> router.mode = event.mode
+            is Event.ModeChanged -> {
+                router.mode = event.mode
+                retarget(onlyUntranslated = false)
+            }
             Event.CutRequested -> live?.let {
                 queued = queued + it.copy(id = nextQueuedId++)
                 // 走っている途中訳は区切った前のカードのものなので、新しい話し中のカードには出さない
@@ -189,7 +211,10 @@ class ConversationSession(
                 live = null
                 queued = emptyList()
             }
-            Event.Cleared -> turns = emptyList()
+            Event.Cleared -> {
+                turns = emptyList()
+                finalQueue.clear()
+            }
         }
         dispatch(effects)
         return effects
@@ -216,8 +241,8 @@ class ConversationSession(
                 // 前の途中訳は、新しい途中の文字を訳し終わるまで出しておく（ちらつかせない）
                 val keep = live?.takeIf { it.direction == direction }?.translation.orEmpty()
                 live = LiveSpeech(event.text, direction, keep, live?.startedAtMs ?: clock())
-                // 文字の無い途中結果は言語の知らせ（カードの向きだけ決める）。訳すものは無い
-                if (event.text.isNotEmpty()) partialPending = PartialRequest(nextRequestId++, generation, event.text, direction)
+                // 文字の無い途中結果は言語の知らせ（カードの向きだけ決める）。訳すものは無い。相手不明の自分の発話も訳さない
+                if (event.text.isNotEmpty() && direction.target != null) partialPending = PartialRequest(nextRequestId++, generation, event.text, direction)
             }
             is SpeechEvent.Final -> {
                 // 確定訳を優先する：古い発話の途中訳は要らないので止める
@@ -239,10 +264,32 @@ class ConversationSession(
             recognizeMs = utterance.recognizeMs,
         )
         turns = turns + turn
+        // 相手が今決まったら、それまでの自分の発話をさかのぼって訳す（話した順に、この発話より前に）
+        retarget(onlyUntranslated = true)
         // 話し続けていれば次の途中結果が来るので、ここでは聞き取り中の表示だけ空にする。
         // 書き起こし待ちがあれば、この確定はその分なので、ボタンの後に始めた話し中のカードはそのままにする
         if (queued.isEmpty()) live = live?.let { LiveSpeech("", null, startedAtMs = clock()) }
-        finalQueue.addLast(turn)
+        if (direction.target != null) finalQueue.addLast(turn)
+    }
+
+    /**
+     * 自分の発話の訳す先を、今の相手の言語にそろえて、訳し直す列に入れる。相手不明（自動を選び直した）なら何もしない
+     * （訳した発話はそのまま残す）。自動で相手が見つかったとき（[onlyUntranslated]）は、相手不明で訳していなかった発話だけ。
+     * 利用者が相手の言語を選んだときは、別の言語へ訳した発話も訳し直す。
+     */
+    private fun retarget(onlyUntranslated: Boolean) {
+        val partner = router.partner ?: return
+        val stale = turns.filter {
+            it.direction.mine && it.direction.target != partner && (!onlyUntranslated || it.direction.target == null)
+        }
+        if (stale.isEmpty()) return
+        val ids = stale.mapTo(HashSet()) { it.id }
+        turns = turns.map {
+            if (it.id in ids) it.copy(direction = it.direction.copy(target = partner), translation = "", translated = false, translateMs = null, failure = null) else it
+        }
+        if (finalRunning in ids) finalStale = true
+        finalQueue.removeAll { it.id in ids }
+        turns.filter { it.id in ids }.forEach { finalQueue.addLast(it) }
     }
 
     /** 空いていれば、次の確定訳と途中訳を渡す。 */

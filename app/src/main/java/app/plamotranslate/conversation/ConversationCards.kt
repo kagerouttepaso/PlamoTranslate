@@ -76,12 +76,12 @@ private fun speakerColors(mine: Boolean): Pair<Color, Color> {
 
 /** 1画面のカードの見出し（誰が・何語から何語へ）。 */
 private fun cardLabel(direction: Direction): String =
-    "${if (direction.mine) "自分" else "相手"}・${direction.source.label} → ${direction.target.label}"
+    "${if (direction.mine) "自分" else "相手"}・${direction.source.label} → ${direction.target?.label ?: "（相手の言語を判定中）"}"
 
 
 /** 対面で、その面を読む人の言語。自分の面は自分が話した・訳された言語、相手の面は相手のもの。 */
 private fun readerLanguage(d: Direction, reader: Reader): Language =
-    if (d.mine == (reader == Reader.ME)) d.source else d.target
+    if (d.mine == (reader == Reader.ME)) d.source else d.target ?: d.source
 
 /**
  * 対面のカード。読む人の言語で書かれた方を上に大きく、もう一方をその下に小さく出す。
@@ -156,7 +156,7 @@ private fun UtteranceCard(
     val speaking by ReadAloud.speaking.collectAsStateWithLifecycle()
     val key = "turn-${turn.id}"
     val speak = Modifier.clickable(enabled = turn.translated && turn.failure == null && turn.translation.isNotBlank()) {
-        ReadAloud.toggle(context, key, turn.translation, turn.direction.target)
+        turn.direction.target?.let { ReadAloud.toggle(context, key, turn.translation, it) }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (right) Arrangement.End else Arrangement.Start) {
         Surface(

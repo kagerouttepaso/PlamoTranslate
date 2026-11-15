@@ -70,8 +70,10 @@ data class ConversationUiState(
     val viewMode: ViewMode = ViewMode.FACE_TO_FACE,
     /** 自分の言語。 */
     val self: Language = Language.JA,
-    /** 今、自分の発話を訳す先の言語。 */
-    val partner: Language = Language.KO,
+    /** 今、自分の発話を訳す先の言語。自動でまだ相手が話していなければ null。 */
+    val partner: Language? = null,
+    /** 相手の言語を自動で見つけたか（「自動で判定」と出す）。 */
+    val partnerFound: Boolean = false,
     val turns: List<Turn> = emptyList(),
     /** マイクの音量（0〜1）。聞いている間だけ動く。 */
     val level: Float = 0f,
@@ -104,7 +106,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     private val recognition = RecognitionPreferences(app)
     private val speechModel = recognition.model
 
-    private val session = ConversationSession(self = preferences.self(speechModel.languages) ?: Language.JA)
+    private val session = ConversationSession(self = preferences.self(speechModel.languages) ?: Language.JA, heard = speechModel.languages)
 
     private var asr: SpeechEngine? = null
     private var listenJob: Job? = null
@@ -354,7 +356,9 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         // 音声認識が話し手の交代を見る言語は、会話の言語（自分か相手が中国語のときだけ、中国語と日本語を分ける）
         asr?.languages = session.speechLanguages
         _state.update {
-            it.copy(turns = session.turns, queued = session.queued, live = session.live, self = session.self, mode = session.mode, partner = session.partner)
+            it.copy(turns = session.turns, queued = session.queued, live = session.live, self = session.self, mode = session.mode, partner = session.partner,
+                partnerFound = session.partnerFound,
+            )
         }
     }
 
@@ -368,7 +372,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
             // 確定訳が来たら制御がこのコルーチンを取り消すので、流れも閉じて途中訳の生成を止める
             val update = coroutineScope {
                 val stream = Translations.open(
-                    this, app, TranslationStream.Options(direction.source, direction.target, maxTokens = PARTIAL_MAX_TOKENS),
+                    this, app, TranslationStream.Options(direction.source, direction.target ?: return@coroutineScope null, maxTokens = PARTIAL_MAX_TOKENS),
                 )
                 try {
                     stream.translateOne(text)
@@ -390,7 +394,8 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         var done: Event.FinalDone? = null
         try {
             coroutineScope {
-                val stream = Translations.open(this, app, TranslationStream.Options(turn.direction.source, turn.direction.target))
+                val target = turn.direction.target ?: return@coroutineScope
+                val stream = Translations.open(this, app, TranslationStream.Options(turn.direction.source, target))
                 try {
                     val result = stream.translateOne(turn.original) { text -> handle(Event.FinalProgress(turn.id, text)) }
                     done = when (result) {
@@ -407,7 +412,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
             handle(done ?: Event.FinalDone(turn.id, "", 0, failure = "中断"))
         }
         session.turns.firstOrNull { it.id == turn.id }?.let {
-            logText { "翻訳 [${it.direction.source.code}→${it.direction.target.code}] ${it.original} → ${it.shownTranslation} ${it.statsText}" }
+            logText { "翻訳 [${it.direction.source.code}→${it.direction.target?.code}] ${it.original} → ${it.shownTranslation} ${it.statsText}" }
         }
     }
 

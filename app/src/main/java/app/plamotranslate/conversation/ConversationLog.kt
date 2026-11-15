@@ -21,8 +21,8 @@ object ConversationLog {
         val last = Instant.ofEpochMilli(turns.last().timeMillis).atZone(zone)
         // 自分の言語は、自分の発話の原文と相手の発話の訳の言語（2026-11-08から日本語以外も選べる）
         val directions = turns.map { it.direction }
-        val mine = directions.map { if (it.mine) it.source else it.target }.distinct()
-        val partners = directions.map { if (it.mine) it.target else it.source }.distinct() - mine.toSet()
+        val mine = directions.mapNotNull { if (it.mine) it.source else it.target }.distinct()
+        val partners = directions.mapNotNull { if (it.mine) it.target else it.source }.distinct() - mine.toSet()
         append("# 会話ログ ").append(DATE.format(first)).append(' ')
             .append(TIME.format(first)).append('〜').append(TIME.format(last)).append("\n\n")
         append("- 言語：").append(mine.joinToString("・") { it.label }).append(" ⇄ ")
@@ -35,8 +35,13 @@ object ConversationLog {
             append("\n**").append(TIME_SEC.format(time)).append(' ')
                 .append(if (d.mine) "自分" else "相手").append('（').append(d.source.label).append("）**\n")
             append("原文：").append(turn.original.oneLine()).append('\n')
-            append("訳（").append(d.target.label).append("）：")
-                .append(if (turn.translated) turn.shownTranslation.oneLine() else "（翻訳中）").append('\n')
+            val target = d.target
+            if (target == null) {
+                append("訳：（相手の言語が分からず、訳していない）\n")
+            } else {
+                append("訳（").append(target.label).append("）：")
+                    .append(if (turn.translated) turn.shownTranslation.oneLine() else "（翻訳中）").append('\n')
+            }
         }
     }
 

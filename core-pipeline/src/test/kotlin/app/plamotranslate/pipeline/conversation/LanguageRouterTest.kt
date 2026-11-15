@@ -9,18 +9,19 @@ import org.junit.Test
 
 class LanguageRouterTest {
     @Test
-    fun 自動では相手が話した言語へ自分の発話を訳す() {
+    fun 自動では相手が話した言語へ自分の発話を訳し_相手が分かる前の自分の発話は訳さない() {
         val router = LanguageRouter()
-        assertEquals(Direction(Language.JA, Language.KO), router.route("こんにちは", "ja")) // 初期値は韓国語
+        assertEquals(Direction(Language.JA, null), router.route("こんにちは", "ja"))
         assertEquals(Direction(Language.EN, Language.JA), router.route("Hello", "en"))
         assertEquals(Direction(Language.JA, Language.EN), router.route("元気です", "ja"))
+        assertTrue(router.partnerFound)
     }
 
     @Test
     fun 途中結果では相手の言語を覚えない() {
         val router = LanguageRouter()
         assertEquals(Direction(Language.EN, Language.JA), router.preview("Hello", "en"))
-        assertEquals(Language.KO, router.partner)
+        assertEquals(null, router.partner)
     }
 
     @Test
@@ -41,8 +42,8 @@ class LanguageRouterTest {
     @Test
     fun 自動では中国語の判定を相手の言語にしない() {
         val router = LanguageRouter()
-        assertEquals(Direction(Language.JA, Language.KO), router.route("天気", "zh"))
-        assertEquals(Language.KO, router.partner)
+        assertEquals(Direction(Language.JA, null), router.route("天気", "zh"))
+        assertEquals(null, router.partner)
     }
 
     @Test
@@ -64,11 +65,9 @@ class LanguageRouterTest {
 
     @Test
     fun 自分が韓国語なら日本語の相手へ訳す() {
-        val router = LanguageRouter(self = Language.KO)
-        assertEquals(Language.JA, router.partner) // 自動の初期値は候補の先頭（自分を除く）
+        val router = LanguageRouter(PartnerMode(Language.JA), self = Language.KO)
         assertEquals(Direction(Language.KO, Language.JA, mine = true), router.route("안녕하세요", "ko"))
-        assertEquals(Direction(Language.EN, Language.KO, mine = false), router.route("Hello", "en"))
-        assertEquals(Direction(Language.KO, Language.EN, mine = true), router.route("감사합니다", "ko"))
+        assertEquals(Direction(Language.JA, Language.KO, mine = false), router.route("こんにちは", "ja"))
     }
 
     @Test
@@ -78,7 +77,7 @@ class LanguageRouterTest {
         val router = LanguageRouter(PartnerMode.ENGLISH)
         router.self = Language.EN
         assertEquals(PartnerMode.AUTO, router.mode)
-        assertEquals("自動（日本語・韓国語）", router.mode.label(Language.EN))
+        assertEquals("自動（相手が話した言語）", router.mode.label())
     }
 
     @Test
@@ -91,8 +90,12 @@ class LanguageRouterTest {
     }
 
     @Test
-    fun 音声認識に渡す会話の言語は自分と相手の言語() {
+    fun 音声認識に渡す会話の言語は相手不明なら聞ける言語_相手確定なら自分と相手() {
+        // 相手不明：聞ける言語のすべて。自分が日本語なら中国語は除く（漢字の多い日本語の聞き違い）
         assertEquals(setOf("ja", "ko", "en"), LanguageRouter().speechLanguages.groups)
+        val qwen = LanguageRouter(heard = SpeechModel.QWEN3_ASR.languages).speechLanguages.groups!!
+        assertTrue("ru" in qwen && "zh" !in qwen)
+        assertEquals("ja", LanguageRouter().speechLanguages.primary)
         val fixed = LanguageRouter(PartnerMode.KOREAN)
         assertEquals(setOf("ja", "ko"), fixed.speechLanguages.groups)
         val chinese = LanguageRouter(PartnerMode.CHINESE_TRADITIONAL)
@@ -101,33 +104,26 @@ class LanguageRouterTest {
     }
 
     @Test
-    fun 自動は相手の言語が2回続いたら自分と相手の2言語に絞り_選び直すと候補に戻す() {
-        val router = LanguageRouter()
-        router.route("안녕하세요", "ko")
-        assertEquals(setOf("ja", "ko", "en"), router.speechLanguages.groups)
-        // 自分の発話を挟んでも、相手の言語が続けば確かめたとする
-        router.route("こんにちは", "ja")
-        router.route("감사합니다", "ko")
-        assertEquals(setOf("ja", "ko"), router.speechLanguages.groups)
-        // 選び直すと忘れる：訳す先も候補の先頭に戻る
-        router.route("Thank you", "en")
-        router.route("Thank you", "en")
-        assertEquals(Language.EN, router.partner)
+    fun 自動は相手の発話が1回確定したら自分と相手の2言語にし_選び直すと相手不明に戻る() {
+        val router = LanguageRouter(heard = SpeechModel.QWEN3_ASR.languages)
+        router.route("Привет", "ru")
+        assertEquals(setOf("ja", "ru"), router.speechLanguages.groups)
+        assertEquals(Language.RU, router.partner)
+        // 相手確定の後は、別の言語の判定が来ても相手を変えない（自分か相手の2択）
+        router.route("Hello there", "en")
+        assertEquals(Language.RU, router.partner)
         router.mode = PartnerMode.AUTO
-        assertEquals(setOf("ja", "ko", "en"), router.speechLanguages.groups)
-        assertEquals(Language.KO, router.partner)
+        assertEquals(null, router.partner)
+        assertTrue("ko" in router.speechLanguages.groups!!)
     }
 
     @Test
-    fun 自分の発話を1回聞き違えても会話の言語を絞らず本当の相手の言語を覚えられる() {
-        val router = LanguageRouter()
-        // 自分の日本語を英語と聞き違えた（相手の発話として扱われる）
-        router.route("Is this the receipt", "en")
-        // 本当の相手（韓国語）は会話の言語に残り、2回話せば相手として確かめる
-        assertTrue("ko" in router.speechLanguages.groups!!)
-        router.route("안녕하세요", "ko")
-        router.route("영수증 주세요", "ko")
-        assertEquals(setOf("ja", "ko"), router.speechLanguages.groups)
-        assertEquals(Language.KO, router.partner)
+    fun 自分が日本語でも中国語でもなければ相手不明の間は中国語を中国語として聞く() {
+        val r = LanguageRouter(PartnerMode.AUTO, Language.EN)
+        assertEquals(true, r.chinese)
+        assertEquals(Direction(Language.ZH, Language.EN, mine = false), r.route("我们说话", "zh"))
+        assertEquals(Language.ZH, r.partner)
+        // 自分が日本語なら中国語を探さず、漢字の多い日本語の聞き違いとして扱う
+        assertEquals(false, LanguageRouter(PartnerMode.AUTO, Language.JA).chinese)
     }
 }
