@@ -96,6 +96,8 @@ class SpeechSegmenterTest {
             emit = { events += it },
             submit = { queue.submit(it) },
             trace = { if (System.getenv("SEGMENTER_TRACE") != null) println("[$chunks] ${it()}") },
+            // 時計は渡した音声の長さで進める（書き起こしの遅れを、端末と同じく途中結果の間隔に効かせる）
+            clock = { chunks * 100_000_000L },
         ).apply { this.languages = languages }
 
         private fun run(all: Boolean) {
@@ -460,6 +462,16 @@ class SpeechSegmenterTest {
         val asr = HeavyRecognizer { _, lang -> lang.takeIf { calls++ % 2 == 0 } }
         val cards = finals(phraseSegmenter(asr).feed(Sound.JA to 3.0, Sound.KO to 6.0, Sound.SILENCE to 3.0))
         assertEquals(listOf("ja", "ko"), cards.map { it.lang })
+    }
+
+    @Test
+    fun 書き起こしが重く途中結果の間隔が延びても話し中の交代にすぐ気づき継ぎ目で区切る() {
+        // 書き起こしに1.5秒かかる（途中結果の間隔は3秒に延びる）。言語の識別はその場で返る
+        val cards = finals(phraseSegmenter(HeavyRecognizer(), latency = 15).feed(Sound.JA to 4.0, Sound.KO to 5.0, Sound.SILENCE to 3.0))
+        assertEquals(listOf("ja", "ko"), cards.map { it.lang })
+        // 区切りは言語の継ぎ目の近く：韓国語の頭が前のカードに残らない
+        assertTrue(cards[0].text, cards[0].text.count { it == '가' } <= 3)
+        assertTrue(cards[1].text, cards[1].text.count { it == '가' } >= 45)
     }
 
     @Test
