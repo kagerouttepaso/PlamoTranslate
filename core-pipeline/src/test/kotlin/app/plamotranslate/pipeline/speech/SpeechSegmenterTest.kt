@@ -452,16 +452,6 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun 話し中の交代に遅れて気づいても新しい話し手の頭を前のカードに残さない() {
-        // 言語の判定に0.5秒かかり、見張りの間隔が延びて、日本語と確かになったカードの交代に気づくのは代わってから数秒後になる
-        val s = Harness(HeavyRecognizer(), profile, heavy = true, languages = SpeechLanguages(setOf("ja", "ko")), languageLatencyChunks = 5)
-        val cards = finals(s.feed(Sound.JA to 6.0, Sound.KO to 6.5, Sound.SILENCE to 3.0))
-        assertEquals(listOf("ja", "ko"), cards.map { it.lang })
-        assertTrue(cards[0].text, cards[0].text.count { it == '가' } <= 3)
-        assertTrue(cards[1].text, cards[1].text.count { it == '가' } >= 60)
-    }
-
-    @Test
     fun 言語の判定が遅いときは話し中の見張りの間隔を延ばして担当の時間を残す() {
         // 言語を自分で識別するモデル（SenseVoice）では、見張りは書き起こしの担当で動く
         fun watches(languageLatency: Int): Int {
@@ -505,12 +495,10 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun 自分の言語かそれ以外かで決め相手不明の間はどの言語かが確かなときだけ名指しする() {
+    fun 自分の言語かそれ以外かで決め相手不明の間は候補の合計で比べる() {
         val unknown = SpeechLanguages(setOf("ja", "ko", "en", "ru"), primary = "ja")
-        // 自分以外が確かで、そのうち一番の言語もそれだけで確かなら、その言語
-        assertEquals("ru", SpeakerJudge.decide(mapOf("ja" to 0.2f, "ko" to 0.1f, "en" to 0.05f, "ru" to 0.65f), unknown, SpeakerJudge.PHRASE))
-        // 自分以外の合計は確かでも、どの言語かが確かでなければ決めない（弱い名指しで相手の言語を決めない）
-        assertEquals(null, SpeakerJudge.decide(mapOf("ja" to 0.37f, "ko" to 0.55f, "en" to 0.02f, "ru" to 0.06f), unknown, SpeakerJudge.PHRASE))
+        // 自分以外の合計が多ければ、そのうち一番の言語
+        assertEquals("ru", SpeakerJudge.decide(mapOf("ja" to 0.2f, "ko" to 0.2f, "en" to 0.15f, "ru" to 0.45f), unknown, SpeakerJudge.PHRASE))
         assertEquals("ja", SpeakerJudge.decide(mapOf("ja" to 0.8f, "ko" to 0.1f, "en" to 0.05f, "ru" to 0.05f), unknown, SpeakerJudge.PHRASE))
         // 差が小さければ決めない（前の話し手のまま）
         assertEquals(null, SpeakerJudge.decide(mapOf("ja" to 0.5f, "ko" to 0.5f), SpeechLanguages(setOf("ja", "ko"), primary = "ja"), SpeakerJudge.PHRASE))

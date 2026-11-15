@@ -52,7 +52,7 @@ class Qwen3Recognizer private constructor(private val recognizer: OfflineRecogni
         }
 
         /** 会話の型の役の名前が、言語ごとに書かれた形。 */
-        private val ROLE_WORDS = setOf("system", "システム", "시스템", "系统")
+        private val ROLE_WORDS = setOf("system", "システム", "시스템")
         private val NON_WORD = Regex("[^\\p{L}\\p{N}]+")
 
         val FILES = listOf("conv_frontend.onnx", "encoder.int8.onnx", "decoder.int8.onnx", "tokenizer/vocab.json")

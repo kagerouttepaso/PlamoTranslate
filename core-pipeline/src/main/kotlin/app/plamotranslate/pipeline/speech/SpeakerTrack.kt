@@ -6,10 +6,10 @@ package app.plamotranslate.pipeline.speech
  * [SpeechSegmenter] は返した判定（[Verdict]）を実行する（区切る・継ぎ目を探す・書き起こす）。判定し直しはしない。
  *
  * - 話し中の窓：カードの言語が無ければ、その言語を仮に決める。カードの言語と同じ窓が [switchChecks] 回続けば確かにする。
- *   違う言語の窓が [switchChecks] 回続けば、確かなカードでは「最初に違った窓」から継ぎ目を探させ（[Verdict.Seek]）、
- *   仮のカードでは、話し始めの窓の誤りか交代かをカードの全体で確かめさせる（[Verdict.Recheck]）。
- *   交代に気づくのは違う窓が続いた後だが、継ぎ目は最初に違った窓から探すので、新しい話し手の頭が前のカードに残らない
- *   （2026-11-15 の beta.3 の試用で、今から3.5秒前より後ろだけを探し、新しい話し手の頭の1〜2秒が前のカードに入っていた）。
+ *   違う言語の窓が [switchChecks] 回続けば、確かなカードでは継ぎ目を探させ（[Verdict.Seek]）、仮のカードでは、話し始めの窓の
+ *   誤りか交代かをカードの全体で確かめさせる（[Verdict.Recheck]）。継ぎ目は、カードの話し手だと分かっている最後の根拠
+ *   （カードの言語と同じだった最後の窓・文の頭）から今までで探す。交代はそれより後ろにあり、気づくまでの遅れに依らない
+ *   （2026-11-15 の beta.3 の試用で、気づいた時点の3.5秒前より後ろだけを探し、新しい話し手の頭の1〜2秒が前のカードに入っていた）。
  * - 文の全体：確かなカードの話し手と違えば、その文の頭で区切らせる（[Verdict.Cut]）。ただしカードの頭から始まる文は、区切る前が
  *   無いので、カードの話し手を替える。確かでなければ、文の話し手をカードの話し手にする。
  * - 閉じた後（[close]）：区切らせない。確かな話し手は変えず、届いた文もカードの話し手の言語で書き起こさせる（同じカードの中で
@@ -31,8 +31,8 @@ class SpeakerTrack(private val start: Long, private val switchChecks: Int) {
     private var mismatches = 0
     private var otherLang: String? = null
 
-    /** カードの言語と違う窓が続き始めた、最初の窓。 */
-    private var firstMismatch: LongRange? = null
+    /** カードの話し手だと分かっている最後の根拠（カードの言語と同じだった窓・文）の始まり。無ければカードの始まり。 */
+    private var lastAgreeFrom = start
 
     /** カードを区切ると決めたか。 */
     private var closed = false
@@ -66,28 +66,29 @@ class SpeakerTrack(private val start: Long, private val switchChecks: Int) {
         return changed
     }
 
-    /** 話し中の窓 [from]〜[to] の話し手が [judged] と決まった（決められなければ null）。 */
-    fun window(from: Long, to: Long, judged: String?): Verdict {
+    /** [from] から始まる話し中の窓の話し手が [judged] と決まった（決められなければ null）。 */
+    fun window(from: Long, judged: String?): Verdict {
         judged ?: return Verdict.Keep
         val current = lang
         return when {
             current == null -> {
                 assign(judged, sure = false)
                 agreeing = 1
+                lastAgreeFrom = from
                 Verdict.Assign(judged)
             }
             judged == current -> {
                 clearMismatch()
+                lastAgreeFrom = from
                 if (++agreeing >= switchChecks) sure = true
                 Verdict.Keep
             }
             else -> {
                 if (otherLang != judged) clearMismatch()
                 otherLang = judged
-                val first = firstMismatch ?: (from..to).also { firstMismatch = it }
                 when {
                     ++mismatches < switchChecks -> Verdict.Keep
-                    sure -> seek(judged, first)
+                    sure -> Verdict.Seek(judged, lastAgreeFrom)
                     else -> Verdict.Recheck(judged)
                 }
             }
@@ -96,8 +97,8 @@ class SpeakerTrack(private val start: Long, private val switchChecks: Int) {
 
     /** カードの全体の話し手が [judged] と決まった（[Verdict.Recheck] の答え）。全体も [lang] なら、話し始めの窓の誤りだった。 */
     fun recheck(lang: String, judged: String?): Verdict {
-        val first = firstMismatch ?: return Verdict.Keep
-        if (judged != lang) return seek(lang, first)
+        if (otherLang != lang) return Verdict.Keep
+        if (judged != lang) return Verdict.Seek(lang, lastAgreeFrom)
         val streak = mismatches
         assign(lang, sure = true)
         agreeing = streak
@@ -122,27 +123,16 @@ class SpeakerTrack(private val start: Long, private val switchChecks: Int) {
         }
         if (judged != current) {
             assign(judged, sure = true)
+            lastAgreeFrom = from
             return Verdict.Assign(judged)
         }
         sure = true
+        lastAgreeFrom = maxOf(lastAgreeFrom, from)
         return Verdict.Keep
     }
-
-    /**
-     * 最初に違った窓 [first] のどこかで話し手が代わった（窓の多くが新しい言語なので、交代は窓の中ほどより前）。
-     * 窓の頭の少し前から探させる。
-     */
-    private fun seek(judged: String, first: LongRange): Verdict =
-        Verdict.Seek(judged, (first.first - SEEK_BEFORE_SAMPLES).coerceAtLeast(start))
 
     private fun clearMismatch() {
         mismatches = 0
         otherLang = null
-        firstMismatch = null
-    }
-
-    private companion object {
-        /** 最初に違った窓の頭より前に、継ぎ目を探す長さ（窓の頭の語が前の話し手の言語に聞こえて、窓が遅れて違い始めることがある）。 */
-        const val SEEK_BEFORE_SAMPLES = SpeechEngine.SAMPLE_RATE.toLong()
     }
 }

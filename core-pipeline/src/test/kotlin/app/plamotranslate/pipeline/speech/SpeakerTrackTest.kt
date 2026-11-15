@@ -13,7 +13,7 @@ class SpeakerTrackTest {
     private fun track() = SpeakerTrack(start = 0, switchChecks = 3)
 
     /** [at] 秒で終わる1.5秒の窓。 */
-    private fun SpeakerTrack.window(at: Double, lang: String?) = window(s(at - 1.5), s(at), lang)
+    private fun SpeakerTrack.window(at: Double, lang: String?) = window(s(at - 1.5), lang)
 
     /** 日本語と確かになったカード。 */
     private fun sureJa() = track().apply {
@@ -53,16 +53,16 @@ class SpeakerTrackTest {
         t.window(4.0, null)
         t.window(4.5, "en")
         t.window(5.0, null)
-        assertEquals(Verdict.Seek("en", s(3.5 - 1.5 - 1.0)), t.window(5.5, "en"))
+        assertEquals(Verdict.Seek("en", s(1.5)), t.window(5.5, "en"))
     }
 
     @Test
-    fun 確かなカードでは交代に気づいた窓でなく最初に違った窓の少し前から継ぎ目を探させる() {
+    fun 交代に気づくのが遅れても継ぎ目はカードの話し手と同じだった最後の窓から探させる() {
         val t = sureJa()
         t.window(6.0, "en")
         t.window(8.0, "en")
-        // 気づくのは10秒の窓だが、探すのは最初に違った窓（4.5〜6秒）の1秒前から
-        assertEquals(Verdict.Seek("en", s(3.5)), t.window(10.0, "en"))
+        // 気づくのは10秒の窓だが、探すのは日本語と決まった最後の窓（1.5〜3秒）の頭から
+        assertEquals(Verdict.Seek("en", s(1.5)), t.window(10.0, "en"))
     }
 
     @Test
@@ -74,7 +74,7 @@ class SpeakerTrackTest {
         t.seamMissed()
         assertEquals(Verdict.Keep, t.window(5.0, "en"))
         assertEquals(Verdict.Keep, t.window(5.5, "en"))
-        assertEquals(Verdict.Seek("en", s(5.0 - 1.5 - 1.0)), t.window(6.0, "en"))
+        assertEquals(Verdict.Seek("en", s(1.5)), t.window(6.0, "en"))
     }
 
     @Test
@@ -90,7 +90,7 @@ class SpeakerTrackTest {
         assertEquals(true, misheard.sure)
 
         val switched = provisional()
-        assertEquals(Verdict.Seek("ja", 0), switched.recheck("ja", judged = "ko"))
+        assertEquals(Verdict.Seek("ja", s(0.5)), switched.recheck("ja", judged = "ko"))
         assertEquals("ko", switched.lang)
     }
 

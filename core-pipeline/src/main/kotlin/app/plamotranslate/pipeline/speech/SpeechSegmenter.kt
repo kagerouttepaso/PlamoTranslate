@@ -407,7 +407,7 @@ class SpeechSegmenter(
             val costSamples = ((clock() - submittedAt) / 1_000_000 * SAMPLE_RATE / 1000).toInt()
             watchInterval = maxOf(WATCH_INTERVAL_SAMPLES, costSamples * WATCH_COST_RATIO)
             if (card !== open) return@scores
-            follow(card, card.track.window(fromAbs, toAbs, SpeakerJudge.decide(scores, languages, SpeakerJudge.WINDOW)))
+            follow(card, card.track.window(fromAbs, SpeakerJudge.decide(scores, languages, SpeakerJudge.WINDOW)))
         }
     }
 
@@ -453,7 +453,7 @@ class SpeechSegmenter(
     }
 
     /**
-     * 言語が代わった位置を探して区切る。話し手の時系列が示した位置（最初に違った窓の少し前）から今までを0.25秒ずつずらした
+     * 言語が代わった位置を探して区切る。話し手の時系列が示した位置（カードの話し手だと分かっている最後の根拠）から今までを0.25秒ずつずらした
      * 1秒の窓のうち、最初に新しい言語になったところを継ぎ目とみなし、継ぎ目の後ろの音声の全体も新しい言語と決まれば、
      * その前後の区切る位置（[CutPoint.languageSeam]）で区切る。
      * 窓は二分探索で選ぶ（[RecognitionJob.Seam]）。後ろの音声が [newLang] と決まらなければ区切らない（短い窓の聞き違い）。
