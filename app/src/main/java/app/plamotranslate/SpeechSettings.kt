@@ -29,7 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.plamotranslate.llm.Language
-import app.plamotranslate.models.DownloadState
+import app.plamotranslate.models.BundleDownloadControl
 import app.plamotranslate.models.ModelBundle
 import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.models.ModelDownloads
@@ -48,18 +48,16 @@ private const val SAMPLE_KEY = "settings-sample"
 @Composable
 fun SpeechCard() {
     val context = LocalContext.current
-    val download by ModelDownloads.state.collectAsStateWithLifecycle()
-    val failure by ModelDownloads.failure.collectAsStateWithLifecycle()
+    val download by ModelDownloads.items.collectAsStateWithLifecycle()
     val speaking by ReadAloud.speaking.collectAsStateWithLifecycle()
     val preferences = remember { SpeechPreferences(context) }
     var engine by remember { mutableStateOf(preferences.engine) }
     var voice by remember { mutableStateOf(preferences.voice) }
     var speed by remember { mutableStateOf(preferences.speed) }
     var steps by remember { mutableStateOf(preferences.steps) }
-    var refresh by remember { mutableStateOf(0) }
     var askConsent by remember { mutableStateOf(false) }
     var agreed by remember { mutableStateOf(preferences.supertonicAgreed) }
-    val present = remember(refresh, download) { ModelCatalog.speechPresent(context) }
+    val present = remember(download) { ModelCatalog.speechPresent(context) }
     // 声の数はモデルを読み込むと分かる。Supertonic 3を選んでいてモデルがあれば、開いたときに読み込む
     var voices by remember { mutableStateOf(0) }
     LaunchedEffect(present, engine) {
@@ -91,26 +89,8 @@ fun SpeechCard() {
             }
 
             if (engine == SpeechEngine.SUPERTONIC) {
-                val files = ModelBundle.SPEECH.files
-                val state = download
-                if (state is DownloadState.Running && state.bundle == ModelBundle.SPEECH) {
-                    val progress = if (state.total > 0) state.done.toFloat() / state.total else 0f
-                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                    Text(
-                        "${state.done / 1_000_000} / ${state.total / 1_000_000} MB　ダウンロード中はアプリを開いたままにしてください",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    OutlinedButton(onClick = ModelDownloads::cancel) { Text("中止") }
-                } else if (!present) {
-                    Text(
-                        "Supertonic 3は使う前に約${files.sumOf { it.size } / 1_000_000}MBをダウンロードします。" +
-                            "ダウンロードするまでは端末の読み上げで読みます。",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    // 一度に取るのは1組だけ。2Bを取っている間は押せなくし、理由を出す
-                    val busy = state is DownloadState.Running
-                    OutlinedButton(enabled = !busy, onClick = { askConsent = true }) { Text("Supertonic 3をダウンロード") }
-                    if (busy) Text("ほかのモデルのダウンロードが終わると押せます", style = MaterialTheme.typography.bodySmall)
+                BundleDownloadControl(ModelBundle.SPEECH, "Supertonic 3は使う前にダウンロードします。ダウンロードするまでは端末の読み上げで読みます") {
+                    askConsent = true
                 }
                 // 前の版でモデルを取った人は、同意するまで端末の読み上げで読む
                 if (present && !agreed) {
@@ -128,13 +108,10 @@ fun SpeechCard() {
                             askConsent = false
                             preferences.supertonicAgreed = true
                             agreed = true
-                            if (!present) ModelDownloads.start(context, ModelBundle.SPEECH, onCompleted = { refresh++ })
+                            if (!present) ModelDownloads.enqueue(context, listOf(ModelBundle.SPEECH))
                         },
                         onDismiss = { askConsent = false },
                     )
-                }
-                failure?.takeIf { it.bundle == ModelBundle.SPEECH }?.let {
-                    Text(it.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
                 if (present) {
                     Text("音質（段数 $steps）", style = MaterialTheme.typography.titleSmall)
@@ -204,7 +181,7 @@ fun SpeechCard() {
  * BigScience Open RAIL-M License 第5項は、アプリの作者に、使う人へ用途の制限（Attachment A）を守らせるよう求める。
  */
 @Composable
-private fun SupertonicConsentDialog(downloading: Boolean, onAgree: () -> Unit, onDismiss: () -> Unit) {
+internal fun SupertonicConsentDialog(downloading: Boolean, onAgree: () -> Unit, onDismiss: () -> Unit) {
     var fullText by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,

@@ -22,6 +22,10 @@ import androidx.compose.ui.unit.dp
 import app.plamotranslate.asr.AsrTuning
 import app.plamotranslate.asr.SpeechEngines
 import app.plamotranslate.models.ModelCatalog
+import app.plamotranslate.models.BundleDownloadControl
+import app.plamotranslate.models.ModelBundle
+import app.plamotranslate.models.ModelDownloads
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.plamotranslate.pipeline.speech.SegmentationProfile
 import app.plamotranslate.pipeline.speech.SpeechModel
 
@@ -93,8 +97,8 @@ fun recognitionSummary(): String {
 }
 
 /**
- * 技術検証の版：Qwen3-ASR と Whisper tiny は、まだ設定の画面から取れない（PCから adb で置く）。
- * 合意した形は、このモデルに切り替えたときにダウンロードを始める（読み上げの Supertonic 3 と同じ）。
+ * 音声認識モデルの選択。選んだモデルが端末に無ければ、ここからダウンロードする（初回の準備で選ばなかったモデル）。
+ * 切り替えは、モデルがそろうまで効かない（会話翻訳は、モデルが無いと伝えて止まる）。
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -103,6 +107,7 @@ fun RecognitionCard() {
     val preferences = remember { RecognitionPreferences(context) }
     var model by remember { mutableStateOf(preferences.model) }
     val asrDir = remember { ModelCatalog.asrDir(context) }
+    val download by ModelDownloads.items.collectAsStateWithLifecycle()
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -124,18 +129,15 @@ fun RecognitionCard() {
                 }
             }
             SpeechModel.entries.forEach { m ->
-                val missing = remember(m) { SpeechEngines.missingFiles(m, asrDir) }
+                val missing = remember(m, download) { SpeechEngines.missingFiles(m, asrDir) }
                 Text("${m.label}：${m.note}", style = MaterialTheme.typography.bodySmall)
                 Text(
                     "聞ける言語：" + m.languages.joinToString("・") { it.label },
                     style = MaterialTheme.typography.bodySmall,
                 )
                 if (missing.isNotEmpty()) {
-                    Text(
-                        "端末にモデルがありません（検証版はPCから置きます）",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    val bundle = ModelBundle.of(m)
+                    BundleDownloadControl(bundle, "${m.label}は使う前にダウンロードします") { ModelDownloads.enqueue(context, listOf(bundle)) }
                 }
             }
         }

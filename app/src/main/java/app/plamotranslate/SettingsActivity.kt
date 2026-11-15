@@ -37,7 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.plamotranslate.models.DownloadState
+import app.plamotranslate.models.BundleDownloadControl
 import app.plamotranslate.models.ModelBundle
 import app.plamotranslate.models.ModelDownloads
 import app.plamotranslate.models.TranslationModel
@@ -207,20 +207,18 @@ private fun AboutPage() {
 
 /**
  * 翻訳モデルの選択（2026-11-06、作者の要望「2Bも選べるようにして、翻訳品質と速度の違いをチェックしたい」）。
- * 2Bが端末に無ければ、ここからダウンロードする。
+ * 選んだ大きさが端末に無ければ、ここからダウンロードする。
  */
 @Composable
 private fun ModelChooser(model: ModelState) {
     val context = LocalContext.current
-    val download by ModelDownloads.state.collectAsStateWithLifecycle()
-    val failure by ModelDownloads.failure.collectAsStateWithLifecycle()
+    val download by ModelDownloads.items.collectAsStateWithLifecycle()
     val current = (model as? ModelState.Ready)?.model ?: EngineHolder.selected(context)
-    var refresh by remember { mutableStateOf(0) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TranslationModel.entries.forEach { m ->
-                    val present = remember(refresh, download) { m.isPresent(context) }
+                    val present = remember(download) { m.isPresent(context) }
                     FilterChip(
                         selected = current == m,
                         enabled = present && model !is ModelState.Loading,
@@ -232,31 +230,10 @@ private fun ModelChooser(model: ModelState) {
             TranslationModel.entries.forEach {
                 Text("${it.label}：${it.note}", style = MaterialTheme.typography.bodySmall)
             }
-            val large = TranslationModel.LARGE
-            val largePresent = remember(refresh, download) { large.isPresent(context) }
-            val state = download
-            if (state is DownloadState.Running && state.bundle == ModelBundle.LARGE_TRANSLATION) {
-                val progress = if (state.total > 0) state.done.toFloat() / state.total else 0f
-                LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                Text(
-                    "${state.done / 1_000_000} / ${state.total / 1_000_000} MB　ダウンロード中はアプリを開いたままにしてください",
-                    style = MaterialTheme.typography.labelSmall,
-                )
-                OutlinedButton(onClick = ModelDownloads::cancel) { Text("中止") }
-            } else if (!largePresent) {
-                Text(
-                    "2Bは使う前に約${large.file.size / 1_000_000}MBをダウンロードします（Wi-Fiでの実行をおすすめします）。",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                // 一度に取るのは1組だけ。読み上げのモデルを取っている間は押せなくし、理由を出す
-                val busy = state is DownloadState.Running
-                OutlinedButton(enabled = !busy, onClick = {
-                    ModelDownloads.start(context, ModelBundle.LARGE_TRANSLATION, onCompleted = { refresh++ })
-                }) { Text("2Bをダウンロード") }
-                if (busy) Text("ほかのモデルのダウンロードが終わると押せます", style = MaterialTheme.typography.bodySmall)
-            }
-            failure?.takeIf { it.bundle == ModelBundle.LARGE_TRANSLATION }?.let {
-                Text(it.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            // 初回に選ばなかった大きさは、使う前にここから取る
+            TranslationModel.entries.forEach { m ->
+                val bundle = ModelBundle.of(m)
+                BundleDownloadControl(bundle, "${m.label}は使う前にダウンロードします") { ModelDownloads.enqueue(context, listOf(bundle)) }
             }
         }
     }

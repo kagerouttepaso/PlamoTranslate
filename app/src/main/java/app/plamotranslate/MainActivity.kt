@@ -55,6 +55,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -65,10 +69,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.plamotranslate.camera.CameraTranslateActivity
 import app.plamotranslate.conversation.ConversationActivity
-import app.plamotranslate.models.DownloadState
+import app.plamotranslate.models.DownloadStatus
 import app.plamotranslate.models.ModelDownloads
 import app.plamotranslate.models.ModelBundle
-import app.plamotranslate.models.needsSetup
 import app.plamotranslate.screen.ScreenTranslateService
 import androidx.compose.ui.res.stringResource
 
@@ -95,16 +98,20 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        // ファイルの大きさを見るだけなので、画面を出す前に数え直す（準備画面が一瞬出ないように）
-        ModelDownloads.refresh(this)
         setContent {
             AppTheme {
-                val download by ModelDownloads.state.collectAsStateWithLifecycle()
-                if (!download.needsSetup()) {
+                val items by ModelDownloads.items.collectAsStateWithLifecycle()
+                // ファイルの大きさを見るだけなので、画面を出す前に数える（準備画面が一瞬出ないように）
+                val ready = remember(items) { ModelBundle.ready(applicationContext) }
+                // 準備の画面で足した組（読み上げなど）を取り終えるまでは、そろっても準備の画面で一覧を出し続ける
+                var setup by rememberSaveable { mutableStateOf(!ModelBundle.ready(applicationContext)) }
+                val active = items.any { it.status is DownloadStatus.Waiting || it.status is DownloadStatus.Running }
+                LaunchedEffect(ready, active) { if (ready && !active) setup = false }
+                if (ready && !setup) {
                     LaunchedEffect(Unit) { EngineHolder.ensureLoaded(applicationContext) }
                     HomeScreen(onToggleScreenTranslate = ::toggleScreenTranslate)
                 } else {
-                    SetupScreen(download, onCompleted = { EngineHolder.ensureLoaded(applicationContext) })
+                    SetupScreen(items)
                 }
             }
         }
@@ -119,7 +126,7 @@ class MainActivity : ComponentActivity() {
     /** アイコンの長押しメニューとクイック設定のタイルから「画面翻訳」で来たとき。 */
     private fun handleShortcut(intent: Intent?) {
         if (intent?.action != ACTION_SCREEN_TRANSLATE) return
-        if (ModelDownloads.state.value.needsSetup()) return
+        if (!ModelBundle.ready(this)) return
         toggleScreenTranslate()
     }
 
@@ -221,19 +228,7 @@ private fun HomeScreen(onToggleScreenTranslate: () -> Unit) {
 private fun BrandHeader(modelLabel: String, onOpenSettings: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-        AppMark(Modifier.size(40.dp))
-        Spacer(Modifier.width(12.dp))
-        Text(
-            buildAnnotatedString {
-                append("Mocking")
-                withStyle(SpanStyle(color = scheme.primary)) { append("word") }
-            },
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = scheme.onSurface,
-            maxLines = 1,
-            modifier = Modifier.weight(1f),
-        )
+        BrandName(Modifier.weight(1f))
         Surface(
             onClick = onOpenSettings,
             shape = CircleShape,
@@ -249,6 +244,26 @@ private fun BrandHeader(modelLabel: String, onOpenSettings: () -> Unit) {
                 Icon(FeatureIcons.Settings, contentDescription = "設定", modifier = Modifier.size(20.dp))
             }
         }
+    }
+}
+
+/** アプリの印と名前（「Mocking」と主の色の「word」）。トップ画面と初回の準備の画面の上の帯。 */
+@Composable
+internal fun BrandName(modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = modifier) {
+        AppMark(Modifier.size(40.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(
+            buildAnnotatedString {
+                append("Mocking")
+                withStyle(SpanStyle(color = scheme.primary)) { append("word") }
+            },
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = scheme.onSurface,
+            maxLines = 1,
+        )
     }
 }
 
@@ -325,47 +340,6 @@ private fun ModelState.shortLabel(): String = when (this) {
     ModelState.Loading -> "読み込み中…"
     is ModelState.Missing -> "モデルなし"
     is ModelState.Failed -> "読み込み失敗"
-}
-
-/** 初回だけ出す、モデルのダウンロードの画面（2026-11-06、APKを配布するため）。 */
-@Composable
-private fun SetupScreen(state: DownloadState, onCompleted: () -> Unit) {
-    val context = LocalContext.current
-    Scaffold { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
-            Text("最初にモデルを準備します", style = MaterialTheme.typography.titleMedium)
-            when (state) {
-                is DownloadState.Idle, is DownloadState.Failed -> {
-                    val missing = if (state is DownloadState.Idle) state.missing else (state as DownloadState.Failed).missing
-                    val mb = missing.sumOf { it.size } / 1_000_000
-                    Text(
-                        "翻訳と音声・文字の認識に使うモデル（約${mb}MB）を、最初に1回だけダウンロードします。" +
-                            "Wi-Fiでの実行をおすすめします。ダウンロードの後は、通信せずに端末の中だけで動きます。",
-                    )
-                    if (state is DownloadState.Failed) Text(state.message, color = MaterialTheme.colorScheme.error)
-                    Button(onClick = { ModelDownloads.start(context, ModelBundle.REQUIRED, onCompleted) }, enabled = missing.isNotEmpty()) {
-                        Text(if (state is DownloadState.Failed) "続きからダウンロード" else "ダウンロード")
-                    }
-                    LicenseAgreementNote()
-                }
-                is DownloadState.Running -> {
-                    val progress = if (state.total > 0) state.done.toFloat() / state.total else 0f
-                    Text(state.current.label)
-                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                    Text(
-                        "${state.done / 1_000_000} / ${state.total / 1_000_000} MB　ダウンロード中はこの画面を開いたままにしてください",
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                    OutlinedButton(onClick = ModelDownloads::cancel) { Text("中止") }
-                }
-                DownloadState.Completed -> Unit
-            }
-        }
-    }
 }
 
 /** アイコンの長押しメニュー・クイック設定のタイルから画面翻訳を始める・止めるための入口。 */
