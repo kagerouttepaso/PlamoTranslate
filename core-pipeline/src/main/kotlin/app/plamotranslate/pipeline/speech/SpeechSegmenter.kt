@@ -389,12 +389,20 @@ class SpeechSegmenter(
      * 1秒の窓の判定32回のうち韓国語6回・会話の外17回）、誤った交代でカードの言語が変わると、その後の日本語も韓国語として書き起こした。
      */
     private fun checkNextPhrase(card: Card, end: Int = buffer.size) {
-        val cutAbs = abs(lastPhraseEnd)
+        // 区切る位置は、確かめる文の始まり（前の文の終わり）
+        val cutAbs = abs(phraseStart)
         val checkedFrom = phraseStart
         language(card, phraseStart, end, PURPOSE_NEXT_PHRASE) { lang ->
             if (card !== open) return@language
-            // 頭で判定できなければ、同じ文が終わったときに文の全体で確かめ直す
-            if (lang == null && phraseStart == checkedFrom) switchUndecided = true
+            // 頭で判定できなければ、文の全体で確かめ直す。判定が届く前に文が終わっていたら、その場で頼む
+            // （文の終わりで確かめ直す機会は過ぎている）。文の全体を見た判定なら、それ以上は広げられない
+            if (lang == null && phraseStart == checkedFrom) {
+                if (!inGap) {
+                    switchUndecided = true
+                } else if (end < lastPhraseEnd && lastPhraseEnd - phraseStart >= MIN_SWITCH_CHECK_SAMPLES) {
+                    checkNextPhrase(card, lastPhraseEnd)
+                }
+            }
             val prev = lastPhraseLang ?: cardLang.takeIf { byPhrase }
             if (lang == null || prev == null || lang == prev) return@language
             val at = rel(cutAbs)
@@ -738,7 +746,6 @@ class SpeechSegmenter(
         /** 短すぎる音声は認識しても空になりやすいので、0.4秒たまってから認識する。 */
         private const val MIN_PARTIAL_SAMPLES = SAMPLE_RATE * 4 / 10
 
-        /** 次の文の言語を判定するのに使う長さ。短いと言語の判定が揺れる。 */
         /** 次の文の言語を、文の全体で確かめる最短の長さ。 */
         private const val MIN_SWITCH_CHECK_SAMPLES = SAMPLE_RATE
 

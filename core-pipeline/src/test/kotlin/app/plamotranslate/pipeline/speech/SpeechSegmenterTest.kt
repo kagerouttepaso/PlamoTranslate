@@ -497,6 +497,15 @@ class SpeechSegmenterTest {
     }
 
     @Test
+    fun 次の文の頭の判定が文の終わりより後に届いても文の全体で確かめ直して区切る() {
+        // 頭の窓（2秒）だけ判定できない識別。結果は1.2秒遅れて届くので、頭の判定より先に短い文が終わる
+        val asr = HeavyRecognizer { samples, lang -> lang.takeIf { samples != SAMPLE_RATE * 2 } }
+        val s = Harness(asr, profile, byPhrase = true, languages = SpeechLanguages(setOf("ja", "ko")), languageLatencyChunks = 12)
+        val cards = finals(s.feed(Sound.KO to 3.0, Sound.SILENCE to 1.0, Sound.JA to 1.8, Sound.SILENCE to 4.0))
+        assertEquals(listOf("ko", "ja"), cards.map { it.lang })
+    }
+
+    @Test
     fun 重いモデルで認識が遅れても確定は欠けずカードの順に出る() {
         val events = phraseSegmenter(HeavyRecognizer(), latency = 20)
             .feed(Sound.JA to 1.5, Sound.SILENCE to 1.0, Sound.KO to 2.5, Sound.SILENCE to 3.0)
