@@ -179,9 +179,8 @@ class FloatingButton(
         visibility = View.GONE
     }
 
-    /** 鳥の入る丸。印は、この丸の形で切り抜く（輪や縁の線が鳥に重ならない）。 */
+    /** 鳥の入る丸。印は、この丸の形で切り抜く（輪や縁の線が鳥に重ならない）。影は付けない（平らなボタン。縁で見分ける）。 */
     private val face = FrameLayout(context).apply {
-        elevation = context.dp(6).toFloat()
         clipToOutline = true
         // アイコンの格子108のうち、真ん中の72（アダプティブアイコンの見える範囲）を丸いっぱいに描く。
         // 108全体を丸に収めると図柄が小さくなる。はみ出した外周は丸で切れる
