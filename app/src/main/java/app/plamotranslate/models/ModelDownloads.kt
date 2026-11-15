@@ -72,7 +72,8 @@ object ModelDownloads {
         val added = bundles.distinct().filter { it !in queued && !it.isPresent(app) }
         if (added.isEmpty()) return
         added.forEach { bundle -> completed[bundle] = { onCompleted(bundle) } }
-        _items.update { list -> list.filterNot { it.bundle in added } + added.map { DownloadItem(it, DownloadStatus.Waiting) } }
+        // 一度に足した組は、ModelBundle の並び（必須・翻訳・音声認識・読み上げ）で並べる。選ぶ画面と同じ並びにする
+        _items.update { list -> list.filterNot { it.bundle in added } + added.sorted().map { DownloadItem(it, DownloadStatus.Waiting) } }
         if (job == null) job = scope.launch { work(app) }
     }
 

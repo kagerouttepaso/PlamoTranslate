@@ -78,27 +78,35 @@ fun SetupScreen(items: List<DownloadItem>) {
             BrandName(Modifier.fillMaxWidth().padding(top = 4.dp))
             Text("モデルの準備", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             if (!active) {
-                // 役割の面で見分ける：音声認識は話すこと（primary）、翻訳は訳（secondary）、読み上げと必須は地の面
+                // 並びは待ち行列と同じ（必須・翻訳・音声認識・読み上げ。ModelBundle の並び）。選ぶ画面と取っている一覧で
+                // 並びを変えない。役割の面で見分ける：翻訳は訳（secondary）、音声認識は話すこと（primary）、必須と読み上げは地の面
                 // （docs/設計/デザイン言語.md「色」）
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainerHigh, contentColor = scheme.onSurface),
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(ModelBundle.BASE.group, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            "${ModelBundle.BASE.title}・約${ModelBundle.BASE.size / 1_000_000}MB。どの選び方でも取ります",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
                 ChoiceCard(
-                    "音声認識", SpeechModel.entries, recognition, { recognition = it }, { it.label },
-                    { "${it.note}・約${ModelBundle.of(it).size / 1_000_000}MB" },
-                    scheme.primaryContainer, scheme.onPrimaryContainer, scheme.primary,
-                )
-                ChoiceCard(
-                    "翻訳", TranslationModel.entries, translation, { translation = it }, { it.label },
+                    ModelBundle.SMALL_TRANSLATION.group, TranslationModel.entries, translation, { translation = it }, { it.label },
                     { "${it.note}・約${ModelBundle.of(it).size / 1_000_000}MB" },
                     scheme.secondaryContainer, scheme.onSecondaryContainer, scheme.secondary,
                 )
                 ChoiceCard(
-                    "読み上げ", SpeechEngine.entries, speech, { speech = it }, { it.label },
+                    ModelBundle.SENSE_VOICE.group, SpeechModel.entries, recognition, { recognition = it }, { it.label },
+                    { "${it.note}・約${ModelBundle.of(it).size / 1_000_000}MB" },
+                    scheme.primaryContainer, scheme.onPrimaryContainer, scheme.primary,
+                )
+                ChoiceCard(
+                    ModelBundle.SPEECH.group, SpeechEngine.entries, speech, { speech = it }, { it.label },
                     { if (it == SpeechEngine.SUPERTONIC) "${it.note}・約${ModelBundle.SPEECH.size / 1_000_000}MB" else it.note },
                     scheme.surfaceContainerHigh, scheme.onSurface, scheme.primary,
-                )
-                Text(
-                    "必須：${ModelBundle.BASE.label}・約${ModelBundle.BASE.size / 1_000_000}MB",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = scheme.onSurfaceVariant,
                 )
                 val total = remember(bundles, items) { bundles.filterNot { it.isPresent(context) }.sumOf { it.size } }
                 Button(

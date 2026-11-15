@@ -77,19 +77,28 @@ enum class TranslationModel(val label: String, val note: String, val quality: In
  * （[ModelDownloads]。上から順に1組ずつ取る）。
  * 初回の準備がそろったとみなすのは、必須の組（[BASE]）と、翻訳・音声認識のモデルがそれぞれどれか1つ置かれたとき（[ready]）。
  */
-enum class ModelBundle(val label: String) {
+enum class ModelBundle(
+    /** 種類（必須・翻訳・音声認識・読み上げ）。準備の画面の欄の名前と、一覧の行の頭にそろえて使う。 */
+    val group: String,
+    /** その種類の中の名前。 */
+    val title: String,
+) {
+    // 並びは、準備の画面の欄の並びと待ち行列の並びの正本（必須・翻訳・音声認識・読み上げ）。変えるときは両方が変わる
     /** どの選び方でも要る：話しているかの判定（Silero VAD）と、漫画・韓国語の文字の認識（PP-OCR）。 */
-    BASE("話しているかの判定・文字の認識"),
-    SMALL_TRANSLATION("翻訳モデル 0.8B"),
-    LARGE_TRANSLATION("翻訳モデル 2B"),
-    SENSE_VOICE("音声認識 SenseVoice Small"),
+    BASE("必須", "話しているかの判定・文字の認識"),
+    SMALL_TRANSLATION("翻訳", "0.8B"),
+    LARGE_TRANSLATION("翻訳", "2B"),
+    SENSE_VOICE("音声認識", "SenseVoice Small"),
 
     /** Qwen3-ASR と、その前に置く言語の識別（Whisper tiny）。 */
-    QWEN3_ASR("音声認識 Qwen3-ASR（言語の識別 Whisper tiny）"),
+    QWEN3_ASR("音声認識", "Qwen3-ASR 0.6B（言語の識別 Whisper tiny）"),
 
     /** 読み上げのモデル（Supertonic 3）。 */
-    SPEECH("読み上げ Supertonic 3"),
+    SPEECH("読み上げ", "Supertonic 3"),
     ;
+
+    /** 一覧の行に出す名前（「翻訳：0.8B」）。 */
+    val label: String get() = "$group：$title"
 
     val files: List<ModelFile>
         get() = when (this) {

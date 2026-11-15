@@ -67,7 +67,7 @@ fun BundleDownloadControl(bundle: ModelBundle, note: String, onDownload: () -> U
         }
         !present -> {
             Text("$note（約${bundle.size / 1_000_000}MB。Wi-Fiでの実行をおすすめします）", style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(onClick = onDownload) { Text("${bundle.label}をダウンロード") }
+            OutlinedButton(onClick = onDownload) { Text("${bundle.title}をダウンロード") }
             if (status is DownloadStatus.Failed) {
                 Text(status.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
