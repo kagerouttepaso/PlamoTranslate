@@ -13,7 +13,10 @@ import kotlin.concurrent.thread
  *   結果を区切りのスレッドへ返す。書き起こしの担当と識別の担当が分かれているので、重い書き起こしの間も言語の見張りは止まらない。
  *
  * 状態は区切りのスレッドだけが持ち、担当のスレッドとは待ち行列（[lock] で守る）と受け取り口（[inbox]）でだけやり取りする。
- * [timing] は仕事ごとの待ち時間と処理時間を書く口（話した言葉は含めないので、正式版でも書く）。
+ * [timing] は仕事ごとの待ち時間と処理時間を書く口（話した言葉は含めないので、いつも書く）。
+ *
+ * 止め終わりの約束：[flush] を呼んだら、閉じた後でも、認識の担当が失敗しても、[SpeechEvent.Flushed] が1回届く。
+ * 呼んだ側は Flushed を待って聞き終えるので、届かないと止まらなくなるため。
  */
 class SpeechPipeline(
     vad: VoiceActivity,
@@ -45,7 +48,13 @@ class SpeechPipeline(
     private val submittedAt = HashMap<Long, Long>()
 
     @Volatile private var stopping = false
+
+    /** [closed] と、受け取り口へ入れる順番を守る（止めるより後に閉じたら、止める命令は必ず閉じる命令より前に入る）。 */
+    private val gate = Object()
     @Volatile private var closed = false
+
+    /** 止める命令を受け取り、まだ [SpeechEvent.Flushed] を出していない（区切りのスレッドだけが読み書きする）。 */
+    private var flushPending = false
 
     /** 区切りのスレッドが受け取った音声のサンプル数（認識の遅れに使う）。 */
     private var received = 0L
@@ -56,7 +65,10 @@ class SpeechPipeline(
         identifies = recognizer.identifies,
         profile = profile,
         byPhrase = byPhrase,
-        emit = { listener(it) },
+        emit = { event ->
+            if (event == SpeechEvent.Flushed) flushPending = false
+            listener(event)
+        },
         submit = ::enqueue,
         trace = trace,
     )
@@ -80,23 +92,32 @@ class SpeechPipeline(
         if (!closed) inbox.put(Input.Cut)
     }
 
-    override fun flush() {
-        if (!closed) inbox.put(Input.Flush)
+    override fun flush() = synchronized(gate) {
+        // 閉じた後なら、止める仕事はもう無い。待っている呼び手のために、その場で止め終わりを返す
+        if (closed) listener(SpeechEvent.Flushed) else inbox.put(Input.Flush)
     }
 
     override fun reset() {
         if (!closed) inbox.put(Input.Reset)
     }
 
-    /** 区切りのスレッドを止め、担当のスレッドが今の仕事を終えてから、モデルを解放する（呼んだスレッドは待たない）。 */
+    /**
+     * 区切りのスレッドを止め、待ち行列の残りを捨て、担当のスレッドが今の仕事を終えてから、モデルを解放する（呼んだスレッドは待たない）。
+     * 止めている途中なら、確定を待たずに止め終わりを返す。
+     */
     override fun close() {
-        if (closed) return
-        closed = true
-        inbox.put(Input.Close)
+        synchronized(gate) {
+            if (closed) return
+            closed = true
+            inbox.put(Input.Close)
+        }
         thread(name = "PlamoAsrClose") {
             control.join()
             stopping = true
-            synchronized(lock) { lock.notifyAll() }
+            synchronized(lock) {
+                queue.clear()
+                lock.notifyAll()
+            }
             lanes.forEach { it.join() }
             recognizer.close()
         }
@@ -112,19 +133,28 @@ class SpeechPipeline(
                         segmenter.accept(input.samples)
                     }
                     Input.Cut -> segmenter.cut()
-                    Input.Flush -> segmenter.flush()
+                    Input.Flush -> {
+                        flushPending = true
+                        segmenter.flush()
+                    }
                     Input.Reset -> {
                         synchronized(lock) { queue.clear() }
                         segmenter.reset()
+                        // 止めている途中で始め直したら、止める仕事は捨てたので、待っている呼び手に止め終わりを返す
+                        if (flushPending) {
+                            flushPending = false
+                            listener(SpeechEvent.Flushed)
+                        }
                         received = 0
                     }
                     is Input.Result -> segmenter.onResult(input.job.id, input.output)
                     Input.Close -> {
-                        segmenter.close()
+                        runCatching { segmenter.close() }
+                        if (flushPending) listener(SpeechEvent.Flushed)
                         return
                     }
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 timing("区切りで失敗: $e")
             }
             // 閉じたカードの途中結果と言語の判定は、もう要らない
@@ -152,7 +182,8 @@ class SpeechPipeline(
             val began = System.nanoTime()
             val output = try {
                 runner.run(job)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // ネイティブの Error でも担当を止めない（結果が戻らないと、カードも止め終わりも出ない）
                 timing("認識に失敗（${job.purpose}）: $e")
                 RecognitionRunner.empty(job)
             }

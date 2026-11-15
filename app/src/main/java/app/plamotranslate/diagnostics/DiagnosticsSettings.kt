@@ -71,7 +71,7 @@ fun DiagnosticsSettings() {
                 "書き出すと、記録と、今のアプリのログを1つの zip にします。ログには、アプリの動き（訳した件数や時間、" +
                     "失敗など）が入ります。" +
                     if (detailed) "詳細設定で「詳しい記録を残す」を選んでいるので、話した言葉・読み取った文字・訳も入ります。"
-                    else "訳した文や話した言葉は入りません。",
+                    else "訳した文や話した言葉は入りません（前に「詳しい記録を残す」を選んでいた間のログは、残っていれば入ります）。",
                 style = MaterialTheme.typography.bodySmall,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

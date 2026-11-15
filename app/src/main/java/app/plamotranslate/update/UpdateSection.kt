@@ -38,8 +38,9 @@ fun UpdateSection() {
             listOf(false to "正式版のみ", true to "ベータも受け取る").forEach { (beta, label) ->
                 FilterChip(
                     selected = includeBeta == beta,
-                    // 確かめている間に取得先を変えない
-                    enabled = state !is UpdateState.Checking && state !is UpdateState.Downloading,
+                    // 確かめている・取っている・入れている間は取得先を変えない
+                    enabled = state !is UpdateState.Checking && state !is UpdateState.Downloading &&
+                        state !is UpdateState.Installing && state !is UpdateState.NeedsPermission,
                     onClick = {
                         if (includeBeta != beta) {
                             includeBeta = beta

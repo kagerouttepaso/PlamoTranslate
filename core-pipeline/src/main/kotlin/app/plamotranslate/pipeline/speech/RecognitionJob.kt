@@ -90,7 +90,7 @@ enum class RecognitionLane { TRANSCRIBE, IDENTIFY }
 
 /**
  * 仕事の優先順位（小さいほど先）。確定に要る書き起こしを先にし、途中結果は後回しにする。
- * 確定（区切った残り）と文の書き起こしは頼んだ順に処理する（文はつなぐ順に届く）。
+ * 確定（区切った残り）は、前のカードの文の書き起こしより先に出ることがある（出来事はカードの順に出すので、結果の順は崩れない）。
  */
 enum class RecognitionPriority { FINAL, PHRASE, LANGUAGE, PARTIAL }
 

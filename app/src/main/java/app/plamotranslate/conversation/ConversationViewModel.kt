@@ -267,7 +267,8 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
 
     /**
      * 聞く。[block] が音声を渡し終えたら（止めた・取り消された）、話しかけだった分も確定させ、確定し終えるまで待ってから終わる。
-     * 聞いている間だけ、翻訳の CPU のスレッド数を調整の値にする（デバッグ版で、音声認識と翻訳の CPU の取り合いを測るため）。
+     * 聞いている間だけ、翻訳の CPU のスレッド数を詳細設定の値にする（音声認識と翻訳の CPU の取り合いを測るため）。
+     * 画面を閉じても、音声認識は閉じた後の止める命令にも止め終わりを返す（SpeechPipeline）ので、ここで止まらず、スレッド数は戻る。
      */
     private fun listen(block: suspend (SpeechEngine) -> Unit) {
         val engine = asr ?: return
@@ -302,7 +303,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     /**
-     * 翻訳の CPU のスレッド数を変える（0 なら設定の画面の値か既定に戻す）。計測の調整なので、翻訳の流れを通さずエンジンを直接使う
+     * 翻訳の CPU のスレッド数を変える（0 なら設定の画面の値か既定に戻す）。エンジンの設定なので、翻訳の流れを通さずエンジンを直接使う
      * （docs/設計/翻訳コア.md「流れを通さない呼び出し」）。
      */
     private suspend fun configureTranslation(threads: Int) {

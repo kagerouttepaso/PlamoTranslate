@@ -697,7 +697,7 @@ class SpeechSegmenter(
         private const val SPLIT_SEARCH_SAMPLES = SAMPLE_RATE * 4
         private const val MIN_TAIL_SAMPLES = SAMPLE_RATE * 3 / 10
 
-        /** 言語の判定の目的。待ち行列は、同じカード・同じ目的の古い判定を捨てる。 */
+        /** 言語の判定の目的（ログに出す）。言語の見張りはカードごとに1件ずつ頼む。 */
         private const val PURPOSE_CARD = "カードの頭"
         private const val PURPOSE_WATCH = "直近"
         private const val PURPOSE_NEXT_PHRASE = "次の文の頭"

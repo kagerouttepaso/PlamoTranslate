@@ -66,7 +66,7 @@ fun AdvancedPage() {
     RecognitionTuningCard()
 }
 
-/** 詳しい記録の選択。切り替えはその場で効く（ほかのプロセスの画面翻訳は、次に始めたときから）。 */
+/** 詳しい記録の選択。切り替えはその場で効く。 */
 @Composable
 private fun DetailedRecordsCard() {
     val context = LocalContext.current
