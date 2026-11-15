@@ -322,10 +322,14 @@ class SpeechSegmenterTest {
      * 書き起こしの重いモデル（Qwen3-ASR）の代わり。言語だけの識別（[SpeechRecognizer.identify]）ができ、
      * 書き起こした音声の長さ・識別の回数・言語を指定した書き起こしの回数を覚える。
      */
-    private inner class HeavyRecognizer : SpeechRecognizer {
+    private inner class HeavyRecognizer(
+        /** 識別の結果を変える（受け取った音声の長さと、本来の判定から決める）。 */
+        private val identifyAs: (samples: Int, lang: String?) -> String? = { _, lang -> lang },
+    ) : SpeechRecognizer {
         private val inner = FakeRecognizer(::soundOf)
         val transcribed = mutableListOf<Int>()
         var identified = 0
+        val identifiedWindows = mutableListOf<Int>()
 
         /** 言語を指定せずに（書き起こしの中で識別して）書き起こした回数。 */
         var unspecified = 0
@@ -344,7 +348,9 @@ class SpeechSegmenterTest {
         override val identifies get() = true
         override fun identify(samples: FloatArray, languages: SpeechLanguages): String? {
             identified++
-            return inner.recognize(samples).lang?.takeIf { languages.groups == null || it in languages.groups }
+            identifiedWindows += samples.size
+            val lang = inner.recognize(samples).lang?.takeIf { languages.groups == null || it in languages.groups }
+            return identifyAs(samples.size, lang)
         }
 
         override fun close() = Unit
@@ -407,6 +413,46 @@ class SpeechSegmenterTest {
         assertTrue(gap[1].text.all { it == '가' })
         val live = finals(phraseSegmenter(HeavyRecognizer()).feed(Sound.JA to 3.0, Sound.KO to 4.0, Sound.SILENCE to 3.0))
         assertEquals(listOf("ja", "ko"), live.map { it.lang })
+    }
+
+    @Test
+    fun カードの言語を判定できなければ同じ窓を繰り返さず広い窓で判定し直す() {
+        // 3秒より短い窓は判定できない（会話の外の言語と判定する）識別
+        val asr = HeavyRecognizer { samples, lang -> lang.takeIf { samples >= SAMPLE_RATE * 3 } }
+        val s = Harness(asr, profile, byPhrase = true, languages = SpeechLanguages(setOf("ja", "ko"), primary = "ja"))
+        val events = s.feed(Sound.KO to 4.0, Sound.SILENCE to 3.0)
+        val head = asr.identifiedWindows.filter { it >= SAMPLE_RATE * 2 }
+        // 同じ長さの窓を何度も頼まない
+        assertEquals(head.distinct().size, head.size)
+        assertEquals("ko", finals(events).single().lang)
+    }
+
+    @Test
+    fun 一番広い窓でも判定できなければ自分の言語として書き起こす() {
+        val asr = HeavyRecognizer { _, _ -> null }
+        val s = Harness(asr, profile, byPhrase = true, languages = SpeechLanguages(setOf("ja", "ko"), primary = "ja"))
+        val events = s.feed(Sound.JA to 7.0, Sound.SILENCE to 3.0)
+        // 文字は話し終わる前に出る（言語が決まらないまま待たない）
+        assertTrue(events.takeWhile { it !is SpeechEvent.Final }.any { it is SpeechEvent.Partial && it.text.isNotEmpty() })
+        assertEquals("ja", finals(events).single().lang)
+    }
+
+    @Test
+    fun 次の文の頭で言語を判定できなければ文の全体で確かめ直して区切る() {
+        // 2.5秒より短い窓は判定できない識別。韓国語の文の後、間を空けて日本語の文（3秒）
+        val asr = HeavyRecognizer { samples, lang -> lang.takeIf { samples >= SAMPLE_RATE * 5 / 2 } }
+        val cards = finals(phraseSegmenter(asr).feed(Sound.KO to 3.0, Sound.SILENCE to 1.0, Sound.JA to 3.0, Sound.SILENCE to 3.0))
+        assertEquals(listOf("ko", "ja"), cards.map { it.lang })
+        assertTrue(cards[1].text, cards[1].text.all { it == 'あ' })
+    }
+
+    @Test
+    fun 話し中の見張りは判定できなかった窓で数え直さない() {
+        // 2回に1回は判定できない識別でも、韓国語が続けば日本語のカードを区切る
+        var calls = 0
+        val asr = HeavyRecognizer { _, lang -> lang.takeIf { calls++ % 2 == 0 } }
+        val cards = finals(phraseSegmenter(asr).feed(Sound.JA to 3.0, Sound.KO to 6.0, Sound.SILENCE to 3.0))
+        assertEquals(listOf("ja", "ko"), cards.map { it.lang })
     }
 
     @Test

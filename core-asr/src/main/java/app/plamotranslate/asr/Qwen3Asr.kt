@@ -28,7 +28,9 @@ class Qwen3Recognizer private constructor(private val recognizer: OfflineRecogni
             NAMES[language]?.let { stream.setOption("language", it) }
             stream.acceptWaveform(samples, SpeechEngine.SAMPLE_RATE)
             recognizer.decode(stream)
-            return Recognition(recognizer.getResult(stream).text.trim(), lang = null)
+            // 終わりの印（<|endoftext|> など）の後ろは、モデルが作り出した続き（2026-11-15のベータで、日本語の後に英語の記事の文を出した）
+            val text = recognizer.getResult(stream).text.substringBefore("<|").trim()
+            return Recognition(text, lang = null)
         } finally {
             stream.release()
         }

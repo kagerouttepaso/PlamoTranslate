@@ -96,6 +96,9 @@ class SpeechSegmenter(
     /** 今の文の言語を、前の文と比べ終えたか。 */
     private var switchChecked = true
 
+    /** 次の文の頭では言語を判定できなかった（文が終わったら、文の全体で確かめ直す）。 */
+    private var switchUndecided = false
+
     /** このカードの言語（[LanguageEvidence] の組）。言語の交代を見張る基準。 */
     private var cardLang: String? = null
 
@@ -148,6 +151,9 @@ class SpeechSegmenter(
         var lastText = ""
         var partialInFlight = false
         var langPending = false
+
+        /** カードの言語を判定した窓の終わり（判定できなかったら、音声が増えてから広い窓で判定し直す）。 */
+        var langTriedTo = -1L
         var watchPending = false
         var seamPending = false
     }
@@ -189,6 +195,14 @@ class SpeechSegmenter(
         if (signal.phraseEnded) {
             // 文の終わり：区切りの無音を少しだけ残した位置を、文の終わりとして覚える
             val end = (buffer.size - phraseTailDrop).coerceAtLeast(phraseStart)
+            // 次の文が、言語を確かめる長さに届かずに終わったら、文の全体で前の文と言語が同じか確かめる
+            // 頭で判定できなかったときも、文の全体で確かめ直す（長い窓ほど判定できる。2026-11-15のベータで、韓国語の後の日本語の文を
+            // 頭の1.7秒では判定できず、文の全体では日本語と判定できたのに、1枚のカードのままだった）
+            if ((!switchChecked || switchUndecided) && end - phraseStart >= MIN_SWITCH_CHECK_SAMPLES) {
+                switchChecked = true
+                switchUndecided = false
+                checkNextPhrase(card, end)
+            }
             phraseEnded(card, end)
             lastPhraseEnd = end
             inGap = true
@@ -200,6 +214,7 @@ class SpeechSegmenter(
                 inGap = false
                 phraseStart = lastPhraseEnd
                 switchChecked = false
+                switchUndecided = false
             } else {
                 gapSamples += samples.size
                 if (gapSamples >= cardEndGapSamples) {
@@ -213,7 +228,7 @@ class SpeechSegmenter(
             }
         }
 
-        if (!switchChecked && buffer.size - phraseStart >= SWITCH_CHECK_SAMPLES) {
+        if (!switchChecked && buffer.size - phraseStart >= cardLangSamples) {
             switchChecked = true
             checkNextPhrase(card)
         }
@@ -303,6 +318,7 @@ class SpeechSegmenter(
         inGap = false
         gapSamples = 0
         switchChecked = true
+        switchUndecided = false
         resetCardState()
     }
 
@@ -349,17 +365,23 @@ class SpeechSegmenter(
     /** 書き起こした（頼んだ）文の終わり（ためた音声の中の位置）。ここから後ろが、まだ書き起こしていない音声。 */
     private fun stitchedEnd(card: Card): Int = card.phrases.lastOrNull()?.let { rel(it.end) } ?: rel(card.start).coerceAtLeast(0)
 
-    /** 次の文の頭の1秒の言語が前の文と違えば、話し手が代わったとみなして前の文までで区切る（間あり）。 */
-    private fun checkNextPhrase(card: Card) {
+    /**
+     * 次の文の頭の言語が前の文と違えば、話し手が代わったとみなして前の文までで区切る（間あり）。窓はカードの言語を決める長さ
+     * （文がそれより短ければ文の全体）。1秒の窓は、作者の日本語を韓国語と誤ることが多く（2026-11-15のベータの記録で、
+     * 1秒の窓の判定32回のうち韓国語6回・会話の外17回）、誤った交代でカードの言語が変わると、その後の日本語も韓国語として書き起こした。
+     */
+    private fun checkNextPhrase(card: Card, end: Int = buffer.size) {
         val cutAbs = abs(lastPhraseEnd)
-        language(card, phraseStart, buffer.size, PURPOSE_NEXT_PHRASE) { lang ->
+        val checkedFrom = phraseStart
+        language(card, phraseStart, end, PURPOSE_NEXT_PHRASE) { lang ->
             if (card !== open) return@language
+            // 頭で判定できなければ、同じ文が終わったときに文の全体で確かめ直す
+            if (lang == null && phraseStart == checkedFrom) switchUndecided = true
             val prev = lastPhraseLang ?: cardLang.takeIf { byPhrase }
             if (lang == null || prev == null || lang == prev) return@language
             val at = rel(cutAbs)
             if (at <= 0 || at > buffer.size) return@language
-            cutAt(at, "言語の交代（間あり：$prev→$lang）", manual = false)
-            setCardLang(lang)
+            cutAt(at, "言語の交代（間あり：$prev→$lang）", manual = false, lang = lang)
         }
     }
 
@@ -372,8 +394,16 @@ class SpeechSegmenter(
     private fun watchLanguage(card: Card) {
         if (cardLang == null) {
             if (card.langPending || buffer.size < speechStart + cardLangSamples) return
+            // 判定できなかったら、音声が増えてから話し始めからの広い窓で判定し直す（同じ窓は何度判定しても同じ）
+            val end = minOf(buffer.size, speechStart + CARD_LANG_MAX_SAMPLES)
+            if (card.langTriedTo >= 0 && abs(end) - card.langTriedTo < CARD_LANG_RETRY_SAMPLES) {
+                // 一番広い窓でも判定できなければ、手がかりの言語にする（言語が決まらないと、文字を出せず言語の見張りも始まらない）
+                if (end == speechStart + CARD_LANG_MAX_SAMPLES) setCardLang(lastPhraseLang ?: languages.primary ?: return)
+                return
+            }
             card.langPending = true
-            language(card, speechStart, speechStart + cardLangSamples, PURPOSE_CARD) { lang ->
+            card.langTriedTo = abs(end)
+            language(card, speechStart, end, PURPOSE_CARD) { lang ->
                 card.langPending = false
                 if (card === open && cardLang == null && lang != null) setCardLang(lang)
             }
@@ -386,7 +416,9 @@ class SpeechSegmenter(
         language(card, buffer.size - LANG_WINDOW_SAMPLES, buffer.size, PURPOSE_WATCH) { recent ->
             card.watchPending = false
             if (card !== open || cardLang != expected) return@language
-            if (recent == null || recent == expected) {
+            // 判定できなかった窓は、交代の根拠にも反証にもしない（会話の外の言語と判定されることが多く、数え直すと交代を見逃した）
+            if (recent == null) return@language
+            if (recent == expected) {
                 mismatches = 0
                 return@language
             }
@@ -438,14 +470,16 @@ class SpeechSegmenter(
             } else {
                 CutPoint.languageSeam(buffer, start, end)
             }
-            cutAt(at, "言語の交代（話し中：$previous→$newLang）", manual = false)
-            setCardLang(newLang)
+            cutAt(at, "言語の交代（話し中：$previous→$newLang）", manual = false, lang = newLang)
         }
     }
 
     /** 話し続けたまま [at] で区切る。前を確定させ、後ろは次のカードの頭として残す。 */
-    private fun cutAt(at: Int, reason: String, manual: Boolean) {
+    private fun cutAt(at: Int, reason: String, manual: Boolean, lang: String? = null) {
         val card = open ?: return
+        // 区切る位置より後ろで終わった文（言語の判定が届く前に文が終わっていたもの）は、次のカードの文として書き起こし直す
+        // （前のカードの言語で書き起こしているうえ、前のカードからは外すので、移さないと言葉が消える）
+        val moved = if (byPhrase) card.phrases.filter { it.end > abs(at) }.map { it.end } else emptyList()
         close(card, at, reason, transcribeRest = true, manual = manual)
         buffer.take(at)
         bufferStart += at
@@ -456,7 +490,9 @@ class SpeechSegmenter(
         // 区切った後ろは別の話し手の可能性があるので、カードの言語は決め直す（呼び出し側が分かっていれば上書きする）
         resetCardState()
         // 区切った後ろの文は、次のカードで書き起こし直す（区切る位置が文の途中のこともあるため）
-        openCard()
+        val next = openCard()
+        if (lang != null) setCardLang(lang)
+        moved.forEach { end -> phraseEnded(next, rel(end)) }
     }
 
     /**
@@ -609,7 +645,7 @@ class SpeechSegmenter(
         var from = rel(phrase.from).coerceAtLeast(0)
         if (byPhrase && from == 0 && speechStart > 0) from = SpeechOnset.start(buffer.slice(0, speechStart), speechStart).coerceAtMost(to)
         val language = cardLang
-        val fallback = lastPhraseLang
+        val fallback = lastPhraseLang ?: languages.primary
         val fromAbs = abs(from)
         job(
             { id ->
@@ -676,7 +712,12 @@ class SpeechSegmenter(
         private const val MIN_PARTIAL_SAMPLES = SAMPLE_RATE * 4 / 10
 
         /** 次の文の言語を判定するのに使う長さ。短いと言語の判定が揺れる。 */
-        private const val SWITCH_CHECK_SAMPLES = SAMPLE_RATE
+        /** 次の文の言語を、文の全体で確かめる最短の長さ。 */
+        private const val MIN_SWITCH_CHECK_SAMPLES = SAMPLE_RATE
+
+        /** カードの言語を判定し直す窓の、一番広い長さと、広げる刻み。 */
+        private const val CARD_LANG_MAX_SAMPLES = SAMPLE_RATE * 5
+        private const val CARD_LANG_RETRY_SAMPLES = SAMPLE_RATE
 
         /** 話している最中の言語の見張りに使う、直近の音声の長さ。 */
         private const val LANG_WINDOW_SAMPLES = SAMPLE_RATE * 3 / 2

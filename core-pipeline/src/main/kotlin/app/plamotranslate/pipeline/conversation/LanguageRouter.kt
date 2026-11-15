@@ -88,7 +88,7 @@ class LanguageRouter(mode: PartnerMode = PartnerMode.AUTO, self: Language = Lang
     val speechLanguages: SpeechLanguages
         get() {
             val partners = mode.fixed?.let { listOf(it) } ?: (mode.autoCandidates(self) + listOfNotNull(lastPartner))
-            return SpeechLanguages((partners + self).mapTo(HashSet()) { speechGroup(it) }, separateChinese = chinese)
+            return SpeechLanguages((partners + self).mapTo(HashSet()) { speechGroup(it) }, separateChinese = chinese, primary = speechGroup(self))
         }
 
     /** 確定した発話の方向を決め、自動なら相手の言語を覚える。 */
