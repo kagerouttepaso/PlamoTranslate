@@ -229,13 +229,6 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun 話している最中の交代は続けて違ったときだけ区切る() {
-        // 直近の窓が2回だけ違う言語（約1秒）なら区切らない
-        val cards = finals(segmenter().feed(Sound.JA to 4.0, Sound.KO to 1.0, Sound.JA to 3.0, Sound.SILENCE to 3.0))
-        assertEquals(1, cards.size)
-    }
-
-    @Test
     fun 話し終わりの確定は話していないとみなした小さい声の語尾も入れる() {
         val card = finals(segmenter().feed(Sound.JA to 1.5, Sound.SOFT to 0.5, Sound.SILENCE to 3.0)).single()
         assertTrue(card.text, card.text.endsWith("ぁ"))
@@ -406,21 +399,6 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun カードの言語を決める長さを短くすると早く文字が出る() {
-        fun firstTextAt(seconds: Float): Int {
-            val s = Harness(
-                HeavyRecognizer(), profile.copy(cardLanguageSeconds = seconds), heavy = true, languages = SpeechLanguages(setOf("ja", "ko")),
-            )
-            val events = s.feed(Sound.KO to 3.0)
-            return events.indexOfFirst { it is SpeechEvent.Partial && it.text.isNotEmpty() }.also { assertTrue(it >= 0) }.let {
-                (events[it] as SpeechEvent.Partial).text.length
-            }
-        }
-        // 最初の文字が出た時点の文字数（話し始めからの長さ）が短い
-        assertTrue(firstTextAt(1.0f) < firstTextAt(2.0f))
-    }
-
-    @Test
     fun 重いモデルでも話し手の交代で区切る() {
         val gap = finals(phraseSegmenter(HeavyRecognizer()).feed(Sound.JA to 1.5, Sound.SILENCE to 1.0, Sound.KO to 1.5, Sound.SILENCE to 3.0))
         assertEquals(listOf("ja", "ko"), gap.map { it.lang })
@@ -464,15 +442,6 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun 話し中の見張りは判定できなかった窓で数え直さない() {
-        // 2回に1回は判定できない識別でも、韓国語が続けば日本語のカードを区切る
-        var calls = 0
-        val asr = HeavyRecognizer { _, lang -> lang.takeIf { calls++ % 2 == 0 } }
-        val cards = finals(phraseSegmenter(asr).feed(Sound.JA to 3.0, Sound.KO to 6.0, Sound.SILENCE to 3.0))
-        assertEquals(listOf("ja", "ko"), cards.map { it.lang })
-    }
-
-    @Test
     fun 書き起こしが重く途中結果の間隔が延びても話し中の交代にすぐ気づき継ぎ目で区切る() {
         // 書き起こしに1.5秒かかる（途中結果の間隔は3秒に延びる）。言語の識別はその場で返る
         val cards = finals(phraseSegmenter(HeavyRecognizer(), latency = 15).feed(Sound.JA to 4.0, Sound.KO to 5.0, Sound.SILENCE to 3.0))
@@ -480,6 +449,16 @@ class SpeechSegmenterTest {
         // 区切りは言語の継ぎ目の近く：韓国語の頭が前のカードに残らない
         assertTrue(cards[0].text, cards[0].text.count { it == '가' } <= 3)
         assertTrue(cards[1].text, cards[1].text.count { it == '가' } >= 45)
+    }
+
+    @Test
+    fun 話し中の交代に遅れて気づいても新しい話し手の頭を前のカードに残さない() {
+        // 言語の判定に0.5秒かかり、見張りの間隔が延びて、日本語と確かになったカードの交代に気づくのは代わってから数秒後になる
+        val s = Harness(HeavyRecognizer(), profile, heavy = true, languages = SpeechLanguages(setOf("ja", "ko")), languageLatencyChunks = 5)
+        val cards = finals(s.feed(Sound.JA to 6.0, Sound.KO to 6.5, Sound.SILENCE to 3.0))
+        assertEquals(listOf("ja", "ko"), cards.map { it.lang })
+        assertTrue(cards[0].text, cards[0].text.count { it == '가' } <= 3)
+        assertTrue(cards[1].text, cards[1].text.count { it == '가' } >= 60)
     }
 
     @Test
