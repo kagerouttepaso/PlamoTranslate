@@ -30,4 +30,15 @@ class AppVersionTest {
         assertFalse(AppVersion.isNewer("nightly", "0.4.0"))
         assertFalse(AppVersion.isNewer("v0.5.0", ""))
     }
+
+    @Test
+    fun betaIsOlderThanTheReleaseOfTheSameNumber() {
+        assertTrue(AppVersion.isNewer("v0.11.0-beta.1", "0.10.1"))
+        assertTrue(AppVersion.isNewer("v0.11.0-beta.2", "0.11.0-beta.1"))
+        assertTrue(AppVersion.isNewer("v0.11.0-beta.10", "0.11.0-beta.2"))
+        assertTrue(AppVersion.isNewer("v0.11.0", "0.11.0-beta.3"))
+        assertFalse(AppVersion.isNewer("v0.11.0-beta.3", "0.11.0"))
+        assertFalse(AppVersion.isNewer("v0.11.0-beta.1", "0.11.0-beta.1"))
+        assertTrue(AppVersion.isNewer("v0.11.0-rc.1", "0.11.0-beta.9"))
+    }
 }

@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** GitHubのリリース1件。[apkSha256] はGitHubがアセットに付けるSHA-256（`digest`）。 */
@@ -59,6 +60,7 @@ sealed interface UpdateState {
  *
  * - 通信するのは、設定の画面で「更新を確認」「ダウンロードして更新」を押したときだけ（起動時に勝手に確かめない）。
  * - 確認：公開リポジトリのAPI `releases/latest` を読み、タグとアプリの版を比べる（[AppVersion]）。認証は要らない。
+ *   「ベータも受け取る」（[UpdatePreferences.includeBeta]）なら `releases` の一覧を読み、pre-release を含めて一番新しい版を選ぶ。
  * - ダウンロード：モデルと同じ部品（[ModelDownloads.download]：続きから取る、SHA-256で照合）で、アプリのキャッシュへ取る。
  * - 照合：取ったAPKのパッケージ名が同じで、版が新しく、署名の鍵が入っているアプリと同じことを確かめてから入れる。
  *   開発版（デバッグ鍵）や他人が作ったAPKは、ここで止める。
@@ -69,6 +71,7 @@ sealed interface UpdateState {
  */
 object AppUpdater {
     const val LATEST_API = "https://api.github.com/repos/kagerouttepaso/PlamoTranslate/releases/latest"
+    const val RELEASES_API = "https://api.github.com/repos/kagerouttepaso/PlamoTranslate/releases?per_page=20"
     const val RELEASES_PAGE = "https://github.com/kagerouttepaso/PlamoTranslate/releases"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -86,7 +89,7 @@ object AppUpdater {
         job = scope.launch {
             _state.value = UpdateState.Checking
             _state.value = try {
-                val release = fetchLatest(currentVersion(app))
+                val release = fetchLatest(currentVersion(app), UpdatePreferences(app).includeBeta)
                 if (AppVersion.isNewer(release.tag, currentVersion(app))) UpdateState.Available(release)
                 else UpdateState.UpToDate(release.tag)
             } catch (e: CancellationException) {
@@ -145,6 +148,12 @@ object AppUpdater {
         job?.cancel()
     }
 
+    /** 取得先を変えたときに、前の確認の結果を消す（取っている途中なら何もしない）。 */
+    fun reset() {
+        if (job?.isActive == true) return
+        _state.value = UpdateState.Idle
+    }
+
     /** インストールの結果（[InstallResultReceiver]）。成功したらアプリは入れ替わって終わるので、ここに来るのは失敗と取り消しだけ。 */
     internal fun onInstallFinished(success: Boolean, message: String?) {
         val release = (state.value as? UpdateState.Installing)?.release
@@ -157,8 +166,8 @@ object AppUpdater {
 
     private fun updatesDir(context: Context) = File(context.cacheDir, "updates").apply { mkdirs() }
 
-    private fun fetchLatest(currentVersion: String): ReleaseInfo {
-        val conn = (URL(LATEST_API).openConnection() as HttpURLConnection).apply {
+    private fun fetchLatest(currentVersion: String, includeBeta: Boolean): ReleaseInfo {
+        val conn = (URL(if (includeBeta) RELEASES_API else LATEST_API).openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
             readTimeout = 30_000
             setRequestProperty("Accept", "application/vnd.github+json")
@@ -172,10 +181,24 @@ object AppUpdater {
                     throw IOException("GitHubへの問い合わせが多すぎます。しばらく（1時間ほど）待ってからもう一度押してください")
                 else -> throw IOException("更新を確かめられませんでした（HTTP $code）")
             }
-            return parseRelease(conn.inputStream.bufferedReader().use { it.readText() })
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            return if (includeBeta) newestRelease(body) else parseRelease(body)
         } finally {
             conn.disconnect()
         }
+    }
+
+    /**
+     * リリースの一覧のJSONから、下書きを除き、照合できるAPKがあるもののうち一番新しい版を選ぶ（pre-release を含む）。
+     * 版を読めないタグは選ばない。
+     */
+    internal fun newestRelease(json: String): ReleaseInfo {
+        val list = JSONArray(json)
+        val releases = (0 until list.length()).map { list.getJSONObject(it) }
+            .filter { !it.optBoolean("draft") && AppVersion.parse(it.optString("tag_name")) != null }
+            .mapNotNull { runCatching { parseRelease(it.toString()) }.getOrNull() }
+        return releases.maxWithOrNull { a, b -> AppVersion.compare(a.tag, b.tag) ?: 0 }
+            ?: throw IOException("APKのあるリリースが見つかりません")
     }
 
     /** GitHubのリリースのJSONから、APKのアセットを1つ選ぶ。SHA-256（digest）が無ければ照合できないので使わない。 */

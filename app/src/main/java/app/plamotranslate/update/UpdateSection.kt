@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -15,6 +16,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -27,7 +31,32 @@ import app.plamotranslate.openUrl
 fun UpdateSection() {
     val context = LocalContext.current
     val state by AppUpdater.state.collectAsStateWithLifecycle()
+    val preferences = remember { UpdatePreferences(context) }
+    var includeBeta by remember { mutableStateOf(preferences.includeBeta) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(false to "正式版のみ", true to "ベータも受け取る").forEach { (beta, label) ->
+                FilterChip(
+                    selected = includeBeta == beta,
+                    // 確かめている間に取得先を変えない
+                    enabled = state !is UpdateState.Checking && state !is UpdateState.Downloading,
+                    onClick = {
+                        if (includeBeta != beta) {
+                            includeBeta = beta
+                            preferences.includeBeta = beta
+                            AppUpdater.reset()
+                        }
+                    },
+                    label = { Text(label) },
+                )
+            }
+        }
+        if (includeBeta) {
+            Text(
+                "ベータは試験中の版です。不具合があるかもしれません。正式版のみに戻しても、次の正式版が出るまではベータのままです。",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         when (val s = state) {
             UpdateState.Idle -> OutlinedButton(onClick = { AppUpdater.check(context) }) { Text("更新を確認") }
             UpdateState.Checking -> Row(verticalAlignment = Alignment.CenterVertically) {
