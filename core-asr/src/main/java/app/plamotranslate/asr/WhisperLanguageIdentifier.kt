@@ -14,7 +14,11 @@ import java.io.File
  * [dir] には `tiny-encoder.int8.onnx`・`tiny-decoder.int8.onnx` を置く（sherpa-onnx の asr-models の `sherpa-onnx-whisper-tiny`）。
  */
 class WhisperLanguageIdentifier private constructor(private val lid: SpokenLanguageIdentification) : LanguageIdentifier {
-    /** 言語のコード（"ja"・"ru" など Whisper の表記）。判定できなければ null。端末で5秒の発話に0.23〜0.3秒。 */
+    /**
+     * 言語のコード（"ja"・"ru" など Whisper の表記）。判定できなければ null。端末で5秒の発話に0.23〜0.3秒。
+     * 識別の担当と書き起こしの担当（カードの言語が無いときに識別してから書き起こす）の両方から呼ばれるので、1件ずつにする。
+     */
+    @Synchronized
     override fun identify(samples: FloatArray): String? {
         val stream = lid.createStream()
         try {

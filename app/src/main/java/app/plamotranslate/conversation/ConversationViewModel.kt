@@ -10,6 +10,7 @@ import app.plamotranslate.EngineHolder
 import app.plamotranslate.ModelState
 import app.plamotranslate.ReadAloud
 import app.plamotranslate.RecognitionPreferences
+import app.plamotranslate.TranslationPreferences
 import app.plamotranslate.asr.SpeechEngines
 import app.plamotranslate.asr.WavFile
 import app.plamotranslate.audio.MicRecorder
@@ -35,14 +36,13 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicInteger
+import app.plamotranslate.llm.TranslationEngine
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -101,7 +101,8 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     private val preferences = ConversationPreferences(app)
 
     /** 音声認識モデル（設定の画面で前もって選ぶ）。会話で選べる言語はこのモデルの言語。画面を開いたときに読む。 */
-    private val speechModel = RecognitionPreferences(app).model
+    private val recognition = RecognitionPreferences(app)
+    private val speechModel = recognition.model
 
     private val session = ConversationSession(self = preferences.self(speechModel.languages) ?: Language.JA)
 
@@ -129,9 +130,11 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         _state.update { it.copy(asr = AsrState.Loading) }
         viewModelScope.launch {
             val begin = System.nanoTime()
-            val result = withContext(asrDispatcher) { runCatching { SpeechEngines.load(speechModel, dir, PROFILE) } }
+            val result = withContext(Dispatchers.Default) {
+                runCatching { SpeechEngines.load(speechModel, dir, recognition.profile(PROFILE), recognition.asrTuning) }
+            }
             log("音声認識を読み込みました: $speechModel ${(System.nanoTime() - begin) / 1_000_000}ms")
-            result.onSuccess { asr = it.also { engine -> engine.languages = session.speechLanguages } }
+            result.onSuccess { asr = it.also(::attach) }
             _state.update {
                 it.copy(asr = result.fold({ AsrState.Ready }, { e -> AsrState.Failed(e.message ?: e.toString()) }))
             }
@@ -152,60 +155,48 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     /**
-     * マイクで聞く。録音と音声認識を別のスレッドに分ける：録音の側で音量を測って画面に出し、音声は上限の無い列で
-     * 音声認識のスレッドへ渡す。書き起こしが重いモデル（1回に1〜2秒）でも、音量のバーは止まらず、音声も落とさない
-     * （録音の流れの中の詰まりで、話し中にバーが止まった。2026-11-15）。認識の遅れ（列にたまった音声）は画面に出す。
+     * 音声認識の出来事と混み具合を受け取る。出来事は区切りのスレッドから届くので、画面のスレッドの制御へ順に渡す。
+     * 認識が確定に要る書き起こしを抱えている間は、途中訳を待たせる（CPU を確定の書き起こしに回す）。
+     */
+    private fun attach(engine: SpeechEngine) {
+        engine.languages = session.speechLanguages
+        engine.listener = { event ->
+            if (event == SpeechEvent.Flushed) flushed?.complete(Unit)
+            post(listOf(event))
+        }
+        engine.loadListener = { load ->
+            viewModelScope.launch {
+                if (load.behindSeconds != _state.value.lagSeconds) _state.update { it.copy(lagSeconds = load.behindSeconds) }
+                handle(Event.RecognitionBusy(load.urgent))
+            }
+        }
+    }
+
+    /** 止めたときに、話しかけだった分を確定し終えるのを待つ。 */
+    @Volatile private var flushed: CompletableDeferred<Unit>? = null
+
+    /**
+     * マイクで聞く。録音の側で音量を測って画面に出し、音声は音声認識に渡すだけにする（音声認識は区切りと認識の担当の
+     * スレッドで動き、録音を待たせない）。書き起こしが重いモデル（1回に1〜2秒）でも、音量のバーは止まらず、音声も落とさない。
+     * 認識の遅れ（まだ書き起こしていない確定に要る音声が、どれだけ前のものか）は画面に出す。
      *
-     * 区切るボタンは、列の中に区切りの印を入れる（[cut]）。押した時点の音声の位置で区切られ、認識が遅れていても
-     * 音声と同じ順に処理される。停止は録音だけを止め、列にたまった音声を書き起こしてから終わる（[stop]）。
+     * 区切るボタンは、音声と同じ順に区切りの命令を渡す（[cut]）。押した時点の音声の位置で区切られる。
+     * 停止は録音だけを止め、たまった音声を書き起こしてから終わる（[listen]）。
      */
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start() = listen { engine ->
         val recording = recorder()
-        val queue = Channel<MicItem>(Channel.UNLIMITED)
-        val queued = AtomicInteger()
-        micQueue = queue
         try {
-            coroutineScope {
-                micJob = launch(Dispatchers.IO) {
-                    try {
-                        MicRecorder.stream().collect { raw ->
-                            val chunk = muteReadAloud(raw)
-                            meter(chunk)
-                            queued.addAndGet(chunk.size)
-                            queue.send(MicItem.Audio(chunk))
-                        }
-                    } finally {
-                        queue.close()
-                    }
-                }
-                for (item in queue) when (item) {
-                    is MicItem.Audio -> {
-                        post(engine.accept(item.chunk))
-                        val behind = queued.addAndGet(-item.chunk.size).toFloat() / SpeechEngine.SAMPLE_RATE
-                        if (behind != _state.value.lagSeconds) _state.update { it.copy(lagSeconds = behind) }
-                        recording?.write(item.chunk)
-                    }
-                    // 区切った分の確定と、区切りを終えた知らせを一緒に渡す（書き起こし待ちのカードと確定が同じ時に入れ替わる）
-                    MicItem.Cut -> post(engine.cut().map(Event::Speech) + Event.CutSettled)
-                }
+            MicRecorder.stream().collect { raw ->
+                val chunk = muteReadAloud(raw)
+                meter(chunk)
+                engine.accept(chunk)
+                recording?.write(chunk)
             }
         } finally {
-            micQueue = null
-            micJob = null
             recording?.close()
         }
     }
-
-    /** 録音から音声認識のスレッドへ渡すもの。音声と、区切るボタンの印を、押した順に並べる。 */
-    private sealed interface MicItem {
-        class Audio(val chunk: FloatArray) : MicItem
-        data object Cut : MicItem
-    }
-
-    /** マイクで聞いている間の、録音の列と録音の作業。 */
-    @Volatile private var micQueue: Channel<MicItem>? = null
-    @Volatile private var micJob: Job? = null
 
     /**
      * デバッグ版だけ、音声認識へ渡した音声を WAV に書く（docs/設計/会話翻訳.md「動作確認」）。[startFromWav] で流し直して、
@@ -233,7 +224,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
             val begin = System.nanoTime()
             val part = muteReadAloud(padded.copyOfRange(from, minOf(from + chunk, padded.size)))
             meter(part)
-            post(engine.accept(part))
+            engine.accept(part)
             val spentMs = (System.nanoTime() - begin) / 1_000_000
             Thread.sleep((100 - spentMs).coerceAtLeast(0))
         }
@@ -254,8 +245,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
      * （認識が遅れていても、止める前に話した分を落とさない）。
      */
     fun stop() {
-        val mic = micJob
-        if (mic?.isActive == true) mic.cancel() else listenJob?.cancel()
+        listenJob?.cancel()
     }
 
     /**
@@ -266,10 +256,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         val engine = asr ?: return
         if (listenJob?.isActive != true) return
         handle(Event.CutRequested)
-        val queue = micQueue
-        if (queue != null && queue.trySend(MicItem.Cut).isSuccess) return
-        // 音声ファイルを流しているときは、音声認識のスレッドへ直に頼む
-        viewModelScope.launch(asrDispatcher) { post(engine.cut().map(Event::Speech) + Event.CutSettled) }
+        engine.cut()
     }
 
     fun clear() {
@@ -277,19 +264,28 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         _state.update { it.copy(error = null) }
     }
 
+    /**
+     * 聞く。[block] が音声を渡し終えたら（止めた・取り消された）、話しかけだった分も確定させ、確定し終えるまで待ってから終わる。
+     * 聞いている間だけ、翻訳の CPU のスレッド数を調整の値にする（デバッグ版で、音声認識と翻訳の CPU の取り合いを測るため）。
+     */
     private fun listen(block: suspend (SpeechEngine) -> Unit) {
         val engine = asr ?: return
         if (listenJob?.isActive == true) return
         listenJob = viewModelScope.launch {
             _state.update { it.copy(listening = true, error = null) }
+            val translateThreads = recognition.translateThreads
+            if (translateThreads > 0) configureTranslation(translateThreads)
             try {
-                withContext(asrDispatcher) {
-                    engine.reset()
-                    try {
-                        block(engine)
-                    } finally {
-                        // 止めたときに話しかけだった分も訳す
-                        post(engine.flush())
+                engine.reset()
+                try {
+                    withContext(Dispatchers.IO) { block(engine) }
+                } finally {
+                    // 止めたときに話しかけだった分も訳す。取り消されても確定し終えるまで待つ
+                    withContext(NonCancellable) {
+                        val done = CompletableDeferred<Unit>()
+                        flushed = done
+                        engine.flush()
+                        done.await()
                     }
                 }
             } catch (e: CancellationException) {
@@ -297,10 +293,23 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message ?: e.toString()) }
             } finally {
+                if (translateThreads > 0) withContext(NonCancellable) { configureTranslation(0) }
                 _state.update { it.copy(listening = false, level = 0f, lagSeconds = 0f) }
                 handle(Event.Stopped)
             }
         }
+    }
+
+    /**
+     * 翻訳の CPU のスレッド数を変える（0 なら設定の画面の値か既定に戻す）。計測の調整なので、翻訳の流れを通さずエンジンを直接使う
+     * （docs/設計/翻訳コア.md「流れを通さない呼び出し」）。
+     */
+    private suspend fun configureTranslation(threads: Int) {
+        val ready = model.value as? ModelState.Ready ?: return
+        val cpu = TranslationPreferences(app).cpuOptions
+        val restore = if (cpu.threads > 0) cpu.threads else TranslationEngine.defaultThreads()
+        ready.engine.configure(cpu.boost, if (threads > 0) threads else restore)
+        log("翻訳のスレッド数: ${if (threads > 0) threads else restore}")
     }
 
     /** 音声認識のスレッドから、出来事を画面のスレッドの制御へ順に渡す（画面のスレッドは届いた順に処理する）。 */
@@ -402,10 +411,11 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
 
     override fun onCleared() {
         listenJob?.cancel()
-        val engine = asr
+        // 止め終えるのを待っている聞き取りを終わらせる（画面と一緒に消える）
+        flushed?.complete(Unit)
+        // 認識中の仕事が終わってから解放される（呼んだスレッドは待たない）
+        asr?.close()
         asr = null
-        // 認識中のスレッドが使い終わってから解放する
-        asrExecutor.execute { engine?.close() }
     }
 
     private fun log(message: String) = Logs.i("会話: $message")
@@ -431,9 +441,5 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
 
         /** デバッグ版が会話の音声を書く、外部ファイルの中のフォルダー。 */
         const val RECORDING_DIR = "asr-rec"
-
-        /** 音声認識は同じスレッドから順に呼ぶ。 */
-        private val asrExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "PlamoAsr") }
-        private val asrDispatcher = asrExecutor.asCoroutineDispatcher()
     }
 }

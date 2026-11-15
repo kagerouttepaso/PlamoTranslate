@@ -6,6 +6,7 @@ import androidx.annotation.RequiresPermission
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.plamotranslate.asr.SpeechEngines
+import app.plamotranslate.pipeline.speech.SegmentationProfile
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechEvent
 import app.plamotranslate.pipeline.speech.SpeechLanguages
@@ -19,7 +20,8 @@ import app.plamotranslate.pipeline.translation.translateOne
 import app.plamotranslate.translation.Translations
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,7 +29,8 @@ import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 data class TranslateUiState(
     val input: String = "",
@@ -92,28 +95,31 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
             val engine = asr ?: loadAsr() ?: return@launch
             val base = _state.value.input
             _state.update { it.copy(voice = VoiceState.Listening, error = null) }
-            var heard: String? = null
+            val heard = AtomicReference<String?>(null)
+            val events = Channel<SpeechEvent>(Channel.UNLIMITED)
             try {
-                withContext(asrDispatcher) {
-                    engine.languages = SpeechLanguages(separateChinese = _state.value.source?.isChinese == true)
-                    engine.reset()
-                    var silentChunks = 0
-                    var spoke = false
-                    try {
-                        MicRecorder.stream().takeWhile { heard == null && !stopVoice && (spoke || silentChunks < WAIT_CHUNKS) }
-                            .collect { chunk ->
-                                silentChunks++
-                                for (event in engine.accept(chunk)) when (event) {
-                                    is SpeechEvent.Speaking -> if (event.speaking) spoke = true
-                                    is SpeechEvent.Partial -> _state.update { it.copy(input = joinSpoken(base, event.text)) }
-                                    is SpeechEvent.Final -> heard = event.utterance.text
-                                }
-                            }
-                    } finally {
-                        // 止めるボタンで止めたときも、話しかけだった分を確定させる
-                        if (heard == null) {
-                            heard = engine.flush().filterIsInstance<SpeechEvent.Final>().firstOrNull()?.utterance?.text
+                engine.listener = { events.trySend(it) }
+                engine.languages = SpeechLanguages(separateChinese = _state.value.source?.isChinese == true)
+                engine.reset()
+                val spoke = AtomicBoolean(false)
+                var silentChunks = 0
+                val mic = launch(Dispatchers.IO) {
+                    MicRecorder.stream().takeWhile { heard.get() == null && !stopVoice && (spoke.get() || silentChunks < WAIT_CHUNKS) }
+                        .collect { chunk ->
+                            silentChunks++
+                            engine.accept(chunk)
                         }
+                }
+                // マイクが止まったら（確定した・止めるボタン・話し始めなかった）、話しかけだった分も確定させる
+                mic.invokeOnCompletion { engine.flush() }
+                for (event in events) {
+                    when (event) {
+                        is SpeechEvent.Speaking -> if (event.speaking) spoke.set(true)
+                        is SpeechEvent.Partial -> if (heard.get() == null) _state.update { it.copy(input = joinSpoken(base, event.text)) }
+                        // 最初の確定で止める
+                        is SpeechEvent.Final -> if (heard.compareAndSet(null, event.utterance.text)) mic.cancel()
+                        SpeechEvent.Flushed -> break
+                        SpeechEvent.CutDone -> Unit
                     }
                 }
             } catch (e: CancellationException) {
@@ -121,9 +127,10 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message ?: e.toString()) }
             } finally {
+                engine.listener = {}
                 _state.update { it.copy(voice = VoiceState.Idle) }
             }
-            val text = heard?.trim().orEmpty()
+            val text = heard.get()?.trim().orEmpty()
             _state.update { it.copy(input = joinSpoken(base, text)) }
             if (text.isNotEmpty()) translate()
         }
@@ -142,7 +149,10 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
             return null
         }
         _state.update { it.copy(voice = VoiceState.Loading, error = null) }
-        val result = withContext(asrDispatcher) { runCatching { SpeechEngines.load(speechModel, dir) } }
+        val tuning = RecognitionPreferences(app)
+        val result = withContext(Dispatchers.Default) {
+            runCatching { SpeechEngines.load(speechModel, dir, tuning.profile(SegmentationProfile.CONVERSATION), tuning.asrTuning) }
+        }
         _state.update { it.copy(voice = VoiceState.Idle) }
         return result.fold(
             { it.also { engine -> asr = engine } },
@@ -152,10 +162,9 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         voiceJob?.cancel()
-        val engine = asr
+        // 認識中の仕事が終わってから解放される（呼んだスレッドは待たない）
+        asr?.close()
         asr = null
-        // 認識中のスレッドが使い終わってから解放する
-        asrExecutor.execute { engine?.close() }
     }
 
     fun translate() {
@@ -186,10 +195,6 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
     companion object {
         /** 話し始めずにこれだけ（0.1秒単位で8秒）たったら、聞き取りをやめる。 */
         private const val WAIT_CHUNKS = 80
-
-        /** 音声認識（sherpa-onnx）は同じスレッドから順に呼ぶ。 */
-        private val asrExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "PlamoVoiceInput") }
-        private val asrDispatcher = asrExecutor.asCoroutineDispatcher()
 
         /**
          * 聞き取った文を、すでに書いてある原文の後ろに足す。日本語・中国語どうしは詰め、それ以外（韓国語・英語）は空白を挟む。

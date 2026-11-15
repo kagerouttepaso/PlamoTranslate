@@ -45,16 +45,28 @@ class SileroVoiceActivity private constructor(private val vad: Vad) : VoiceActiv
     override fun close() = vad.release()
 
     companion object {
-        fun load(model: File, phraseSilenceSeconds: Float): SileroVoiceActivity = SileroVoiceActivity(
+        const val DEFAULT_THRESHOLD = 0.5f
+        const val DEFAULT_MIN_SPEECH_SECONDS = 0.25f
+
+        /**
+         * [threshold] は話しているとみなす確からしさ、[minSpeechSeconds] は話し始めとみなす最短の長さ。
+         * 作者の録音で、話し始めの検出が0.7〜1.3秒遅れた（頭は前に足して補っている）。縮められるかをデバッグ版の設定で試す。
+         */
+        fun load(
+            model: File,
+            phraseSilenceSeconds: Float,
+            threshold: Float = DEFAULT_THRESHOLD,
+            minSpeechSeconds: Float = DEFAULT_MIN_SPEECH_SECONDS,
+        ): SileroVoiceActivity = SileroVoiceActivity(
             Vad(
                 assetManager = null,
                 config = VadModelConfig(
                     sileroVadModelConfig = SileroVadModelConfig(
                         model = model.path,
-                        threshold = 0.5f,
+                        threshold = threshold,
                         // VADは文の区切りの無音で「文」を区切る。カードの確定（話し終わり、言語の交代）は中核が決める
                         minSilenceDuration = phraseSilenceSeconds,
-                        minSpeechDuration = 0.25f,
+                        minSpeechDuration = minSpeechSeconds,
                         windowSize = 512,
                         // 長い発話はVADでは区切らず、中核が静かなところを探して区切る。
                         // VADに区切らせると、次の話し始めを検出し直す間の音声が抜けた
@@ -90,9 +102,9 @@ class SenseVoiceRecognizer private constructor(private val recognizer: OfflineRe
          * SenseVoiceは非自己回帰で軽い。翻訳はGPUで動くので、CPUは認識に4スレッド使う
          * （REDMAGICのCPUクロック上限は docs/現在地.md）。
          */
-        private const val THREADS = 4
+        const val THREADS = 4
 
-        fun load(modelDir: File): SenseVoiceRecognizer = SenseVoiceRecognizer(
+        fun load(modelDir: File, threads: Int = THREADS): SenseVoiceRecognizer = SenseVoiceRecognizer(
             OfflineRecognizer(
                 assetManager = null,
                 config = OfflineRecognizerConfig(
@@ -104,7 +116,7 @@ class SenseVoiceRecognizer private constructor(private val recognizer: OfflineRe
                             useInverseTextNormalization = true,
                         ),
                         tokens = File(modelDir, "sense-voice/tokens.txt").path,
-                        numThreads = THREADS,
+                        numThreads = threads,
                     ),
                 ),
             ),

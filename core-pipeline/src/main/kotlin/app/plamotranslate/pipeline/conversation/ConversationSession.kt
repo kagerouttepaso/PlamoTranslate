@@ -75,12 +75,15 @@ class ConversationSession(
 
         /**
          * 区切るボタンが押された。音声認識より先に、画面の話し中のカードを書き起こし待ちの列へ移し、新しい話し中のカードを始める。
-         * 音声認識が押した位置まで追いついて区切ると、確定（[SpeechEvent.Final]）と [CutSettled] が届く。
+         * 音声認識が押した位置まで追いついて区切ると、確定（[SpeechEvent.Final]）と [SpeechEvent.CutDone] が届く。
          */
         data object CutRequested : Event
 
-        /** 音声認識が区切りを終えた（確定の後に届く）。書き起こし待ちの列の先頭を消す（確定したカードに置き換わる）。 */
-        data object CutSettled : Event
+        /**
+         * 音声認識の混み具合（[RecognitionLoad.urgent]：確定に要る書き起こしが残っている）。残っている間は途中訳を始めない。
+         * 翻訳と音声認識が CPU を取り合うと、確定の書き起こしが遅れるため（docs/作業中/会話翻訳に守備範囲の広い音声認識を足す.md「CPU の割り当て」）。
+         */
+        data class RecognitionBusy(val busy: Boolean) : Event
 
         /** 聞くのを止めた（聞き取り中の表示を消す）。 */
         data object Stopped : Event
@@ -147,6 +150,9 @@ class ConversationSession(
     /** 渡している途中訳。 */
     private var partialRunning: PartialRequest? = null
 
+    /** 音声認識に確定に要る書き起こしが残っているか（[Event.RecognitionBusy]）。 */
+    private var recognitionBusy = false
+
     fun handle(event: Event): List<Effect> {
         val effects = mutableListOf<Effect>()
         when (event) {
@@ -178,7 +184,7 @@ class ConversationSession(
                 generation++
                 live = LiveSpeech("", null, startedAtMs = clock())
             }
-            Event.CutSettled -> queued = queued.drop(1)
+            is Event.RecognitionBusy -> recognitionBusy = event.busy
             Event.Stopped -> {
                 live = null
                 queued = emptyList()
@@ -191,6 +197,9 @@ class ConversationSession(
 
     private fun onSpeech(event: SpeechEvent, effects: MutableList<Effect>) {
         when (event) {
+            // 区切るボタンの区切りを終えた（確定の後に届く）。書き起こし待ちの列の先頭を消す（確定したカードに置き換わる）
+            SpeechEvent.CutDone -> queued = queued.drop(1)
+            SpeechEvent.Flushed -> Unit
             is SpeechEvent.Speaking -> {
                 generation++
                 live = if (event.speaking) LiveSpeech("", null, startedAtMs = clock()) else null
@@ -247,8 +256,13 @@ class ConversationSession(
         if (partialRunning != null) return
         val request = partialPending ?: return
         partialPending = null
-        // 確定訳が残っている間と、古い発話の途中の文字は訳さない
+        // 確定訳が残っている間と、古い発話の途中の文字は訳さない（次の途中の文字を待つ）
         if (finalRunning != null || finalQueue.isNotEmpty() || request.generation != generation) return
+        // 音声認識が確定を書き起こしている間は始めない。最新の1件を持っておき、空いたら渡す
+        if (recognitionBusy) {
+            partialPending = request
+            return
+        }
         partialRunning = request
         effects += Effect.TranslatePartial(request.id, request.text, request.direction)
     }

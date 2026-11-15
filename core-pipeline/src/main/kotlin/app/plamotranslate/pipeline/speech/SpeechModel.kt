@@ -10,7 +10,8 @@ import app.plamotranslate.llm.Language
  * false のモデルには、既定の言語の識別（[LanguageIdentifier]、Whisper tiny）を前に置き、識別した言語を指定して書き起こさせる。
  *
  * [byPhrase] が true のモデルは書き起こしが重い（1回に1〜2秒）。区切りは、カード全体を書き起こし直さず、
- * 文ごとに書き起こしてつなぐ（[SpeechSegmenter]）。
+ * 文ごとに書き起こしてつなぐ（[SpeechSegmenter]）。書き起こしの時間は渡す音声の長さに比例するので、話し始めの前に足した
+ * 音声のうち、声の始まりより前の無音は渡さない（[SpeechOnset]）。速いモデルは今までどおり足した音声を全部渡す。
  */
 enum class SpeechModel(
     val label: String,
@@ -73,6 +74,13 @@ class IdentifiedRecognizer(
     override fun recognize(samples: FloatArray, languages: SpeechLanguages, fallback: String?): Recognition {
         val groups = languages.groups
         val lang = identify(samples, languages) ?: fallback?.takeIf { groups == null || it in groups }
+        return recognizeAs(samples, lang, groups)
+    }
+
+    /** 言語が分かっているとき（カードの言語）。識別を省いて、その言語として書き起こす。 */
+    override fun recognizeAs(samples: FloatArray, language: String?): Recognition = recognizeAs(samples, language, null)
+
+    private fun recognizeAs(samples: FloatArray, lang: String?, groups: Set<String>?): Recognition {
         val r = recognizer.recognizeAs(samples, lang)
         return r.copy(lang = lang ?: ScriptLanguage.guess(r.text, groups))
     }

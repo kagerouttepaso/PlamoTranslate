@@ -61,12 +61,23 @@ class ConversationSessionTest {
         assertEquals("こんにちは", s.queued.first().text)
         // 確定と区切りの完了が届くと、先頭が確定したカードに置き換わる
         s.handle(final("こんにちは"))
-        s.handle(Event.CutSettled)
+        s.handle(Event.Speech(SpeechEvent.CutDone))
         assertEquals(listOf("こんにちは"), s.turns.map { it.original })
         assertEquals(1, s.queued.size)
         // 止めたら待ちのカードは消す（残りは止めるときの確定で出る）
         s.handle(Event.Stopped)
         assertTrue(s.queued.isEmpty())
+    }
+
+    @Test
+    fun 音声認識が確定を書き起こしている間は途中訳を待たせ空いたら最新を訳す() {
+        val s = ConversationSession()
+        s.handle(speaking(true))
+        s.handle(Event.RecognitionBusy(true))
+        assertTrue(s.handle(partial("こんに")).none { it is Effect.TranslatePartial })
+        assertTrue(s.handle(partial("こんにちは")).none { it is Effect.TranslatePartial })
+        val started = s.handle(Event.RecognitionBusy(false)).filterIsInstance<Effect.TranslatePartial>()
+        assertEquals(listOf("こんにちは"), started.map { it.text })
     }
 
     @Test

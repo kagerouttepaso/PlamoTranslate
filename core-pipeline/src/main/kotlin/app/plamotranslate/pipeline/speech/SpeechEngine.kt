@@ -24,12 +24,25 @@ sealed interface SpeechEvent {
 
     /** 話し始めたとき（[speaking] = true）と、話し終わったか音声が止んだとき（false）。 */
     data class Speaking(val speaking: Boolean) : SpeechEvent
+
+    /** 区切るボタン（[SpeechEngine.cut]）の区切りを終えた。区切った分の確定（あれば）の後に届く。 */
+    data object CutDone : SpeechEvent
+
+    /** 止める前に話した分（[SpeechEngine.flush]）を、すべて確定し終えた。最後に届く。 */
+    data object Flushed : SpeechEvent
 }
 
 /**
- * 音声を発話に区切って認識する（会話翻訳とテキスト翻訳の音声入力が使う）。実装は中核の [SpeechSegmenter] で、
- * VAD と認識は差し込み口（[VoiceActivity]・[SpeechRecognizer]）から受け取る。
- * 呼び出し側は1本のスレッドから順に音声を渡し、返ってきた出来事を順に処理する。
+ * 認識の混み具合。[behindSeconds] は、まだ書き起こしていない確定に要る音声が、今からどれだけ前のものか（秒）。
+ * [urgent] は、確定に要る書き起こし（区切った残り・文）が残っているか。残っている間、ほかの重い処理（途中訳）を待たせる。
+ */
+data class RecognitionLoad(val behindSeconds: Float = 0f, val urgent: Boolean = false)
+
+/**
+ * 音声を発話に区切って認識する（会話翻訳とテキスト翻訳の音声入力が使う）。部品どうしは、返り値の無い命令と購読する出来事で
+ * つなぐ（docs/設計/アーキテクチャ.md「設計の原則」）。命令（[accept]・[cut]・[flush]・[reset]）はすぐ戻り、
+ * 出来事は [listener] に届く順に処理する。命令はどのスレッドから呼んでもよいが、音声は話した順に渡す。
+ * 実装は中核の [SpeechPipeline]（区切りの状態遷移 [SpeechSegmenter] と、認識の担当のスレッド）。
  */
 interface SpeechEngine : AutoCloseable {
     /**
@@ -38,14 +51,23 @@ interface SpeechEngine : AutoCloseable {
      */
     var languages: SpeechLanguages
 
+    /** 出来事の届け先。区切りのスレッドから順に呼ばれる。 */
+    var listener: (SpeechEvent) -> Unit
+
+    /** 認識の混み具合。変わるたびに区切りのスレッドから呼ばれる。 */
+    var loadListener: (RecognitionLoad) -> Unit
+
     /** 16kHz・モノラル・-1〜1のfloat。 */
-    fun accept(samples: FloatArray): List<SpeechEvent>
+    fun accept(samples: FloatArray)
 
-    /** 残っている音声を発話として確定させる（停止時・音声ファイルの終わり）。 */
-    fun flush(): List<SpeechEvent>
+    /** 残っている音声を発話として確定させる（停止時・音声ファイルの終わり）。終えたら [SpeechEvent.Flushed] が届く。 */
+    fun flush()
 
-    /** 話している分を確定させ、聞き続ける（利用者が区切るボタンを押したとき）。続けて話した音声は次の発話になる。 */
-    fun cut(): List<SpeechEvent>
+    /**
+     * 話している分を確定させ、聞き続ける（利用者が区切るボタンを押したとき）。続けて話した音声は次の発話になる。
+     * それまでに渡した音声の位置で区切り、終えたら [SpeechEvent.CutDone] が届く（話していなければ確定は無い）。
+     */
+    fun cut()
 
     /** 途中の音声を捨てて、新しい会話として始め直す。 */
     fun reset()
@@ -101,4 +123,31 @@ interface SpeechRecognizer : AutoCloseable {
 
     /** 言語だけを判定する（[identifies] が true の認識器）。会話の言語（[SpeechLanguages.groups]）の外か、判定できなければ null。 */
     fun identify(samples: FloatArray, languages: SpeechLanguages): String? = null
+}
+
+/**
+ * VAD が話し始めを見つけるより前に足した音声（[SpeechSegmenter] の頭の補い）の中で、実際に声が始まった位置を探す。
+ * 話した言葉を落とさないために頭は常に足すが、書き起こしの重いモデルには、その前の無音まで渡すと時間だけかかる。
+ * 足した区間の一番静かな0.1秒を部屋の音（床）とし、床の4倍（12dB）を超えた最初の0.1秒を声の始まりとみなして、
+ * その [MARGIN] 前を返す（小さい子音を切らない）。超えるところが無ければ、VAD が見つけた位置の [MARGIN] 前。
+ * 値は端末や部屋の音の大きさに依らない比で決める。
+ */
+object SpeechOnset {
+    private const val FRAME = SpeechEngine.SAMPLE_RATE / 10
+    const val MARGIN = SpeechEngine.SAMPLE_RATE * 3 / 10
+    private const val RATIO = 4.0
+
+    /** [audio] の [0, detected) が足した区間。書き起こしを始める位置（[audio] の中のサンプル数）を返す。 */
+    fun start(audio: FloatArray, detected: Int): Int {
+        val end = detected.coerceIn(0, audio.size)
+        if (end < FRAME * 2) return 0
+        val rms = (0 until end / FRAME).map { f ->
+            var sum = 0.0
+            for (i in f * FRAME until (f + 1) * FRAME) sum += audio[i] * audio[i]
+            kotlin.math.sqrt(sum / FRAME)
+        }
+        val floor = rms.min().coerceAtLeast(1e-5)
+        val onset = rms.indexOfFirst { it > floor * RATIO }.takeIf { it >= 0 }?.let { it * FRAME } ?: end
+        return (onset - MARGIN).coerceAtLeast(0)
+    }
 }

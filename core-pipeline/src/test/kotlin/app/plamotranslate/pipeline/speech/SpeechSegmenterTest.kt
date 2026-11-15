@@ -8,6 +8,7 @@ import org.junit.Test
 /**
  * 区切りの状態遷移（[SpeechSegmenter]）。音声の値で「何語を話しているか」を表し、偽の VAD と偽の認識で区切りを確かめる。
  * 偽の認識は、0.1秒ごとに1文字（日本語は「あ」、韓国語は「가」、中国語は「中」）を返し、言語は多い方にする。
+ * 認識の担当の代わり（[Harness]）は、結果をその場で返すか、決めた分だけ遅れて返す。
  */
 class SpeechSegmenterTest {
     private enum class Sound(val value: Float, val char: String?, val lang: String?) {
@@ -70,17 +71,80 @@ class SpeechSegmenterTest {
 
     private val profile = SegmentationProfile.CONVERSATION
 
-    private fun segmenter(languages: SpeechLanguages = SpeechLanguages(setOf("ja", "ko"))) = SpeechSegmenter(
-        FakeVad((profile.phraseSilenceSeconds * 10).toInt()),
-        FakeRecognizer(::soundOf),
-        profile,
-    ).apply { this.languages = languages }
+    /**
+     * 区切りと、認識の担当の代わり。仕事は待ち行列（[RecognitionQueue]）から取ってその場で処理し（言語の判定を先に）、
+     * 書き起こしの結果は [latencyChunks] 個の音声（0.1秒ずつ）を渡した後に返す（0ならその場で返す）。言語の判定は速いので、
+     * その場で返す（端末では識別の担当が別のスレッドで、0.3秒ほどで返す）。
+     */
+    private class Harness(
+        recognizer: SpeechRecognizer,
+        profile: SegmentationProfile,
+        byPhrase: Boolean,
+        languages: SpeechLanguages,
+        private val latencyChunks: Int = 0,
+    ) {
+        val events = mutableListOf<SpeechEvent>()
+        private val queue = RecognitionQueue()
+        private val runner = RecognitionRunner(recognizer)
+        private val waiting = ArrayDeque<Triple<Int, Long, RecognitionOutput>>()
+        private var chunks = 0
+        val segmenter = SpeechSegmenter(
+            FakeVad((profile.phraseSilenceSeconds * 10).toInt()),
+            recognizer.identifies,
+            profile,
+            byPhrase,
+            emit = { events += it },
+            submit = { queue.submit(it) },
+            trace = { if (System.getenv("SEGMENTER_TRACE") != null) println("[$chunks] ${it()}") },
+        ).apply { this.languages = languages }
 
-    /** [parts] の音を0.1秒ずつ流し、出来事を集める。 */
-    private fun SpeechSegmenter.feed(vararg parts: Pair<Sound, Double>): List<SpeechEvent> =
-        parts.flatMap { (sound, seconds) ->
-            (0 until (seconds * 10).toInt()).flatMap { accept(FloatArray(FRAME) { sound.value }) }
+        private fun run(all: Boolean) {
+            while (true) {
+                while (true) {
+                    val job = queue.take(RecognitionLane.IDENTIFY) ?: queue.take(RecognitionLane.TRANSCRIBE) ?: break
+                    val delay = if (job is RecognitionJob.Transcribe) latencyChunks else 0
+                    waiting.addLast(Triple(chunks + delay, job.id, runner.run(job)))
+                }
+                val due = waiting.filter { all || it.first <= chunks }.minByOrNull { it.first } ?: return
+                waiting.remove(due)
+                segmenter.onResult(due.second, due.third)
+            }
         }
+
+        fun accept(samples: FloatArray) {
+            segmenter.accept(samples)
+            chunks++
+            run(all = false)
+        }
+
+        /** 頼んだ仕事をすべて終わらせる。 */
+        fun settle() = run(all = true)
+
+        fun collect(block: Harness.() -> Unit): List<SpeechEvent> {
+            val before = events.size
+            block()
+            return events.drop(before)
+        }
+
+        fun cut() = collect {
+            segmenter.cut()
+            settle()
+        }
+
+        fun flush() = collect {
+            segmenter.flush()
+            settle()
+        }
+    }
+
+    private fun segmenter(languages: SpeechLanguages = SpeechLanguages(setOf("ja", "ko")), latency: Int = 0) =
+        Harness(FakeRecognizer(::soundOf), profile, byPhrase = false, languages = languages, latencyChunks = latency)
+
+    /** [parts] の音を0.1秒ずつ流し、出来事を集める（最後に、頼んだ仕事を終わらせる）。 */
+    private fun Harness.feed(vararg parts: Pair<Sound, Double>): List<SpeechEvent> = collect {
+        parts.forEach { (sound, seconds) -> repeat((seconds * 10).toInt()) { accept(FloatArray(FRAME) { sound.value }) } }
+        settle()
+    }
 
     private fun finals(events: List<SpeechEvent>) = events.filterIsInstance<SpeechEvent.Final>().map { it.utterance }
 
@@ -97,7 +161,7 @@ class SpeechSegmenterTest {
 
     @Test
     fun 言いよどみの無音では区切らない() {
-        // 文の区切り（0.6秒）より長く、話し終わり（2秒）より短い間
+        // 文の区切り（0.6秒）より長く、話し終わり（3秒）より短い間
         val cards = finals(segmenter().feed(Sound.JA to 1.5, Sound.SILENCE to 1.0, Sound.JA to 1.5, Sound.SILENCE to 3.0))
         assertEquals(1, cards.size)
     }
@@ -168,26 +232,30 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun 止めたら話しかけの分も確定する() {
+    fun 止めたら話しかけの分も確定し最後に止め終えたと知らせる() {
         val s = segmenter()
         s.feed(Sound.JA to 1.5)
         val events = s.flush()
         assertEquals(1, finals(events).size)
-        assertEquals(SpeechEvent.Speaking(false), events.last())
+        assertEquals(listOf(SpeechEvent.Speaking(false), SpeechEvent.Flushed), events.takeLast(2))
+        // 話していなければ、止め終えた知らせだけ
+        assertEquals(listOf(SpeechEvent.Flushed), s.flush())
     }
 
     @Test
     fun 手で区切ったら話した分を確定し続けた話は次のカードにする() {
         val s = segmenter()
         s.feed(Sound.JA to 1.5)
-        val cut = finals(s.cut())
+        val events = s.cut()
+        val cut = finals(events)
         assertEquals(1, cut.size)
         assertTrue(cut[0].text.all { it == 'あ' })
+        assertEquals(SpeechEvent.CutDone, events.last())
         // 聞くのは続けるので、続けて話した分は次のカードになり、話し終わりで確定する
         val rest = finals(s.feed(Sound.KO to 1.5, Sound.SILENCE to 3.0))
         assertEquals(listOf("ko"), rest.map { it.lang })
-        // 話していないときに押しても何も起きない
-        assertTrue(s.cut().isEmpty())
+        // 話していないときに押したら、区切りを終えた知らせだけ
+        assertEquals(listOf(SpeechEvent.CutDone), s.cut())
     }
 
     @Test
@@ -200,18 +268,15 @@ class SpeechSegmenterTest {
     @Test
     fun 長く話し続けても文の切れ目があればそこで区切る() {
         // 偽の認識に、10秒目に文の終わりを返させる（区切りの長さの直前6秒の中）
-        val s = SpeechSegmenter(
-            FakeVad((profile.phraseSilenceSeconds * 10).toInt()),
-            object : SpeechRecognizer {
-                val inner = FakeRecognizer(::soundOf)
-                override fun recognize(samples: FloatArray): Recognition {
-                    val r = inner.recognize(samples)
-                    return if (samples.size > SAMPLE_RATE * 11) r.copy(breaks = listOf(SpeechBreak(SAMPLE_RATE * 10, sentence = true))) else r
-                }
-                override fun close() = Unit
-            },
-            profile,
-        )
+        val recognizer = object : SpeechRecognizer {
+            val inner = FakeRecognizer(::soundOf)
+            override fun recognize(samples: FloatArray): Recognition {
+                val r = inner.recognize(samples)
+                return if (samples.size > SAMPLE_RATE * 11) r.copy(breaks = listOf(SpeechBreak(SAMPLE_RATE * 10, sentence = true))) else r
+            }
+            override fun close() = Unit
+        }
+        val s = Harness(recognizer, profile, byPhrase = false, languages = SpeechLanguages(setOf("ja", "ko")))
         val cards = finals(s.feed(Sound.JA to 20.0, Sound.SILENCE to 4.0))
         assertTrue(cards.size >= 2)
         assertTrue("${cards[0].durationMs}", cards[0].durationMs in 9_800L..10_600L)
@@ -229,31 +294,52 @@ class SpeechSegmenterTest {
     fun 始め直したら前の話しかけは捨てる() {
         val s = segmenter()
         s.feed(Sound.JA to 1.5)
-        s.reset()
+        s.segmenter.reset()
         assertTrue(finals(s.feed(Sound.SILENCE to 3.0)).isEmpty())
-        assertTrue(s.flush().isEmpty())
+        assertTrue(finals(s.flush()).isEmpty())
     }
 
     @Test
     fun 閉じた後の呼び出しは何もしない() {
         val s = segmenter()
-        s.close()
-        assertTrue(s.accept(FloatArray(FRAME) { Sound.JA.value }).isEmpty())
+        s.segmenter.close()
+        assertTrue(s.feed(Sound.JA to 1.0).isEmpty())
         assertTrue(s.flush().isEmpty())
+    }
+
+    @Test
+    fun 認識が遅れても出来事はカードの順に出て音声の区切りは遅れない() {
+        // 認識の結果が1.5秒遅れて届く。前のカードの確定より先に、次のカードの出来事を出さない
+        val events = segmenter(latency = 15).feed(Sound.JA to 1.5, Sound.SILENCE to 1.0, Sound.KO to 1.5, Sound.SILENCE to 3.0)
+        assertEquals(listOf("ja", "ko"), finals(events).map { it.lang })
+        val firstFinal = events.indexOfFirst { it is SpeechEvent.Final }
+        assertTrue(events.take(firstFinal).filterIsInstance<SpeechEvent.Partial>().none { it.text.contains('가') })
+        // 区切っても音声は欠けない
+        assertEquals(15, finals(events)[1].text.length)
     }
 
     /**
      * 書き起こしの重いモデル（Qwen3-ASR）の代わり。言語だけの識別（[SpeechRecognizer.identify]）ができ、
-     * 書き起こした音声の長さと識別の回数を覚える。
+     * 書き起こした音声の長さ・識別の回数・言語を指定した書き起こしの回数を覚える。
      */
     private inner class HeavyRecognizer : SpeechRecognizer {
         private val inner = FakeRecognizer(::soundOf)
         val transcribed = mutableListOf<Int>()
         var identified = 0
+
+        /** 言語を指定せずに（書き起こしの中で識別して）書き起こした回数。 */
+        var unspecified = 0
         override fun recognize(samples: FloatArray): Recognition {
             transcribed += samples.size
             return inner.recognize(samples)
         }
+
+        override fun recognize(samples: FloatArray, languages: SpeechLanguages, fallback: String?): Recognition {
+            unspecified++
+            return recognize(samples)
+        }
+
+        override fun recognizeAs(samples: FloatArray, language: String?): Recognition = recognize(samples).copy(lang = language)
 
         override val identifies get() = true
         override fun identify(samples: FloatArray, languages: SpeechLanguages): String? {
@@ -264,24 +350,31 @@ class SpeechSegmenterTest {
         override fun close() = Unit
     }
 
-    private fun phraseSegmenter(asr: SpeechRecognizer) = SpeechSegmenter(
-        FakeVad((profile.phraseSilenceSeconds * 10).toInt()),
-        asr,
-        profile,
-        byPhrase = true,
-    ).apply { languages = SpeechLanguages(setOf("ja", "ko")) }
+    private fun phraseSegmenter(asr: SpeechRecognizer, latency: Int = 0) =
+        Harness(asr, profile, byPhrase = true, languages = SpeechLanguages(setOf("ja", "ko")), latencyChunks = latency)
 
     @Test
     fun 重いモデルは文ごとに書き起こし確定でカード全体を書き起こし直さない() {
         val asr = HeavyRecognizer()
-        val events = phraseSegmenter(asr).feed(Sound.JA to 1.5, Sound.SILENCE to 1.0, Sound.JA to 1.5, Sound.SILENCE to 3.0)
+        val events = phraseSegmenter(asr).feed(Sound.JA to 2.5, Sound.SILENCE to 1.0, Sound.JA to 2.5, Sound.SILENCE to 3.0)
         val card = finals(events).single()
         assertEquals("ja", card.lang)
-        assertTrue(card.text, card.text.length >= 25 && card.text.all { it == 'あ' })
-        // カードは4秒あるが、1回に書き起こすのは1つの文（前に足した音声と区切りの無音を入れても3秒未満）だけ
-        assertTrue("${asr.transcribed}", asr.transcribed.max() < SAMPLE_RATE * 3)
-        // 言語の見張りは識別だけで行う
+        assertEquals(50, card.text.length)
+        assertTrue(card.text, card.text.all { it == 'あ' })
+        // カードは6秒あるが、1回に書き起こすのは1つの文（文の前の間と、文の終わりを見つけるまでの無音を入れても4秒未満）だけ
+        assertTrue("${asr.transcribed}", asr.transcribed.max() < SAMPLE_RATE * 4)
+        // 言語の見張りは識別だけで行い、カードの言語が決まった後の書き起こしは言語を指定する（識別を繰り返さない）
         assertTrue(asr.identified > 0)
+        assertEquals(0, asr.unspecified)
+    }
+
+    @Test
+    fun 重いモデルには話し始めの前の無音を渡さず言葉は欠かさない() {
+        val asr = HeavyRecognizer()
+        val card = finals(phraseSegmenter(asr).feed(Sound.SILENCE to 2.0, Sound.JA to 2.5, Sound.SILENCE to 3.0)).single()
+        assertEquals(25, card.text.length)
+        // 前に足した1.5秒のうち、声の0.3秒前から渡す。最初の書き起こし（カードの言語が決まった2秒の時点）は0.3秒＋2秒
+        assertTrue("${asr.transcribed}", asr.transcribed.first() <= SAMPLE_RATE * 24 / 10)
     }
 
     @Test
@@ -290,6 +383,21 @@ class SpeechSegmenterTest {
             .filterIsInstance<SpeechEvent.Partial>()
         assertEquals(SpeechEvent.Partial("", "ko"), partials.first())
         assertTrue(partials.drop(1).any { it.text.isNotEmpty() })
+    }
+
+    @Test
+    fun カードの言語を決める長さを短くすると早く文字が出る() {
+        fun firstTextAt(seconds: Float): Int {
+            val s = Harness(
+                HeavyRecognizer(), profile.copy(cardLanguageSeconds = seconds), byPhrase = true, languages = SpeechLanguages(setOf("ja", "ko")),
+            )
+            val events = s.feed(Sound.KO to 3.0)
+            return events.indexOfFirst { it is SpeechEvent.Partial && it.text.isNotEmpty() }.also { assertTrue(it >= 0) }.let {
+                (events[it] as SpeechEvent.Partial).text.length
+            }
+        }
+        // 最初の文字が出た時点の文字数（話し始めからの長さ）が短い
+        assertTrue(firstTextAt(1.0f) < firstTextAt(2.0f))
     }
 
     @Test
@@ -302,11 +410,21 @@ class SpeechSegmenterTest {
     }
 
     @Test
+    fun 重いモデルで認識が遅れても確定は欠けずカードの順に出る() {
+        val events = phraseSegmenter(HeavyRecognizer(), latency = 20)
+            .feed(Sound.JA to 1.5, Sound.SILENCE to 1.0, Sound.KO to 2.5, Sound.SILENCE to 3.0)
+        val cards = finals(events)
+        assertEquals(listOf("ja", "ko"), cards.map { it.lang })
+        assertEquals(listOf(15, 25), cards.map { it.text.length })
+    }
+
+    @Test
     fun 重いモデルで文の途中を手で区切ると残りだけ書き起こす() {
         val s = phraseSegmenter(HeavyRecognizer())
         s.feed(Sound.JA to 1.5, Sound.SILENCE to 1.0, Sound.JA to 1.0)
         val card = finals(s.cut()).single()
-        assertTrue(card.text, card.text.length >= 22 && card.text.all { it == 'あ' })
+        assertEquals(25, card.text.length)
+        assertTrue(card.text, card.text.all { it == 'あ' })
     }
 
     @Test
@@ -315,6 +433,36 @@ class SpeechSegmenterTest {
         assertEquals("こんにちは。元気です", TranscriptJoin.join("こんにちは。", "元気です"))
         assertEquals("Привет мир", TranscriptJoin.join("Привет", "мир"))
         assertEquals("ok", TranscriptJoin.stitch(listOf(Recognition("", "ja"), Recognition("ok", "en"))).text)
+    }
+
+    @Test
+    fun 認識の待ち行列は確定に要る書き起こしを途中結果より先に出す() {
+        val q = RecognitionQueue()
+        fun t(id: Long, card: Long, p: RecognitionPriority) =
+            RecognitionJob.Transcribe(id, card, p, FloatArray(0), 0, "", SpeechLanguages.ANY, null, null)
+        q.submit(t(0, 0, RecognitionPriority.PARTIAL))
+        q.submit(t(1, 0, RecognitionPriority.PHRASE))
+        q.submit(t(2, 0, RecognitionPriority.FINAL))
+        q.submit(t(3, 0, RecognitionPriority.PHRASE))
+        assertTrue(q.hasUrgent())
+        assertEquals(listOf(2L, 1L, 3L, 0L), List(4) { q.take(RecognitionLane.TRANSCRIBE)!!.id })
+        // 閉じたカードの途中結果は捨て、確定に要るものは残す
+        q.submit(t(4, 0, RecognitionPriority.PARTIAL))
+        q.submit(t(5, 0, RecognitionPriority.PHRASE))
+        q.dropStale(openCard = 1)
+        assertEquals(5L, q.take(RecognitionLane.TRANSCRIBE)!!.id)
+        assertEquals(null, q.take(RecognitionLane.TRANSCRIBE))
+    }
+
+    @Test
+    fun 声の始まりは前に足した区間の部屋の音との比で見つける() {
+        val quiet = FloatArray(SAMPLE_RATE) { if (it % 2 == 0) 0.001f else -0.001f }
+        val voice = FloatArray(SAMPLE_RATE / 2) { if (it % 2 == 0) 0.05f else -0.05f }
+        val audio = quiet + voice
+        // 声は1.0秒から。その0.3秒前から渡す
+        assertEquals(SAMPLE_RATE - SpeechOnset.MARGIN, SpeechOnset.start(audio, audio.size))
+        // 声が見つからなければ、VAD が見つけた位置の0.3秒前
+        assertEquals(SAMPLE_RATE - SpeechOnset.MARGIN, SpeechOnset.start(quiet, quiet.size))
     }
 
     companion object {
