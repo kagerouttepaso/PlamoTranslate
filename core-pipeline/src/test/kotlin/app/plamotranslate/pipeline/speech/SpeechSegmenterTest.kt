@@ -82,8 +82,13 @@ class SpeechSegmenterTest {
         byPhrase: Boolean,
         languages: SpeechLanguages,
         private val latencyChunks: Int = 0,
+        /** 言語の判定（[RecognitionJob.Language]・[RecognitionJob.Seam]）の結果を返すまでの音声の個数。 */
+        private val languageLatencyChunks: Int = 0,
     ) {
         val events = mutableListOf<SpeechEvent>()
+
+        /** 頼まれた言語の判定の目的（`直近` など）。 */
+        val languagePurposes = mutableListOf<String>()
         private val queue = RecognitionQueue()
         private val runner = RecognitionRunner(recognizer)
         private val waiting = ArrayDeque<Triple<Int, Long, RecognitionOutput>>()
@@ -94,7 +99,10 @@ class SpeechSegmenterTest {
             profile,
             byPhrase,
             emit = { events += it },
-            submit = { queue.submit(it) },
+            submit = {
+                if (it is RecognitionJob.Language) languagePurposes += it.purpose
+                queue.submit(it)
+            },
             trace = { if (System.getenv("SEGMENTER_TRACE") != null) println("[$chunks] ${it()}") },
             // 時計は渡した音声の長さで進める（書き起こしの遅れを、端末と同じく途中結果の間隔に効かせる）
             clock = { chunks * 100_000_000L },
@@ -104,7 +112,7 @@ class SpeechSegmenterTest {
             while (true) {
                 while (true) {
                     val job = queue.take(RecognitionLane.IDENTIFY) ?: queue.take(RecognitionLane.TRANSCRIBE) ?: break
-                    val delay = if (job is RecognitionJob.Transcribe) latencyChunks else 0
+                    val delay = if (job is RecognitionJob.Transcribe) latencyChunks else languageLatencyChunks
                     waiting.addLast(Triple(chunks + delay, job.id, runner.run(job)))
                 }
                 val due = waiting.filter { all || it.first <= chunks }.minByOrNull { it.first } ?: return
@@ -472,6 +480,20 @@ class SpeechSegmenterTest {
         // 区切りは言語の継ぎ目の近く：韓国語の頭が前のカードに残らない
         assertTrue(cards[0].text, cards[0].text.count { it == '가' } <= 3)
         assertTrue(cards[1].text, cards[1].text.count { it == '가' } >= 45)
+    }
+
+    @Test
+    fun 言語の判定が遅いときは話し中の見張りの間隔を延ばして担当の時間を残す() {
+        // 言語を自分で識別するモデル（SenseVoice）では、見張りは書き起こしの担当で動く
+        fun watches(languageLatency: Int): Int {
+            val s = Harness(FakeRecognizer(::soundOf), profile, byPhrase = false, languages = SpeechLanguages(setOf("ja", "ko")),
+                languageLatencyChunks = languageLatency)
+            s.feed(Sound.JA to 10.0, Sound.SILENCE to 3.0)
+            return s.languagePurposes.count { it == "直近" }
+        }
+        val fast = watches(0)
+        val slow = watches(5)
+        assertTrue("速い $fast 遅い $slow", slow * 2 <= fast)
     }
 
     @Test

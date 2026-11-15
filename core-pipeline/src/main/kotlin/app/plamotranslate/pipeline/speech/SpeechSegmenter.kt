@@ -111,6 +111,12 @@ class SpeechSegmenter(
     /** 前に言語を見張ってから、話している音声がどれだけ増えたか。 */
     private var sinceLastWatch = 0
 
+    /**
+     * 言語を見張る間隔。見張りにかかった時間（待ち時間を含む）の何倍かより短くはしない。言語の識別の担当があるモデルでは
+     * 最短の間隔のまま、識別を書き起こしの担当で行うモデル（SenseVoice）では、担当が混むと延びて途中結果の時間を残す。
+     */
+    private var watchInterval = WATCH_INTERVAL_SAMPLES
+
     /** 途中結果を頼む間隔。かかった時間の何倍かより短くはしない（CPU を途中結果で埋めない）。 */
     private var partialInterval = MIN_PARTIAL_INTERVAL
 
@@ -251,9 +257,9 @@ class SpeechSegmenter(
             sinceLastPartial += samples.size
             sinceLastWatch += samples.size
             val started = buffer.size - speechStart >= MIN_PARTIAL_SAMPLES
-            // 言語の見張りは途中結果と別の間隔で見る。途中結果の間隔は書き起こしの重さで延びるが、見張りは言語の識別の
-            // 担当で軽く動くので、延ばすと話し手の交代に気づくのが遅れ、継ぎ目が探す範囲の外に出ていた
-            if (sinceLastWatch >= WATCH_INTERVAL_SAMPLES && started) {
+            // 言語の見張りは途中結果と別の間隔で見る（間隔は見張り自身にかかった時間で決める）。途中結果の間隔に結びつけると、
+            // 書き起こしが重いだけで見張りまで遅れ、話し手の交代に気づくのが遅れて、継ぎ目が探す範囲の外に出ていた
+            if (sinceLastWatch >= watchInterval && started) {
                 sinceLastWatch = 0
                 watchLanguage(card)
             }
@@ -302,6 +308,7 @@ class SpeechSegmenter(
         bufferStart = 0
         speechStart = 0
         partialInterval = MIN_PARTIAL_INTERVAL
+        watchInterval = WATCH_INTERVAL_SAMPLES
         startSpeech()
     }
 
@@ -424,8 +431,11 @@ class SpeechSegmenter(
         if (card.watchPending || card.seamPending) return
         card.watchPending = true
         val expected = cardLang
+        val submittedAt = clock()
         language(card, buffer.size - LANG_WINDOW_SAMPLES, buffer.size, PURPOSE_WATCH) { recent ->
             card.watchPending = false
+            val costSamples = ((clock() - submittedAt) / 1_000_000 * SAMPLE_RATE / 1000).toInt()
+            watchInterval = maxOf(WATCH_INTERVAL_SAMPLES, costSamples * WATCH_COST_RATIO)
             if (card !== open || cardLang != expected) return@language
             // 判定できなかった窓は、交代の根拠にも反証にもしない（会話の外の言語と判定されることが多く、数え直すと交代を見逃した）
             if (recent == null) return@language
@@ -715,8 +725,11 @@ class SpeechSegmenter(
         /** 途中結果は0.5秒ごとより頻繁には頼まない。 */
         private const val MIN_PARTIAL_INTERVAL = SAMPLE_RATE / 2
 
-        /** 話している最中に言語を見張る間隔（話した音声の長さ）。途中結果の間隔とは別に数える。 */
+        /** 話している最中に言語を見張る最短の間隔（話した音声の長さ）。途中結果の間隔とは別に数える。 */
         private const val WATCH_INTERVAL_SAMPLES = SAMPLE_RATE / 2
+
+        /** 見張りの間隔を、見張りにかかった時間の何倍より短くしないか（見張りが担当の時間の3分の1より多くを取らない）。 */
+        private const val WATCH_COST_RATIO = 3
 
         /** 途中結果の間隔を、かかった時間の何倍にするか（書き起こしの重いモデルは2倍、ほかは3倍）。 */
         private const val PHRASE_PARTIAL_COST_RATIO = 2
