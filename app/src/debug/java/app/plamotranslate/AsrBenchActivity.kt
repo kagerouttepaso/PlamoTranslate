@@ -63,13 +63,13 @@ class AsrBenchActivity : Activity() {
         line("PSS: 始め ${pss0 / 1024}MB, SenseVoice+Whisper後 ${pss1 / 1024}MB, Qwen3後 ${pss2 / 1024}MB")
 
         // 1回目は遅いので捨てる
-        audio.values.first().let { sv.recognize(it); lid.identify(it); qwen.recognize(it) }
+        audio.values.first().let { sv.recognize(it); lid.scores(it, null); qwen.recognize(it) }
 
         line("音声\t秒\tSV ms\tSV言語\tSV文\tWhisper ms\tWhisper言語\tQwen3 ms\tQwen3文\tQwen3指定 ms\tQwen3指定文")
         for ((name, samples) in audio) {
             val secs = samples.size / 16_000f
             val (s, sMs) = timed { sv.recognize(samples) }
-            val (lang, lMs) = timed { lid.identify(samples) }
+            val (lang, lMs) = timed { lid.scores(samples, null)?.maxByOrNull { it.value }?.key }
             val (q, qMs) = timed { qwen.recognizeAs(samples, language = null) }
             val (qh, qhMs) = timed { qwen.recognizeAs(samples, language = lang) }
             line("$name\t${"%.1f".format(secs)}\t$sMs\t${s.lang}\t${s.text}\t$lMs\t$lang\t$qMs\t${q.text}\t$qhMs\t${qh.text}")

@@ -24,7 +24,10 @@ dependencies {
     // 中核の差し込み口（VoiceActivity・SpeechRecognizer）を実装し、中核の区切り（SpeechEngine）を返す
     api(project(":core-pipeline"))
     implementation(project(":core-log"))
+    // 言語の識別の点数（Whisper tiny を直接動かす）。漫画用OCRと同じ版（sherpa-onnx は ONNX Runtime を静的に組み込んでいて、名前がぶつからない）
+    implementation(libs.onnxruntime.android)
     testImplementation(libs.junit)
+    testImplementation(libs.onnxruntime.jvm)
 }
 
 // JDK 21で動かし、Java 17相当のバイトコードを出す（JDK 17は入れていない）

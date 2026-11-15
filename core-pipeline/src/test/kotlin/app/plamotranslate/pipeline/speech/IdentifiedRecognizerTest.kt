@@ -18,8 +18,14 @@ class IdentifiedRecognizerTest {
         override fun close() = Unit
     }
 
+    /** [lang] を一番（0.8）、ほかの候補を残りで分ける識別。 */
     private class FakeIdentifier(private val lang: String?) : LanguageIdentifier {
-        override fun identify(samples: FloatArray) = lang
+        override fun scores(samples: FloatArray, candidates: Set<String>?): Map<String, Float>? {
+            val all = candidates ?: setOfNotNull(lang)
+            if (lang == null || all.isEmpty()) return null
+            val others = all - lang
+            return if (lang in all) others.associateWith { 0.2f / others.size } + (lang to 0.8f) else all.associateWith { 1f / all.size }
+        }
         override fun close() = Unit
     }
 
@@ -34,12 +40,11 @@ class IdentifiedRecognizerTest {
     }
 
     @Test
-    fun 会話の言語の外なら指定せず文字の種類で決める() {
-        // 端末で、アラビア語を Whisper tiny がトルコ語と誤った。トルコ語を指定すると書き起こしが崩れる
+    fun 会話の言語の外の言語は指定しない() {
+        // 端末で、アラビア語を Whisper tiny がトルコ語と誤った。トルコ語を指定すると書き起こしが崩れるので、会話の言語の中で比べる
         val asr = FakeRecognizer("إطلالات مكياج عيون ذهبية")
-        val r = IdentifiedRecognizer(FakeIdentifier("tr"), asr).recognize(audio, SpeechLanguages(setOf("ja", "ar")))
-        assertNull(asr.requested)
-        assertEquals("ar", r.lang)
+        IdentifiedRecognizer(FakeIdentifier("tr"), asr).recognize(audio, SpeechLanguages(setOf("ja", "ar")))
+        assertTrue(asr.requested in setOf("ja", "ar"))
     }
 
     @Test
@@ -68,9 +73,9 @@ class IdentifiedRecognizerTest {
 
     @Test
     fun 識別できなければカードの言語として書き起こす() {
-        // 短い区間の識別は外れやすい。言語を指定しないと Qwen3-ASR が中国語で書くことがあるので、カードの言語を渡す
+        // 言語を指定しないと Qwen3-ASR が中国語で書くことがあるので、カードの言語を渡す
         val asr = FakeRecognizer("ですね")
-        val r = IdentifiedRecognizer(FakeIdentifier("ko"), asr).recognize(audio, SpeechLanguages(setOf("ja", "ru")), fallback = "ja")
+        val r = IdentifiedRecognizer(FakeIdentifier(null), asr).recognize(audio, SpeechLanguages(setOf("ja", "ru")), fallback = "ja")
         assertEquals("ja", asr.requested)
         assertEquals("ja", r.lang)
     }

@@ -116,13 +116,17 @@ interface SpeechRecognizer : AutoCloseable {
     fun recognizeAs(samples: FloatArray, language: String?): Recognition = recognize(samples)
 
     /**
-     * 書き起こさずに言語だけを判定できるか。できる認識器（言語の識別を前に置く組み立て）は、区切りが言語の見張りに
-     * [identify] を使い、重い書き起こしを省く。できない認識器（SenseVoice）は、書き起こした結果の言語で見張る。
+     * 書き起こさずに言語の点数を出せるか（[scores]）。出せる認識器（言語の識別を前に置く組み立て）は、区切りが言語の判定を
+     * 識別の担当に回し、重い書き起こしを省く。出せない認識器（SenseVoice）は、書き起こした結果の言語を点数1の判定として使う
+     * （[RecognitionRunner]）。
      */
     val identifies: Boolean get() = false
 
-    /** 言語だけを判定する（[identifies] が true の認識器）。会話の言語（[SpeechLanguages.groups]）の外か、判定できなければ null。 */
-    fun identify(samples: FloatArray, languages: SpeechLanguages): String? = null
+    /**
+     * 会話の言語（[SpeechLanguages.groups] の組。null ならすべて）ごとの確率（合計1。[identifies] が true の認識器）。
+     * 判定できなければ null。話し手は、この点数から [SpeakerJudge] が決める。
+     */
+    fun scores(samples: FloatArray, languages: SpeechLanguages): Map<String, Float>? = null
 }
 
 /**

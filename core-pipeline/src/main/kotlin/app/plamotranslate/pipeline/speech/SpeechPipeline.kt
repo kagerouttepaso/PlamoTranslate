@@ -22,7 +22,7 @@ class SpeechPipeline(
     vad: VoiceActivity,
     private val recognizer: SpeechRecognizer,
     profile: SegmentationProfile = SegmentationProfile.CONVERSATION,
-    byPhrase: Boolean = false,
+    heavy: Boolean = false,
     trace: (() -> String) -> Unit = {},
     private val timing: (String) -> Unit = {},
 ) : SpeechEngine {
@@ -64,7 +64,7 @@ class SpeechPipeline(
         vad,
         identifies = recognizer.identifies,
         profile = profile,
-        byPhrase = byPhrase,
+        heavy = heavy,
         emit = { event ->
             if (event == SpeechEvent.Flushed) flushPending = false
             listener(event)
@@ -205,7 +205,7 @@ class SpeechPipeline(
     /** 認識の混み具合が変わったら知らせる（0.1秒刻み）。 */
     private fun publishLoad() {
         val (urgent, oldest) = synchronized(lock) {
-            val urgentRunning = running.values.filter { it.priority <= RecognitionPriority.PHRASE }
+            val urgentRunning = running.values.filter { it.priority.urgent }
             (queue.hasUrgent() || urgentRunning.isNotEmpty()) to
                 listOfNotNull(queue.oldestTranscribeEnd(), urgentRunning.minOfOrNull { it.endAt }).minOrNull()
         }

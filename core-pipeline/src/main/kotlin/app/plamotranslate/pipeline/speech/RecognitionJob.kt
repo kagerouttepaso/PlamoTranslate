@@ -42,25 +42,25 @@ sealed interface RecognitionJob {
     }
 
     /**
-     * 言語だけを判定する。言語だけを識別できる認識器は識別の担当（[RecognitionLane.IDENTIFY]）が、できない認識器は
-     * 書き起こしの担当が書き起こして判定する。[evidence] が true なら、話し手の交代の根拠になる判定だけを返す（[LanguageEvidence]）。
+     * 会話の言語ごとの点数を出す（話し手は区切りが [SpeakerJudge] で決める）。点数を出せる認識器は識別の担当
+     * （[RecognitionLane.IDENTIFY]）が、出せない認識器は書き起こしの担当が書き起こして、その言語を点数1とする。
+     * [priority] は、文の全体（[RecognitionPriority.PHRASE_LANGUAGE]）か、話し中の窓（[RecognitionPriority.LANGUAGE]）か。
      */
     class Language(
         override val id: Long,
         override val card: Long,
         override val lane: RecognitionLane,
+        override val priority: RecognitionPriority,
         override val samples: FloatArray,
         override val endAt: Long,
         override val purpose: String,
         val languages: SpeechLanguages,
-        val evidence: Boolean = true,
-    ) : RecognitionJob {
-        override val priority get() = RecognitionPriority.LANGUAGE
-    }
+    ) : RecognitionJob
 
     /**
      * 言語の継ぎ目を探す。[samples] の中で、[probe] の長さの窓を [step] ずつずらし、[newLang] に変わった最初の窓の
      * 頭の位置（[samples] の中のサンプル数）を返す。前は元の言語、後ろは新しい言語と見て、二分探索で窓の数を減らす。
+     * 見つけた継ぎ目から後ろの音声の全体が [newLang] と決まらなければ、継ぎ目は無いとする（短い窓の聞き違いで区切らない）。
      */
     class Seam(
         override val id: Long,
@@ -81,7 +81,8 @@ sealed interface RecognitionJob {
 /** 認識の結果。失敗したら空の結果を返す（確定を待たせ続けないため）。 */
 sealed interface RecognitionOutput {
     data class Transcribed(val recognition: Recognition) : RecognitionOutput
-    data class Identified(val lang: String?) : RecognitionOutput
+    /** 点数（判定できなければ null）。書き起こして判定した認識器は、その書き起こし（[recognition]、後処理の後）も返す。 */
+    data class Scored(val scores: Map<String, Float>?, val recognition: Recognition? = null) : RecognitionOutput
     data class SeamFound(val at: Int?) : RecognitionOutput
 }
 
@@ -89,15 +90,21 @@ sealed interface RecognitionOutput {
 enum class RecognitionLane { TRANSCRIBE, IDENTIFY }
 
 /**
- * 仕事の優先順位（小さいほど先）。確定に要る書き起こしを先にし、途中結果は後回しにする。
- * 確定（区切った残り）は、前のカードの文の書き起こしより先に出ることがある（出来事はカードの順に出すので、結果の順は崩れない）。
+ * 仕事の優先順位（小さいほど先）。確定に要る仕事（区切った残り・文の書き起こし・文の話し手の判定）を先にし、
+ * 話し中の窓の判定、途中結果の順に後回しにする。確定（区切った残り）は、前のカードの文の書き起こしより先に出ることがある
+ * （出来事はカードの順に出すので、結果の順は崩れない）。
  */
-enum class RecognitionPriority { FINAL, PHRASE, LANGUAGE, PARTIAL }
+enum class RecognitionPriority {
+    FINAL, PHRASE, PHRASE_LANGUAGE, LANGUAGE, PARTIAL;
+
+    /** 確定に要る仕事か。 */
+    val urgent: Boolean get() = this <= PHRASE_LANGUAGE
+}
 
 /**
  * 判定：認識の仕事の待ち行列（担当ごと）。次に処理する仕事と、要らなくなった仕事を決める。スレッドに依らない。
  * - 優先順位の高いものから、同じ順位は頼んだ順に出す（文の書き起こしは、つなぐ順に届く）。
- * - 閉じたカードの途中結果と言語の判定は捨てる（[dropStale]）。確定と文の書き起こしは捨てない。
+ * - 閉じたカードの途中結果と話し中の窓の判定は捨てる（[dropStale]）。確定に要る仕事は捨てない。
  * 途中結果と言語の見張りは、区切りがカードごとに1件ずつしか頼まないので、ここでは間引かない。
  */
 class RecognitionQueue {
@@ -116,16 +123,16 @@ class RecognitionQueue {
         return next
     }
 
-    /** [openCard] 以外のカードの、途中結果と言語の判定を捨てる（確定に要る仕事は残す）。 */
+    /** [openCard] 以外のカードの、途中結果と話し中の窓の判定を捨てる（確定に要る仕事は残す）。 */
     fun dropStale(openCard: Long?) {
         jobs.removeAll { it.card != openCard && it.priority >= RecognitionPriority.LANGUAGE }
     }
 
-    /** 確定に要る仕事（確定・文の書き起こし）が残っているか。 */
-    fun hasUrgent(): Boolean = jobs.any { it.priority <= RecognitionPriority.PHRASE }
+    /** 確定に要る仕事（確定・文の書き起こし・文の話し手の判定）が残っているか。 */
+    fun hasUrgent(): Boolean = jobs.any { it.priority.urgent }
 
-    /** まだ処理していない書き起こしのうち、一番古い音声の終わり。無ければ null。 */
-    fun oldestTranscribeEnd(): Long? = jobs.filter { it.priority <= RecognitionPriority.PHRASE }.minOfOrNull { it.endAt }
+    /** まだ処理していない確定に要る仕事のうち、一番古い音声の終わり。無ければ null。 */
+    fun oldestTranscribeEnd(): Long? = jobs.filter { it.priority.urgent }.minOfOrNull { it.endAt }
 
     fun clear() = jobs.clear()
 }
