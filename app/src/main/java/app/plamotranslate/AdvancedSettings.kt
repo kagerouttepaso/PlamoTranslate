@@ -93,7 +93,7 @@ private fun DetailedRecordsCard() {
 
 /**
  * 音声認識の調整。書き起こしの遅れを端末で切り分けるための値。次に会話翻訳・音声入力を開いたときに効く。
- * 仕事ごとの待ち時間と処理時間は、ログの「会話の認識: 認識 …」の行に出る。
+ * ジョブごとの待ち時間と処理時間は、ログの「会話の認識: 認識 …」の行に出る。
  */
 @Composable
 private fun RecognitionTuningCard() {

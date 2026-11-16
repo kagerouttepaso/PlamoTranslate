@@ -18,9 +18,9 @@ import org.junit.Test
 import java.io.File
 
 /**
- * 会話の録音を PC で流し直し、端末と同じ区切りの判断（[SpeechSegmenter]）を再現する（docs/手順/開発環境.md「会話の録音を流し直す」）。
+ * 会話の録音を PC でリプレイし、端末と同じ区切りの判断（[SpeechSegmenter]）を再現する（docs/手順/開発環境.md「会話の録音をリプレイする」）。
  * VAD（Silero）・言語の識別（Whisper tiny）・書き起こし（Qwen3-ASR）は端末と同じ実物を使い、時間だけを模擬する：
- * 音声は録音の速さで流し、仕事の処理時間は端末の記録から測った式（[DeviceTiming]）で見積もる。PC の速さに左右されず、同じ録音からは同じ結果になる。
+ * 音声は録音の速さで流し、ジョブの処理時間は端末の記録から測った式（[DeviceTiming]）で見積もる。PC の速さに左右されず、同じ録音からは同じ結果になる。
  *
  * 環境変数で動かす（どれかが無ければ飛ばす）：
  * - PLAMO_REPLAY_WAV：会話の録音（端末の `files/asr-rec/conv_*.wav`）
@@ -38,17 +38,17 @@ class ConversationReplayTest {
             return when (job) {
                 is RecognitionJob.Language -> if (job.lane == RecognitionLane.IDENTIFY) 330 + 21 * seconds else 256 + 203 * seconds
                 is RecognitionJob.Transcribe -> 256 + 203 * seconds
-                // 継ぎ目探しは識別の繰り返し（記録の平均）
+                // 境界探しは識別の繰り返し（記録の平均）
                 is RecognitionJob.Seam -> 1700.0
             }.toLong()
         }
     }
 
     /**
-     * 採点の物差し：録音の全体を見通して、0.25秒ごとに「どの言語の声か」を決める（`tools/score-speaker.py` が読む）。
-     * 2秒の区間を0.5秒ずつずらして Whisper tiny で点数を出し、0.25秒ごとに重なる区間の点数を足して一番の言語にする。
+     * 採点の基準：録音の全体を見通して、0.25秒ごとに「どの言語の声か」を決める（`tools/score-speaker.py` が読む）。
+     * 2秒の区間を0.5秒ずつずらして Whisper tiny でスコアを出し、0.25秒ごとに重なる区間のスコアを足して一番の言語にする。
      * 声の無いところ（端末と同じ Silero VAD が話していないとするところ）は `-` にする。
-     * 話し中の判定と違い、後ろの音声も使えて時間の制約も無いので、区切りの判断より確かな物差しになる（ただし正解そのものではない）。
+     * 話し中の判定と違い、後ろの音声も使えて時間の制約も無いので、区切りの判断より確かな基準になる（ただし正解そのものではない）。
      * PLAMO_REFERENCE_OUT（書く先）・PLAMO_REPLAY_WAV・PLAMO_REPLAY_ASR・PLAMO_SHERPA_LIB・PLAMO_REFERENCE_LANGS（候補。既定 ja,en）で動かす。
      */
     @Test
@@ -148,7 +148,7 @@ class ConversationReplayTest {
         )
         segmenter.languages = session.speechLanguages
 
-        // 担当ごとに、走っている仕事と終わる時刻
+        // ワーカーごとに、走っているジョブと終わる時刻
         val running = HashMap<RecognitionLane, Triple<RecognitionJob, RecognitionOutput, Long>>()
         fun startJobs() {
             for (lane in RecognitionLane.entries) {
@@ -158,7 +158,7 @@ class ConversationReplayTest {
                 running[lane] = Triple(job, output, now + DeviceTiming.millis(job) * SAMPLE_RATE / 1000)
             }
         }
-        // 端末と同じく、閉じたカードの要らない仕事は捨て、空の結果を返す（SpeechPipeline）
+        // 端末と同じく、閉じたカードの要らないジョブは捨て、空の結果を返す（SpeechPipeline）
         fun dropStale() {
             while (true) {
                 val stale = queue.dropStale(segmenter.openCardId)
@@ -191,7 +191,7 @@ class ConversationReplayTest {
             startJobs()
             pos = end
         }
-        // 録音の終わり：止めて、残りの仕事を終える
+        // 録音の終わり：止めて、残りのジョブを終える
         segmenter.flush()
         startJobs()
         while (running.isNotEmpty()) {

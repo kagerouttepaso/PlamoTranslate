@@ -22,7 +22,7 @@ data class CpuOptions(
     val threads: Int = 0,
     /** 性能ヒント（ADPF）で周波数・配置を上げてもらう。 */
     val boost: Boolean = true,
-    /** 仕事を待つ間にスピン待機する（`poll`。false なら眠って待つ）。 */
+    /** 処理を待つ間にスピン待機する（`poll`。false なら眠って待つ）。 */
     val spinWait: Boolean = true,
     /** スレッドプールを常駐させる（false ならllama.cppが推論のたびに用意する）。 */
     val threadPool: Boolean = true,
@@ -179,7 +179,7 @@ class TranslationEngine private constructor(
 
         /**
          * 最高周波数が一番低いクラスター（小さいコア）がコアの半分以下なら、それ以外のコア（大きいコア）の数にする。
-         * 小さいコアに仕事が回ると、ほかのスレッドが待たされて全体が遅くなる（2026-11-08、15T Pro（2.4GHz×4、
+         * 小さいコアに処理が回ると、ほかのスレッドが待たされて全体が遅くなる（2026-11-08、15T Pro（2.4GHz×4、
          * 3.3GHz×3、3.73GHz×1）で6スレッドは0.3〜0.8トークン/秒、4スレッドは56〜62トークン/秒）。
          * 小さいコアが半分より多い、または周波数が読めない端末は、今までどおり「コア数−2」にする
          * （REDMAGIC 11 Pro（4.6GHz×2、3.6GHz×6）では6が最速だった。docs/現在地.md）。
@@ -205,7 +205,7 @@ class TranslationEngine private constructor(
                 }.getOrDefault(0L)
             }
 
-        /** llama.cppの既定。仕事を待つ間、しばらくスピン待機してから眠る。 */
+        /** llama.cppの既定。処理を待つ間、しばらくスピン待機してから眠る。 */
         private const val DEFAULT_POLL = 50
 
         /** 端末に入っているCPUバックエンドの版（ファイル名）。 */

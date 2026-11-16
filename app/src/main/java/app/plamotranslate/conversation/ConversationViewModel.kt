@@ -178,7 +178,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     @Volatile private var flushed: CompletableDeferred<Unit>? = null
 
     /**
-     * マイクで聞く。録音の側で音量を測って画面に出し、音声は音声認識に渡すだけにする（音声認識は区切りと認識の担当の
+     * マイクで聞く。録音の側で音量を測って画面に出し、音声は音声認識に渡すだけにする（音声認識は区切りと認識のワーカーの
      * スレッドで動き、録音を待たせない）。書き起こしが重いモデル（1回に1〜2秒）でも、音量のバーは止まらず、音声も落とさない。
      * 認識の遅れ（まだ書き起こしていない確定に要る音声が、どれだけ前のものか）は画面に出す。
      *
@@ -202,7 +202,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
 
     /**
      * 詳しい記録を残すとき（デバッグ版の既定。正式版は詳細設定で本人が選ぶ）だけ、音声認識へ渡した音声を WAV に書く
-     * （docs/設計/会話翻訳.md「動作確認」）。[startFromWav] で流し直して、区切りと確定の文を前後で比べるため。
+     * （docs/設計/会話翻訳.md「動作確認」）。[startFromWav] でリプレイして、区切りと確定の文を前後で比べるため。
      * 会話の中身なので、端末の外部ファイルの `asr-rec/` にだけ置き、調べ終えたら消す。
      */
     private fun recorder(): WavFile.Writer? {
@@ -420,7 +420,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         listenJob?.cancel()
         // 止め終えるのを待っている聞き取りを終わらせる（画面と一緒に消える）
         flushed?.complete(Unit)
-        // 認識中の仕事が終わってから解放される（呼んだスレッドは待たない）
+        // 認識中のジョブが終わってから解放される（呼んだスレッドは待たない）
         asr?.close()
         asr = null
     }

@@ -8,7 +8,7 @@ import org.junit.Test
 /**
  * 区切りの状態遷移（[SpeechSegmenter]）。音声の値で「何語を話しているか」を表し、偽の VAD と偽の認識で区切りを確かめる。
  * 偽の認識は、0.1秒ごとに1文字（日本語は「あ」、韓国語は「가」、中国語は「中」）を返し、言語は多い方にする。
- * 認識の担当の代わり（[Harness]）は、結果をその場で返すか、決めた分だけ遅れて返す。
+ * 認識のワーカーの代わり（[Harness]）は、結果をその場で返すか、決めた分だけ遅れて返す。
  */
 class SpeechSegmenterTest {
     private enum class Sound(val value: Float, val char: String?, val lang: String?) {
@@ -72,9 +72,9 @@ class SpeechSegmenterTest {
     private val profile = SegmentationProfile.CONVERSATION
 
     /**
-     * 区切りと、認識の担当の代わり。仕事は待ち行列（[RecognitionQueue]）から取ってその場で処理し（言語の判定を先に）、
+     * 区切りと、認識のワーカーの代わり。ジョブは待ち行列（[RecognitionQueue]）から取ってその場で処理し（言語の判定を先に）、
      * 書き起こしの結果は [latencyChunks] 個の音声（0.1秒ずつ）を渡した後に返す（0ならその場で返す）。言語の判定は速いので、
-     * その場で返す（端末では識別の担当が別のスレッドで、0.3秒ほどで返す）。
+     * その場で返す（端末では識別のワーカーが別のスレッドで、0.3秒ほどで返す）。
      */
     private class Harness(
         recognizer: SpeechRecognizer,
@@ -84,9 +84,9 @@ class SpeechSegmenterTest {
         private val latencyChunks: Int = 0,
         /** 言語の判定（[RecognitionJob.Language]・[RecognitionJob.Seam]）の結果を返すまでの音声の個数。 */
         private val languageLatencyChunks: Int = 0,
-        /** 継ぎ目探し（[RecognitionJob.Seam]）の結果を返すまでの音声の個数。 */
+        /** 境界探し（[RecognitionJob.Seam]）の結果を返すまでの音声の個数。 */
         private val seamLatencyChunks: Int = languageLatencyChunks,
-        /** 担当ごとに1件ずつ処理する（端末と同じく、処理中の仕事の後ろに次の仕事が待ち行列で待つ）。 */
+        /** ワーカーごとに1件ずつ処理する（端末と同じく、処理中のジョブの後ろに次のジョブが待ち行列で待つ）。 */
         private val oneJobPerLane: Boolean = false,
     ) {
         val events = mutableListOf<SpeechEvent>()
@@ -116,7 +116,7 @@ class SpeechSegmenterTest {
 
         private fun run(all: Boolean) {
             while (true) {
-                // 端末と同じく、閉じたカードの要らない仕事は捨て、空の結果を返す
+                // 端末と同じく、閉じたカードの要らないジョブは捨て、空の結果を返す
                 while (true) {
                     val stale = queue.dropStale(segmenter.openCardId)
                     if (stale.isEmpty()) break
@@ -145,7 +145,7 @@ class SpeechSegmenterTest {
             run(all = false)
         }
 
-        /** 頼んだ仕事をすべて終わらせる。 */
+        /** 頼んだジョブをすべて終わらせる。 */
         fun settle() = run(all = true)
 
         fun collect(block: Harness.() -> Unit): List<SpeechEvent> {
@@ -168,7 +168,7 @@ class SpeechSegmenterTest {
     private fun segmenter(languages: SpeechLanguages = SpeechLanguages(setOf("ja", "ko")), latency: Int = 0) =
         Harness(FakeRecognizer(::soundOf), profile, heavy = false, languages = languages, latencyChunks = latency)
 
-    /** [parts] の音を0.1秒ずつ流し、出来事を集める（最後に、頼んだ仕事を終わらせる）。 */
+    /** [parts] の音を0.1秒ずつ流し、出来事を集める（最後に、頼んだジョブを終わらせる）。 */
     private fun Harness.feed(vararg parts: Pair<Sound, Double>): List<SpeechEvent> = collect {
         parts.forEach { (sound, seconds) -> repeat((seconds * 10).toInt()) { accept(FloatArray(FRAME) { sound.value }) } }
         settle()
@@ -205,7 +205,7 @@ class SpeechSegmenterTest {
     fun 間を空けずに言語が代わっても話している最中に区切る() {
         val cards = finals(segmenter().feed(Sound.JA to 4.0, Sound.KO to 4.0, Sound.SILENCE to 3.0))
         assertEquals(listOf("ja", "ko"), cards.map { it.lang })
-        // 区切りは言語の継ぎ目の近く：前のカードはほとんど日本語、後ろはほとんど韓国語
+        // 区切りは言語の境界の近く：前のカードはほとんど日本語、後ろはほとんど韓国語
         assertTrue(cards[0].text.count { it == 'あ' } >= 35)
         assertTrue(cards[1].text.count { it == '가' } >= 35)
     }
@@ -340,7 +340,7 @@ class SpeechSegmenterTest {
     }
 
     /**
-     * 書き起こしの重いモデル（Qwen3-ASR）の代わり。書き起こさずに点数を出せ（[SpeechRecognizer.scores]。決めた言語を点数1にする）、
+     * 書き起こしの重いモデル（Qwen3-ASR）の代わり。書き起こさずにスコアを出せ（[SpeechRecognizer.scores]。決めた言語をスコア1にする）、
      * 書き起こした音声の長さ・識別の回数・言語を指定した書き起こしの回数を覚える。
      */
     private inner class HeavyRecognizer(
@@ -460,18 +460,18 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun 書き起こしが重く途中結果の間隔が延びても話し中の交代にすぐ気づき継ぎ目で区切る() {
+    fun 書き起こしが重く途中結果の間隔が延びても話し中の交代にすぐ気づき境界で区切る() {
         // 書き起こしに1.5秒かかる（途中結果の間隔は3秒に延びる）。言語の識別はその場で返る
         val cards = finals(phraseSegmenter(HeavyRecognizer(), latency = 15).feed(Sound.JA to 4.0, Sound.KO to 5.0, Sound.SILENCE to 3.0))
         assertEquals(listOf("ja", "ko"), cards.map { it.lang })
-        // 区切りは言語の継ぎ目の近く：韓国語の頭が前のカードに残らない
+        // 区切りは言語の境界の近く：韓国語の頭が前のカードに残らない
         assertTrue(cards[0].text, cards[0].text.count { it == '가' } <= 3)
         assertTrue(cards[1].text, cards[1].text.count { it == '가' } >= 45)
     }
 
     @Test
-    fun 言語の判定が遅いときは話し中の監視の間隔を延ばして担当の時間を残す() {
-        // 言語を自分で識別するモデル（SenseVoice）では、監視は書き起こしの担当で動く
+    fun 言語の判定が遅いときは話し中の監視の間隔を延ばしてワーカーの時間を残す() {
+        // 言語を自分で識別するモデル（SenseVoice）では、監視は書き起こしのワーカーで動く
         fun watches(languageLatency: Int): Int {
             val s = Harness(FakeRecognizer(::soundOf), profile, heavy = false, languages = SpeechLanguages(setOf("ja", "ko")),
                 languageLatencyChunks = languageLatency)
@@ -485,7 +485,7 @@ class SpeechSegmenterTest {
 
     @Test
     fun 文の判定が遅れて届いても文の頭で区切る() {
-        // 点数は1.2秒遅れて届くので、判定より先に次の文が始まる
+        // スコアは1.2秒遅れて届くので、判定より先に次の文が始まる
         val asr = HeavyRecognizer()
         val s = Harness(asr, profile, heavy = true, languages = SpeechLanguages(setOf("ja", "ko")), languageLatencyChunks = 12)
         val cards = finals(s.feed(Sound.KO to 3.0, Sound.SILENCE to 1.0, Sound.JA to 1.8, Sound.SILENCE to 4.0))
@@ -506,8 +506,8 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun 継ぎ目を探している間に話し終わり次の人が話し始めても話し終わりで分ける() {
-        // 継ぎ目の結果が5秒遅れて届くので、その前に話し終わりの無音（3秒）が過ぎ、次の発話が始まる
+    fun 境界を探している間に話し終わり次の人が話し始めても話し終わりで分ける() {
+        // 境界の結果が5秒遅れて届くので、その前に話し終わりの無音（3秒）が過ぎ、次の発話が始まる
         val s = Harness(HeavyRecognizer(), profile, heavy = true, languages = SpeechLanguages(setOf("ja", "ko")), seamLatencyChunks = 50)
         val cards = finals(s.feed(Sound.JA to 5.0, Sound.KO to 2.5, Sound.SILENCE to 3.5, Sound.JA to 4.0, Sound.SILENCE to 6.0))
         assertEquals(listOf("ja", "ko", "ja"), cards.map { it.lang })
@@ -515,7 +515,7 @@ class SpeechSegmenterTest {
 
     @Test
     fun 待ち行列で区間の判定を待っている間にカードを閉じても確定が出る() {
-        // 識別の担当が1件ずつ処理し、判定に0.7秒かかる。文が終わった直後に話し、区間の判定が文の判定の後ろの待ち行列に
+        // 識別のワーカーが1件ずつ処理し、判定に0.7秒かかる。文が終わった直後に話し、区間の判定が文の判定の後ろの待ち行列に
         // 残ったまま（その後ろに次の文の判定が並んだまま）手で区切る。捨てた区間に結果を返さないと、カードが確定しなかった
         val s = Harness(
             HeavyRecognizer(), profile, heavy = true, languages = SpeechLanguages(setOf("ja", "ko")),
@@ -535,8 +535,8 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun 継ぎ目を探す区間で新しい言語が見つからなければ話し中に区切らない() {
-        // 日本語だけの話で、話し中の区間（1.5秒）が続けて4回、韓国語と聞き違える識別。継ぎ目を探す短い区間は正しい
+    fun 境界を探す区間で新しい言語が見つからなければ話し中に区切らない() {
+        // 日本語だけの話で、話し中の区間（1.5秒）が続けて4回、韓国語と聞き違える識別。境界を探す短い区間は正しい
         var windows = 0
         val asr = HeavyRecognizer { samples, lang ->
             if (samples == SAMPLE_RATE * 3 / 2 && ++windows in 5..8) "ko" else lang

@@ -55,7 +55,7 @@ object LanguageEvidence {
         }
     }
 
-    /** 言語のコードを、比べるための組にまとめる（根拠かどうかは見ない。言語の継ぎ目探しはこれで比べる）。 */
+    /** 言語のコードを、比べるための組にまとめる（根拠かどうかは見ない。言語の境界探しはこれで比べる）。 */
     fun group(lang: String?, separateChinese: Boolean): String? = when (lang) {
         "zh", "yue" -> if (separateChinese) "zh" else "ja"
         else -> lang

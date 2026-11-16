@@ -192,7 +192,7 @@ fun PerformanceCard(model: ModelState) {
             SettingSwitch("性能ヒント", "OSにCPUの周波数・配置を上げてもらう（ADPF）", options.boost, !busy) {
                 apply(options.copy(boost = it))
             }
-            SettingSwitch("待つ間もCPUを回し続ける", "オフにすると、スレッドが仕事を待つ間は眠る", options.spinWait, !busy) {
+            SettingSwitch("待つ間もCPUを回し続ける", "オフにすると、スレッドが処理を待つ間は眠る", options.spinWait, !busy) {
                 apply(options.copy(spinWait = it))
             }
             SettingSwitch("スレッドを常駐させる", "オフにすると、llama.cppが推論のたびにスレッドを用意する", options.threadPool, !busy) {

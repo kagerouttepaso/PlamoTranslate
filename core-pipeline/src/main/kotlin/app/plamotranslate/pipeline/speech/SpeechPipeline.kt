@@ -9,13 +9,13 @@ import kotlin.concurrent.thread
  *
  * - 区切りのスレッド：命令（音声・区切る・止める）と認識の結果を届いた順に受け取り、区切りの状態遷移（[SpeechSegmenter]）に渡す。
  *   VAD は軽いので、重い書き起こしの間も音声は遅れずに区切られる。
- * - 認識の担当のスレッド（[RecognitionLane] ごとに1本）：待ち行列（[RecognitionQueue]）から次の仕事を取り、[recognizer] で処理して、
- *   結果を区切りのスレッドへ返す。書き起こしの担当と識別の担当が分かれているので、重い書き起こしの間も言語の監視は止まらない。
+ * - 認識のワーカーのスレッド（[RecognitionLane] ごとに1本）：待ち行列（[RecognitionQueue]）から次のジョブを取り、[recognizer] で処理して、
+ *   結果を区切りのスレッドへ返す。書き起こしのワーカーと識別のワーカーが分かれているので、重い書き起こしの間も言語の監視は止まらない。
  *
- * 状態は区切りのスレッドだけが持ち、担当のスレッドとは待ち行列（[lock] で守る）と受け取り口（[inbox]）でだけやり取りする。
- * [timing] は仕事ごとの待ち時間と処理時間を書く口（話した言葉は含めないので、いつも書く）。
+ * 状態は区切りのスレッドだけが持ち、ワーカーのスレッドとは待ち行列（[lock] で守る）と受け取り口（[inbox]）でだけやり取りする。
+ * [timing] はジョブごとの待ち時間と処理時間を書く口（話した言葉は含めないので、いつも書く）。
  *
- * 止め終わりの約束：[flush] を呼んだら、閉じた後でも、認識の担当が失敗しても、[SpeechEvent.Flushed] が1回届く。
+ * 止め終わりの約束：[flush] を呼んだら、閉じた後でも、認識のワーカーが失敗しても、[SpeechEvent.Flushed] が1回届く。
  * 呼んだ側は Flushed を待って聞き終えるので、届かないと止まらなくなるため。
  */
 class SpeechPipeline(
@@ -41,7 +41,7 @@ class SpeechPipeline(
     private val inbox = LinkedBlockingQueue<Input>()
     private val runner = RecognitionRunner(recognizer)
 
-    /** [queue]・[running]・[submittedAt] を守る。担当のスレッドは仕事が無ければここで待つ。 */
+    /** [queue]・[running]・[submittedAt] を守る。ワーカーのスレッドはジョブが無ければここで待つ。 */
     private val lock = Object()
     private val queue = RecognitionQueue()
     private val running = HashMap<RecognitionLane, RecognitionJob>()
@@ -93,7 +93,7 @@ class SpeechPipeline(
     }
 
     override fun flush() = synchronized(gate) {
-        // 閉じた後なら、止める仕事はもう無い。待っている呼び手のために、その場で止め終わりを返す
+        // 閉じた後なら、止める処理はもう無い。待っている呼び手のために、その場で止め終わりを返す
         if (closed) listener(SpeechEvent.Flushed) else inbox.put(Input.Flush)
     }
 
@@ -102,7 +102,7 @@ class SpeechPipeline(
     }
 
     /**
-     * 区切りのスレッドを止め、待ち行列の残りを捨て、担当のスレッドが今の仕事を終えてから、モデルを解放する（呼んだスレッドは待たない）。
+     * 区切りのスレッドを止め、待ち行列の残りを捨て、ワーカーのスレッドが今のジョブを終えてから、モデルを解放する（呼んだスレッドは待たない）。
      * 止めている途中なら、確定を待たずに止め終わりを返す。
      */
     override fun close() {
@@ -140,7 +140,7 @@ class SpeechPipeline(
                     Input.Reset -> {
                         synchronized(lock) { queue.clear() }
                         segmenter.reset()
-                        // 止めている途中で始め直したら、止める仕事は捨てたので、待っている呼び手に止め終わりを返す
+                        // 止めている途中で始め直したら、止める処理は捨てたので、待っている呼び手に止め終わりを返す
                         if (flushPending) {
                             flushPending = false
                             listener(SpeechEvent.Flushed)
@@ -163,8 +163,8 @@ class SpeechPipeline(
     }
 
     /**
-     * 閉じたカードの途中結果と言語の判定は、もう要らないので捨てる。捨てた仕事にも空の結果を渡す（区切りは結果を受けてから
-     * 次を決めるので、知らせないとその仕事を待ち続ける）。渡した結果で区切りが仕事を足し、また捨てられることがあるので、
+     * 閉じたカードの途中結果と言語の判定は、もう要らないので捨てる。捨てたジョブにも空の結果を渡す（区切りは結果を受けてから
+     * 次を決めるので、知らせないとそのジョブを待ち続ける）。渡した結果で区切りがジョブを足し、また捨てられることがあるので、
      * 捨てるものが無くなるまで繰り返す。
      */
     private fun dropStale() {
@@ -203,7 +203,7 @@ class SpeechPipeline(
             val output = try {
                 runner.run(job)
             } catch (e: Throwable) {
-                // ネイティブの Error でも担当を止めない（結果が戻らないと、カードも止め終わりも出ない）
+                // ネイティブの Error でもワーカーを止めない（結果が戻らないと、カードも止め終わりも出ない）
                 timing("認識に失敗（${job.purpose}）: $e")
                 RecognitionRunner.empty(job)
             }

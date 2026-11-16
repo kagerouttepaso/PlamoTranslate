@@ -1,6 +1,6 @@
 package app.plamotranslate.pipeline.speech
 
-/** 文字の種類。言語のコードと、認識した文の多数派の文字を、同じ物差しで比べる。 */
+/** 文字の種類。言語のコードと、認識した文の多数派の文字を、同じ基準で比べる。 */
 enum class Script {
     JAPANESE, HAN, HANGUL, LATIN, CYRILLIC, ARABIC, DEVANAGARI, THAI, GREEK, HEBREW, OTHER;
 

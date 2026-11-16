@@ -17,11 +17,11 @@ import kotlin.math.sin
 
 /**
  * 話された言語の識別（既定の実装。docs/設計/会話翻訳.md「エンジンと出来事」）。Whisper tiny（99言語）を ONNX Runtime で直接動かし、
- * 候補の言語ごとの点数（確率）を返す。sherpa-onnx の識別は一番の言語の名前しか返さず、会話の2つの言語のどちらに近いかを比べられないため。
+ * 候補の言語ごとのスコア（確率）を返す。sherpa-onnx の識別は一番の言語の名前しか返さず、会話の2つの言語のどちらに近いかを比べられないため。
  * 認識モデルによらず使える。
  *
  * 処理は Whisper の言語の判定と同じ：音声を30秒に足して log-mel（80本）を作り、エンコーダーを1回、デコーダーを
- * 始まりのトークン（SOT）で1手だけ動かして、言語のトークンの logits を候補の中で softmax する。
+ * 始まりのトークン（SOT）で1ステップだけ動かして、言語のトークンの logits を候補の中で softmax する。
  * [dir] には `tiny-encoder.int8.onnx`・`tiny-decoder.int8.onnx` を置く（sherpa-onnx の asr-models の `sherpa-onnx-whisper-tiny`）。
  * 言語のトークンと言語のコードの対応は、モデルのメタデータ（`all_language_tokens`・`all_language_codes`）から読む。
  */
@@ -47,7 +47,7 @@ class WhisperLanguageIdentifier private constructor(
         textState = meta.getValue("n_text_state").toInt()
     }
 
-    /** デコーダーの自己注意のキャッシュ（1手だけなので常に0）。毎回作り直さない。 */
+    /** デコーダーの自己注意のキャッシュ（1ステップだけなので常に0）。毎回作り直さない。 */
     private val emptyCache = FloatArray(layers * textCtx * textState)
 
     /** 聞ける言語のコード（Whisper の表記）。 */
@@ -55,7 +55,7 @@ class WhisperLanguageIdentifier private constructor(
 
     /**
      * 候補の言語ごとの確率（合計1）。候補のうち Whisper が知らない言語は除く。知っている候補が無ければ null。
-     * 識別の担当と書き起こしの担当（言語が分からないまま書き起こすとき）の両方から呼ばれるので、1件ずつにする。
+     * 識別のワーカーと書き起こしのワーカー（言語が分からないまま書き起こすとき）の両方から呼ばれるので、1件ずつにする。
      */
     @Synchronized
     override fun scores(samples: FloatArray, candidates: Set<String>?): Map<String, Float>? {

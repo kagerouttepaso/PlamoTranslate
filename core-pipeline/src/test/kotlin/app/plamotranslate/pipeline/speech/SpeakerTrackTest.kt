@@ -64,7 +64,7 @@ class SpeakerTrackTest {
     }
 
     @Test
-    fun 交代に気づくのが遅れても継ぎ目はカードの話し手と同じだった最後の区間から探させる() {
+    fun 交代に気づくのが遅れても境界はカードの話し手と同じだった最後の区間から探させる() {
         val t = sureJa()
         t.window(8.0, "en")
         // 気づくのは10秒の区間だが、探すのは日本語と決まった最後の区間（1〜2.5秒）の頭から、英語の最初の区間の終わり（8秒）まで
@@ -74,7 +74,7 @@ class SpeakerTrackTest {
     }
 
     @Test
-    fun 継ぎ目が見つからなければその根拠を使い終え次の区間から数え直す() {
+    fun 境界が見つからなければその根拠を使い終え次の区間から数え直す() {
         val t = sureJa()
         t.window(4.0, "en")
         t.window(4.5, "en")
@@ -84,7 +84,7 @@ class SpeakerTrackTest {
     }
 
     @Test
-    fun 継ぎ目が見つからなかった根拠は文の全体の判定を止めない() {
+    fun 境界が見つからなかった根拠は文の全体の判定を止めない() {
         val t = sureJa().apply { window(4.0, "en"); window(4.5, "en"); seamMissed() }
         assertEquals(Verdict.Cut("en", s(3.0)), t.phrase(3.0, 5.0, "en"))
     }
@@ -107,7 +107,7 @@ class SpeakerTrackTest {
 
     @Test
     fun 文の中で区間が話し手を決めていれば文の全体の多数決で上書きしない() {
-        // 日本語のカードで英語が2秒以上続いた文：文の全体が日本語でも、英語の交代は継ぎ目探しに任せる
+        // 日本語のカードで英語が2秒以上続いた文：文の全体が日本語でも、英語の交代は境界探しに任せる
         val switched = sureJa().apply { window(4.0, "en"); window(4.5, "en") }
         assertEquals(Verdict.Keep, switched.phrase(0.0, 5.0, "ja"))
         // 日本語が2秒以上続いた文を、文の全体が英語としても区切らない

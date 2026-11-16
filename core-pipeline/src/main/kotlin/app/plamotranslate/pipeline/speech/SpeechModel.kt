@@ -6,7 +6,7 @@ import app.plamotranslate.llm.Language
  * 音声認識モデルの一覧（docs/作業中/会話翻訳に守備範囲の広い音声認識を足す.md）。設定の画面で前もって選び、
  * 会話翻訳とテキスト翻訳の音声入力が使う。会話で選べる言語は「モデルが聞ける」かつ「PLaMo が訳せる」言語（[languages]）。
  *
- * 言語の識別は2層にする。[identifiesLanguage] が true のモデルは、モデル自身の言語の判定を使う（書き起こした言語を点数1とする）。
+ * 言語の識別は2層にする。[identifiesLanguage] が true のモデルは、モデル自身の言語の判定を使う（書き起こした言語をスコア1とする）。
  * false のモデルには、既定の言語の識別（[LanguageIdentifier]、Whisper tiny）を前に置き、決めた話し手の言語を指定して書き起こさせる。
  * どのモデルも、区切りは文ごとに話し手を決めて書き起こし、つなぐ（[SpeechSegmenter]）。
  *
@@ -51,13 +51,13 @@ enum class SpeechModel(
 interface LanguageIdentifier : AutoCloseable {
     /**
      * 候補の言語（[candidates]、"ja"・"ru" などのコード。null なら識別器が知るすべての言語）ごとの確率（合計1）。
-     * 判定できなければ null。どちらの言語に近いかを比べるので、一番の言語の名前ではなく点数を返す。
+     * 判定できなければ null。どちらの言語に近いかを比べるので、一番の言語の名前ではなくスコアを返す。
      */
     fun scores(samples: FloatArray, candidates: Set<String>?): Map<String, Float>?
 }
 
 /**
- * 処理のブロックをつなぐ：言語の識別（会話の言語ごとの点数）と、決めた言語を指定した書き起こし。
+ * 処理のブロックをつなぐ：言語の識別（会話の言語ごとのスコア）と、決めた言語を指定した書き起こし。
  * 識別は会話の言語（[SpeechLanguages.groups]）の中で比べる。違う言語を指定すると書き起こしが崩れる（端末で、アラビア語を
  * トルコ語と誤って指定するとローマ字になった）ので、会話の言語の外は選ばない。
  */
@@ -90,7 +90,7 @@ class IdentifiedRecognizer(
 
     override val identifies: Boolean get() = true
 
-    /** 識別器の点数を、比べるための組（中国語・広東語は1つの組）にまとめる。 */
+    /** 識別器のスコアを、比べるための組（中国語・広東語は1つの組）にまとめる。 */
     override fun scores(samples: FloatArray, languages: SpeechLanguages): Map<String, Float>? {
         val raw = identifier.scores(samples, languages.groups) ?: return null
         val grouped = HashMap<String, Float>()

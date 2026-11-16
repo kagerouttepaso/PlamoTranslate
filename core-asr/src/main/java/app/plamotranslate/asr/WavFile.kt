@@ -8,7 +8,7 @@ import java.nio.ByteOrder
 
 /**
  * 動作確認で、マイクの代わりに流す音声ファイルを読み書きする。16kHz・モノラル・16bit PCMのWAVだけ扱う。
- * 書くのは、デバッグ版の会話翻訳が聞いた音声を残して、流し直すため（docs/設計/会話翻訳.md「動作確認」）。
+ * 書くのは、デバッグ版の会話翻訳が聞いた音声を残して、リプレイするため（docs/設計/会話翻訳.md「動作確認」）。
  */
 object WavFile {
     fun read(file: File): FloatArray = parse(file.readBytes(), file.name)

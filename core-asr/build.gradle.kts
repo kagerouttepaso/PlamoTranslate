@@ -16,7 +16,7 @@ android {
     }
 }
 
-// 会話の録音を流し直す試験が使う、sherpa-onnx の AAR の中のクラス
+// 会話の録音をリプレイする試験が使う、sherpa-onnx の AAR の中のクラス
 val sherpaAar = rootProject.file("third_party/sherpa-onnx/sherpa-onnx-static-link-onnxruntime-${libs.versions.sherpa.onnx.get()}.aar")
 val sherpaClassesDir = layout.buildDirectory.dir("sherpa-classes")
 val sherpaClassesJar = sherpaClassesDir.map { it.file("classes.jar") }
@@ -33,16 +33,16 @@ dependencies {
     // 中核のインターフェース（VoiceActivity・SpeechRecognizer）を実装し、中核の区切り（SpeechEngine）を返す
     api(project(":core-pipeline"))
     implementation(project(":core-log"))
-    // 言語の識別の点数（Whisper tiny を直接動かす）。漫画用OCRと同じ版（sherpa-onnx は ONNX Runtime を静的に組み込んでいて、名前がぶつからない）
+    // 言語の識別のスコア（Whisper tiny を直接動かす）。漫画用OCRと同じ版（sherpa-onnx は ONNX Runtime を静的に組み込んでいて、名前がぶつからない）
     implementation(libs.onnxruntime.android)
     testImplementation(libs.junit)
     testImplementation(libs.onnxruntime.jvm)
-    // 会話の録音を PC で流し直す試験（ConversationReplayTest）が、端末と同じ VAD と書き起こしを使うため。
+    // 会話の録音を PC でリプレイする試験（ConversationReplayTest）が、端末と同じ VAD と書き起こしを使うため。
     // AAR の中の classes.jar を取り出して使う。ネイティブのライブラリ（Windows 版の JNI）は PLAMO_SHERPA_LIB で指す
     testImplementation(files(sherpaClassesJar).builtBy(extractSherpaClasses))
 }
 
-// 流し直しの試験は、PLAMO_SHERPA_LIB（sherpa-onnx の Windows 版の JNI の lib）があるときだけ動く（docs/手順/開発環境.md「会話の録音を流し直す」）
+// リプレイの試験は、PLAMO_SHERPA_LIB（sherpa-onnx の Windows 版の JNI の lib）があるときだけ動く（docs/手順/開発環境.md「会話の録音をリプレイする」）
 tasks.withType<Test>().configureEach {
     System.getenv("PLAMO_SHERPA_LIB")?.let { lib ->
         systemProperty("java.library.path", lib)

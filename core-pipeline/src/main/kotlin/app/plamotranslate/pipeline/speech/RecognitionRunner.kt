@@ -1,11 +1,11 @@
 package app.plamotranslate.pipeline.speech
 
 /**
- * 認識の仕事（[RecognitionJob]）を1件処理する（認識の担当のスレッドが呼ぶ。試験では同じスレッドから呼ぶ）。
- * 認識のインターフェース [recognizer] を、仕事の種類に合わせて呼び分ける。
+ * 認識のジョブ（[RecognitionJob]）を1件処理する（認識のワーカーのスレッドが呼ぶ。試験では同じスレッドから呼ぶ）。
+ * 認識のインターフェース [recognizer] を、ジョブの種類に合わせて呼び分ける。
  */
 class RecognitionRunner(private val recognizer: SpeechRecognizer) {
-    /** 仕事を1件処理する（担当のスレッド）。 */
+    /** ジョブを1件処理する（ワーカーのスレッド）。 */
     fun run(job: RecognitionJob): RecognitionOutput = when (job) {
         is RecognitionJob.Transcribe -> RecognitionOutput.Transcribed(
             // 話し手の言語が分かっていれば、識別を省いてその言語として書き起こす
@@ -20,7 +20,7 @@ class RecognitionRunner(private val recognizer: SpeechRecognizer) {
     }
 
     /**
-     * 会話の言語ごとの点数。点数を出せる認識器はその点数を、出せない認識器は書き起こした結果の言語を点数1とする。
+     * 会話の言語ごとのスコア。スコアを出せる認識器はそのスコアを、出せない認識器は書き起こした結果の言語をスコア1とする。
      * [strict] なら、書き起こした結果の言語は、話し手の根拠になるもの（[LanguageEvidence.of]：文字の種類が合い、1語より多い）だけを使う。
      */
     private fun scored(samples: FloatArray, languages: SpeechLanguages, strict: Boolean): RecognitionOutput.Scored {
@@ -38,9 +38,9 @@ class RecognitionRunner(private val recognizer: SpeechRecognizer) {
         SpeakerJudge.decide(scored(samples, languages, strict).scores, languages, confidence)
 
     /**
-     * 言語の継ぎ目：区間を [RecognitionJob.Seam.step] ずつずらし、新しい言語になった最初の区間を二分探索で探す
+     * 言語の境界：区間を [RecognitionJob.Seam.step] ずつずらし、新しい言語になった最初の区間を二分探索で探す
      * （前は元の言語、後ろは新しい言語と見る。10個の区間を4回ほどの判定で済ませる）。交代かどうかは頼んだ側（話し手の時系列の
-     * 区間の連なり）が決めているので、ここは位置を探すだけにする。
+     * 連続区間）が決めているので、ここは位置を探すだけにする。
      */
     private fun seam(job: RecognitionJob.Seam): Int? {
         val count = (job.samples.size - job.probe) / job.step + 1
@@ -61,7 +61,7 @@ class RecognitionRunner(private val recognizer: SpeechRecognizer) {
     }
 
     companion object {
-        /** 失敗した仕事・捨てた仕事の結果（空）。確定を待たせ続けないため。 */
+        /** 失敗したジョブ・捨てたジョブの結果（空）。確定を待たせ続けないため。 */
         fun empty(job: RecognitionJob): RecognitionOutput = when (job) {
             is RecognitionJob.Transcribe -> RecognitionOutput.Transcribed(Recognition("", null))
             is RecognitionJob.Language -> RecognitionOutput.Scored(null)

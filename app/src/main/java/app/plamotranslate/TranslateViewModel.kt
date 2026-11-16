@@ -162,7 +162,7 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         voiceJob?.cancel()
-        // 認識中の仕事が終わってから解放される（呼んだスレッドは待たない）
+        // 認識中のジョブが終わってから解放される（呼んだスレッドは待たない）
         asr?.close()
         asr = null
     }

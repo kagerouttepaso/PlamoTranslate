@@ -17,7 +17,7 @@ class CutPointTest {
         CutPoint.longUtterance(buf, breakFrom = from, quietFrom = from, to = buf.size, breaks = breaks)
 
     @Test
-    fun 言語の継ぎ目は一番静かな区間の真ん中で区切る() {
+    fun 言語の境界は一番静かな区間の真ん中で区切る() {
         val buf = buffer(0.8f, 0.8f, 0.01f, 0.8f, 0.8f)
         val at = CutPoint.languageSeam(buf, 0, buf.size)
         assertTrue("区切り $at", at in frame * 2..frame * 3)

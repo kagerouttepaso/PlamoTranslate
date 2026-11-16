@@ -42,7 +42,7 @@ data class RecognitionLoad(val behindSeconds: Float = 0f, val urgent: Boolean = 
  * 音声を発話に区切って認識する（会話翻訳とテキスト翻訳の音声入力が使う）。部品どうしは、返り値の無い命令と購読する出来事で
  * つなぐ（docs/設計/アーキテクチャ.md「設計の原則」）。命令（[accept]・[cut]・[flush]・[reset]）はすぐ戻り、
  * 出来事は [listener] に届く順に処理する。命令はどのスレッドから呼んでもよいが、音声は話した順に渡す。
- * 実装は中核の [SpeechPipeline]（区切りの状態遷移 [SpeechSegmenter] と、認識の担当のスレッド）。
+ * 実装は中核の [SpeechPipeline]（区切りの状態遷移 [SpeechSegmenter] と、認識のワーカーのスレッド）。
  */
 interface SpeechEngine : AutoCloseable {
     /**
@@ -116,15 +116,15 @@ interface SpeechRecognizer : AutoCloseable {
     fun recognizeAs(samples: FloatArray, language: String?): Recognition = recognize(samples)
 
     /**
-     * 書き起こさずに言語の点数を出せるか（[scores]）。出せる認識器（言語の識別を前に置く組み立て）は、区切りが言語の判定を
-     * 識別の担当に回し、重い書き起こしを省く。出せない認識器（SenseVoice）は、書き起こした結果の言語を点数1の判定として使う
+     * 書き起こさずに言語のスコアを出せるか（[scores]）。出せる認識器（言語の識別を前に置く組み立て）は、区切りが言語の判定を
+     * 識別のワーカーに回し、重い書き起こしを省く。出せない認識器（SenseVoice）は、書き起こした結果の言語をスコア1の判定として使う
      * （[RecognitionRunner]）。
      */
     val identifies: Boolean get() = false
 
     /**
      * 会話の言語（[SpeechLanguages.groups] の組。null ならすべて）ごとの確率（合計1。[identifies] が true の認識器）。
-     * 判定できなければ null。話し手は、この点数から [SpeakerJudge] が決める。
+     * 判定できなければ null。話し手は、このスコアから [SpeakerJudge] が決める。
      */
     fun scores(samples: FloatArray, languages: SpeechLanguages): Map<String, Float>? = null
 }

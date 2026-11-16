@@ -32,7 +32,7 @@ class SpeechPipelineTest {
     }
 
     @Test
-    fun 認識の担当が失敗しても止め終わりが届く() {
+    fun 認識のワーカーが失敗しても止め終わりが届く() {
         val (p, flushed) = pipeline()
         repeat(20) { p.accept(FloatArray(SpeechEngine.SAMPLE_RATE / 10) { 0.5f }) }
         p.flush()

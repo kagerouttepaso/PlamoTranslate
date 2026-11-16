@@ -283,7 +283,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeInit(JNIEnv *env, jobject, jstring
             // OpenCLの無い端末では libggml-opencl.so の読み込みだけが失敗し、CPUの部分は読み込まれる
             ggml_backend_load_all_from_path(lib_dir.c_str());
         } else {
-            // CPUの部分だけ読み込む。世代ごとの版のうち、端末で動く中で一番点数の高いもの（ggml_backend_score）を選ぶ。
+            // CPUの部分だけ読み込む。世代ごとの版のうち、端末で動く中で一番スコアの高いもの（ggml_backend_score）を選ぶ。
             // ggml_backend_load_all_from_path と同じ選び方を、GPUを除いて行う
             std::string best;
             int best_score = 0;
@@ -307,7 +307,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeInit(JNIEnv *env, jobject, jstring
                 closedir(dir);
             }
             if (!best.empty() && ggml_backend_load(best.c_str())) {
-                LOGI("CPUのバックエンド: %s（点数%d）", best.c_str(), best_score);
+                LOGI("CPUのバックエンド: %s（スコア%d）", best.c_str(), best_score);
                 g_cpu_backend = best.substr(best.find_last_of('/') + 1);
             } else {
                 LOGE("CPUのバックエンドを読み込めませんでした: %s", lib_dir.c_str());
@@ -373,7 +373,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
     const auto before = list_threads();
     ggml_threadpool_params tp_params = ggml_threadpool_params_default(n_threads);
     // use_pool が false なら作らず、llama.cppが推論のたびにスレッドを用意する既定の動きにする。
-    // poll は仕事を待つ間のスピン待機の度合い（0は眠って待つ、既定50）
+    // poll は処理を待つ間のスピン待機の度合い（0は眠って待つ、既定50）
     tp_params.poll = (uint32_t) poll;
     engine->threadpool = use_pool && g_threadpool_new ? g_threadpool_new(&tp_params) : nullptr;
     if (engine->threadpool) {

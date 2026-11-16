@@ -45,7 +45,7 @@ import app.plamotranslate.llm.Language
  * 1画面は2人が同じカードの全部を読むので、見出し・原文・訳を同じ重さで出す。
  */
 
-/** 対面で、そのカードを読む人。相手の面のカードは逆さに出し、相手の言語を上に出す。 */
+/** 対面で、そのカードを読む人。相手側のカードは逆さに出し、相手の言語を上に出す。 */
 internal enum class Reader { ME, PARTNER }
 
 /**
@@ -79,7 +79,7 @@ private fun cardLabel(direction: Direction): String =
     "${if (direction.mine) "自分" else "相手"}・${direction.source.label} → ${direction.target?.label ?: "（相手の言語を判定中）"}"
 
 
-/** 対面で、その面を読む人の言語。自分の面は自分が話した・訳された言語、相手の面は相手のもの。 */
+/** 対面で、その側の表示を読む人の言語。自分側は自分が話した・訳された言語、相手側は相手のもの。 */
 private fun readerLanguage(d: Direction, reader: Reader): Language =
     if (d.mine == (reader == Reader.ME)) d.source else d.target ?: d.source
 
@@ -215,7 +215,7 @@ private fun UtteranceCard(
  *
  * 見出しに、誰が何語で話しているかを出し、枠・見出し・音量のバーを話した人の色（確定したカードと同じ）にする。
  * 話し手が代わると色が変わるので、カードが替わったことがひと目で分かる（2026-11-15、作者の要望）。話し手が分かる前は中立の色。
- * 相手の面は相手が読むので、言語をその言語自身の名前で出す（例：한국어）。
+ * 相手側は相手が読むので、言語をその言語自身の名前で出す（例：한국어）。
  */
 @Composable
 internal fun LiveCard(live: LiveSpeech, reader: Reader?, level: Float, lagSeconds: Float, queued: Boolean = false) {
@@ -237,7 +237,7 @@ internal fun LiveCard(live: LiveSpeech, reader: Reader?, level: Float, lagSecond
         }
     }
     val seconds = ((now - live.startedAtMs) / 1000).coerceAtLeast(0)
-    // 相手の面は相手が読むので、言語に依らない書き方にする
+    // 相手側は相手が読むので、言語に依らない書き方にする
     val waiting = if (reader == Reader.PARTNER) "… ${seconds}s" else "書き起こし中… ${seconds}秒"
     val original = live.text.ifEmpty { waiting }
     val translation = live.translation.ifEmpty { "…" }
@@ -292,7 +292,7 @@ internal fun LiveCard(live: LiveSpeech, reader: Reader?, level: Float, lagSecond
 @Composable
 internal fun QueuedCard(card: LiveSpeech, reader: Reader?) = LiveCard(card, reader, level = 0f, lagSeconds = 0f, queued = true)
 
-/** 書き起こし待ちのカードの見出し。相手の面は言語に依らない記号（⏳）にする。 */
+/** 書き起こし待ちのカードの見出し。相手側は言語に依らない記号（⏳）にする。 */
 private fun queuedStatus(d: Direction?, reader: Reader?): String = when {
     reader == Reader.PARTNER -> if (d == null) "⏳" else "⏳ ${ownName(d.source)}"
     d == null -> "⏳ 区切りました・書き起こし中"
@@ -300,8 +300,8 @@ private fun queuedStatus(d: Direction?, reader: Reader?): String = when {
 }
 
 /**
- * 話し中のカードの見出し：誰が何語で話しているか。自分の面と1画面は「● 相手・韓国語」、相手の面は相手が読めるよう
- * 言語をその言語自身の名前で出す（「● 한국어」）。話し手がまだ分からなければ「● 話し中」（相手の面は「●」）。
+ * 話し中のカードの見出し：誰が何語で話しているか。自分側と1画面は「● 相手・韓国語」、相手側は相手が読めるよう
+ * 言語をその言語自身の名前で出す（「● 한국어」）。話し手がまだ分からなければ「● 話し中」（相手側は「●」）。
  */
 private fun liveStatus(d: Direction?, reader: Reader?): String = when {
     d == null -> if (reader == Reader.PARTNER) "●" else "● 話し中"

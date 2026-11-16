@@ -1,8 +1,8 @@
 package app.plamotranslate.pipeline.speech
 
 /**
- * 区切り（[SpeechSegmenter]）が認識の担当に頼む仕事（docs/作業中/会話翻訳に守備範囲の広い音声認識を足す.md「認識を段に分ける」）。
- * 区切りは仕事を出して待たずに次の音声へ進み、結果（[RecognitionOutput]）を受け取ってから次を決める。
+ * 区切り（[SpeechSegmenter]）が認識のワーカーに頼むジョブ（docs/作業中/会話翻訳に守備範囲の広い音声認識を足す.md「認識を段に分ける」）。
+ * 区切りはジョブを出して待たずに次の音声へ進み、結果（[RecognitionOutput]）を受け取ってから次を決める。
  * 音声は頼んだ時点の写しを持つので、結果が届くまでにためた音声が区切られても影響しない。位置は聞き始めからのサンプル数。
  */
 sealed interface RecognitionJob {
@@ -42,8 +42,8 @@ sealed interface RecognitionJob {
     }
 
     /**
-     * 会話の言語ごとの点数を出す（話し手は区切りが [SpeakerJudge] で決める）。点数を出せる認識器は識別の担当
-     * （[RecognitionLane.IDENTIFY]）が、出せない認識器は書き起こしの担当が書き起こして、その言語を点数1とする。
+     * 会話の言語ごとのスコアを出す（話し手は区切りが [SpeakerJudge] で決める）。スコアを出せる認識器は識別のワーカー
+     * （[RecognitionLane.IDENTIFY]）が、出せない認識器は書き起こしのワーカーが書き起こして、その言語をスコア1とする。
      * [priority] は、文の全体（[RecognitionPriority.PHRASE_LANGUAGE]）か、話し中の区間（[RecognitionPriority.LANGUAGE]）か。
      */
     class Language(
@@ -58,9 +58,9 @@ sealed interface RecognitionJob {
     ) : RecognitionJob
 
     /**
-     * 言語の継ぎ目を探す。[samples] の中で、[probe] の長さの区間を [step] ずつずらし、[newLang] に変わった最初の区間の
+     * 言語の境界を探す。[samples] の中で、[probe] の長さの区間を [step] ずつずらし、[newLang] に変わった最初の区間の
      * 頭の位置（[samples] の中のサンプル数）を返す。前は元の言語、後ろは新しい言語と見て、二分探索で区間の数を減らす。
-     * どの区間も [newLang] でなければ、継ぎ目は無いとする。
+     * どの区間も [newLang] でなければ、境界は無いとする。
      */
     class Seam(
         override val id: Long,
@@ -81,32 +81,32 @@ sealed interface RecognitionJob {
 /** 認識の結果。失敗したら空の結果を返す（確定を待たせ続けないため）。 */
 sealed interface RecognitionOutput {
     data class Transcribed(val recognition: Recognition) : RecognitionOutput
-    /** 点数（判定できなければ null）。書き起こして判定した認識器は、その書き起こし（[recognition]、後処理の後）も返す。 */
+    /** スコア（判定できなければ null）。書き起こして判定した認識器は、その書き起こし（[recognition]、後処理の後）も返す。 */
     data class Scored(val scores: Map<String, Float>?, val recognition: Recognition? = null) : RecognitionOutput
     data class SeamFound(val at: Int?) : RecognitionOutput
 }
 
-/** 認識の担当。担当ごとに1本のスレッドで1件ずつ処理する。重い書き起こしの間も、言語の識別は止まらない。 */
+/** 認識のワーカー。ワーカーごとに1本のスレッドで1件ずつ処理する。重い書き起こしの間も、言語の識別は止まらない。 */
 enum class RecognitionLane { TRANSCRIBE, IDENTIFY }
 
 /**
- * 仕事の優先順位（小さいほど先）。確定に要る仕事（区切った残り・文の書き起こし・文の話し手の判定）を先にし、
+ * ジョブの優先順位（小さいほど先）。確定に要るジョブ（区切った残り・文の書き起こし・文の話し手の判定）を先にし、
  * 話し中の区間の判定、途中結果の順に後回しにする。確定（区切った残り）は、前のカードの文の書き起こしより先に出ることがある
  * （出来事はカードの順に出すので、結果の順は崩れない）。
  */
 enum class RecognitionPriority {
     FINAL, PHRASE, PHRASE_LANGUAGE, LANGUAGE, PARTIAL;
 
-    /** 確定に要る仕事か。 */
+    /** 確定に要るジョブか。 */
     val urgent: Boolean get() = this <= PHRASE_LANGUAGE
 }
 
 /**
- * 判定：認識の仕事の待ち行列（担当ごと）。次に処理する仕事と、要らなくなった仕事を決める。スレッドに依らない。
+ * 判定：認識のジョブの待ち行列（ワーカーごと）。次に処理するジョブと、要らなくなったジョブを決める。スレッドに依らない。
  * - 優先順位の高いものから、同じ順位は頼んだ順に出す（文の書き起こしは、つなぐ順に届く）。
- * - 閉じたカードの途中結果と話し中の区間の判定は捨てる（[dropStale]）。確定に要る仕事は捨てない。
- *   捨てた仕事は返し、呼び手は空の結果（[RecognitionRunner.empty]）を区切りに渡す。頼んだ仕事には、処理しても捨てても
- *   必ず1回だけ結果が返る（結果を待って次を決める区切りが、捨てられた仕事を待ち続けて止まらないようにする）。
+ * - 閉じたカードの途中結果と話し中の区間の判定は捨てる（[dropStale]）。確定に要るジョブは捨てない。
+ *   捨てたジョブは返し、呼び手は空の結果（[RecognitionRunner.empty]）を区切りに渡す。頼んだジョブには、処理しても捨てても
+ *   必ず1回だけ結果が返る（結果を待って次を決める区切りが、捨てられたジョブを待ち続けて止まらないようにする）。
  * 途中結果と言語の監視は、区切りがカードごとに1件ずつしか頼まないので、ここでは間引かない。
  */
 class RecognitionQueue {
@@ -118,24 +118,24 @@ class RecognitionQueue {
         jobs += job
     }
 
-    /** [lane] の次の仕事を取り出す。無ければ null。 */
+    /** [lane] の次のジョブを取り出す。無ければ null。 */
     fun take(lane: RecognitionLane): RecognitionJob? {
         val next = jobs.filter { it.lane == lane }.minByOrNull { it.priority.ordinal } ?: return null
         jobs.remove(next)
         return next
     }
 
-    /** [openCard] 以外のカードの、途中結果と話し中の区間の判定を捨てて返す（確定に要る仕事は残す）。 */
+    /** [openCard] 以外のカードの、途中結果と話し中の区間の判定を捨てて返す（確定に要るジョブは残す）。 */
     fun dropStale(openCard: Long?): List<RecognitionJob> {
         val stale = jobs.filter { it.card != openCard && it.priority >= RecognitionPriority.LANGUAGE }
         jobs.removeAll(stale)
         return stale
     }
 
-    /** 確定に要る仕事（確定・文の書き起こし・文の話し手の判定）が残っているか。 */
+    /** 確定に要るジョブ（確定・文の書き起こし・文の話し手の判定）が残っているか。 */
     fun hasUrgent(): Boolean = jobs.any { it.priority.urgent }
 
-    /** まだ処理していない確定に要る仕事のうち、一番古い音声の終わり。無ければ null。 */
+    /** まだ処理していない確定に要るジョブのうち、一番古い音声の終わり。無ければ null。 */
     fun oldestTranscribeEnd(): Long? = jobs.filter { it.priority.urgent }.minOfOrNull { it.endAt }
 
     fun clear() = jobs.clear()

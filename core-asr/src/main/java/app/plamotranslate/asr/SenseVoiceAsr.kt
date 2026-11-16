@@ -49,7 +49,7 @@ class SileroVoiceActivity private constructor(private val vad: Vad) : VoiceActiv
         const val DEFAULT_MIN_SPEECH_SECONDS = 0.25f
 
         /**
-         * [threshold] は話しているとみなす確からしさ、[minSpeechSeconds] は話し始めとみなす最短の長さ。
+         * [threshold] は話しているとみなす確率のしきい値、[minSpeechSeconds] は話し始めとみなす最短の長さ。
          * 作者の録音で、話し始めの検出が0.7〜1.3秒遅れた（頭は前に足して補っている）。縮められるかをデバッグ版の設定で試す。
          */
         fun load(

@@ -25,7 +25,7 @@ object CutPoint {
         return quietest(buffer, quietFrom, to)
     }
 
-    /** 話し手の交代の区切り：言語の継ぎ目の前後 [from]〜[to] で、0.1秒ごとの音量が一番小さい区間の中央。 */
+    /** 話し手の交代の区切り：言語の境界の前後 [from]〜[to] で、0.1秒ごとの音量が一番小さい区間の中央。 */
     fun languageSeam(buffer: SpeechBuffer, from: Int, to: Int): Int = quietest(buffer, from, to)
 
     /** 文の切れ目の時刻の前と後ろで、区切る位置を探す長さ（切れ目の時刻は直前の文字の後で、その後に間がある）。 */

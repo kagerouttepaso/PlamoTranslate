@@ -7,7 +7,7 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  * VAD（[vad]）は「話しているか」と「文の終わり」の判定だけに使い、認識する音声は自分でためた [SpeechBuffer] から取る。
  * 途中結果と確定結果が同じ音声から作られ、区切っても音声が途切れない。
  *
- * 誰が話しているか（話し手の言語）は、音声の点数（[RecognitionJob.Language]）から [SpeakerJudge] が決める。点数を頼む入口は2つ。
+ * 誰が話しているか（話し手の言語）は、音声のスコア（[RecognitionJob.Language]）から [SpeakerJudge] が決める。スコアを頼む入口は2つ。
  * - 話し中の区間：話した音声0.5秒ごと（監視自身にかかった時間で延びる）に直近1.5秒。カードの言語がまだ無ければ、話し始めからの音声
  *   （[SegmentationProfile.cardLanguageSeconds] から）。仮の言語を決め、話し手の交代に話し中に気づく。
  * - 文の全体：文が終わったとき。文の話し手を決め、その言語を指定して文を書き起こす。文の判定が、話し手の決まりの最後の機会になる。
@@ -16,21 +16,21 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  * - 文が終わってから無音が続き、合わせて [SegmentationProfile.endSilenceSeconds] になった（話し終わり）
  * - 文の全体の話し手が、カードの確かな話し手と違った（話し手の交代。その文の頭で区切る）
  * - 話している最中に、カードの確かな話し手と違う言語の区間が [SegmentationProfile.minTurnSeconds] 以上の音声にわたって続き、
- *   その交代の継ぎ目が見つかった（話し手の交代・話し中。継ぎ目の位置で区切る）
+ *   その交代の境界が見つかった（話し手の交代・話し中。境界の位置で区切る）
  * - [SegmentationProfile.splitAfterSeconds] 話し続けた（長い発話）
  * - 利用者が区切った（[cut]）
- * カードの話し手と交代は、区間と文の根拠から話し手の時系列（[SpeakerTrack]）が決める。継ぎ目を探している間は、話し終わりと
+ * カードの話し手と交代は、区間と文の根拠から話し手の時系列（[SpeakerTrack]）が決める。境界を探している間は、話し終わりと
  * 長い発話でカードを閉じない（閉じると、見つかった交代を区切れず、新しい話し手の音声が前の話し手の言語で書き起こされる）。
- * 話し終わりは位置を覚えておき、継ぎ目の結果を受けてから閉じる（[closeAfterSeam]）。文の判定は、届いていない区間があれば
- * その区間の後に渡す（判定の担当では文の点数が区間より先に処理されるので、届く順で使う根拠が変わらないようにする）。
+ * 話し終わりは位置を覚えておき、境界の結果を受けてから閉じる（[closeAfterSeam]）。文の判定は、届いていない区間があれば
+ * その区間の後に渡す（判定のワーカーでは文のスコアが区間より先に処理されるので、届く順で使う根拠が変わらないようにする）。
  *
- * 認識は待たない：書き起こしと点数は仕事（[RecognitionJob]）として [submit] に出し、結果を [onResult] で受け取ってから
+ * 認識は待たない：書き起こしとスコアはジョブ（[RecognitionJob]）として [submit] に出し、結果を [onResult] で受け取ってから
  * 次を決める。音声の処理（VAD・区切り）は、重い書き起こしの間も止まらない（2026-11-15、作者の試用で、書き起こし中の表示が
  * 5〜7秒続いた。1本のスレッドで認識を待っていたので、1回の重い書き起こしの後ろに音声と区切りが並んでいた）。
  * 位置は聞き始めからのサンプル数で覚え、結果が届いた時点のためた音声の位置に直す。
  *
  * 出来事はカードの順に出す：前のカードの確定が届くまで、次のカードの出来事は [Card.held] に持っておく。
- * 確定に要る仕事は途中結果より先に処理される（[RecognitionQueue]）ので、待たせる時間はほとんど無い。
+ * 確定に要るジョブは途中結果より先に処理される（[RecognitionQueue]）ので、待たせる時間はほとんど無い。
  *
  * 話している間は、まだ終わっていない文を、カードの言語で書き起こして途中結果を出す（書き起こした文につなぐ。疑似ストリーミング）。
  * カードの言語が決まるまでは書き起こさず、決まったら文字より先に知らせる（空の途中結果）。確定は、書き起こした文と、
@@ -38,12 +38,12 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  * 声の始まり（[SpeechOnset]）より前を渡さない（書き起こしの時間は音声の長さに比例する）。
  *
  * 判断は部品に分ける：話し手は [SpeakerJudge]、区切る位置は [CutPoint]、認識した文字の聞き違いの判定は [TranscriptCleanup]、
- * 仕事の順番は [RecognitionQueue]。状態を持つので、すべての呼び出しは1本のスレッドから行う（[SpeechPipeline]）。
+ * ジョブの順番は [RecognitionQueue]。状態を持つので、すべての呼び出しは1本のスレッドから行う（[SpeechPipeline]）。
  * [trace] は区切りの経過を書く口（話した言葉を含むので、デバッグ版だけが書く）。
  */
 class SpeechSegmenter(
     private val vad: VoiceActivity,
-    /** 書き起こさずに点数を出せる認識器か（[SpeechRecognizer.identifies]）。出せれば点数は識別の担当に回す。 */
+    /** 書き起こさずにスコアを出せる認識器か（[SpeechRecognizer.identifies]）。出せればスコアは識別のワーカーに回す。 */
     private val identifies: Boolean,
     private val profile: SegmentationProfile = SegmentationProfile.CONVERSATION,
     /** 書き起こしの重いモデルか（[SpeechModel.heavy]）。声の始まりより前を渡さず、途中結果の間隔を詰める。 */
@@ -71,7 +71,7 @@ class SpeechSegmenter(
     /** ためる音声の上限（念のため）。前に足す音声と区切りより長くしておく。 */
     private val buffer = SpeechBuffer(prerollSamples, prerollSamples + splitAfterSamples + SAMPLE_RATE * 6)
 
-    /** 点数を頼む担当。 */
+    /** スコアを頼むワーカー。 */
     private val languageLane = if (identifies) RecognitionLane.IDENTIFY else RecognitionLane.TRANSCRIBE
 
     @Volatile var languages = SpeechLanguages.ANY
@@ -101,12 +101,12 @@ class SpeechSegmenter(
     /** 前の途中結果を頼んでから、話している音声がどれだけ増えたか。 */
     private var sinceLastPartial = 0
 
-    /** 前に区間の点数を頼んでから、話している音声がどれだけ増えたか。 */
+    /** 前に区間のスコアを頼んでから、話している音声がどれだけ増えたか。 */
     private var sinceLastWatch = 0
 
     /**
-     * 話し中の区間の間隔。監視にかかった時間（待ち時間を含む）の何倍かより短くはしない。点数を識別の担当で出すモデルでは
-     * 最短の間隔のまま、書き起こしの担当で出すモデル（SenseVoice）では、担当が混むと延びて途中結果の時間を残す。
+     * 話し中の区間の間隔。監視にかかった時間（待ち時間を含む）の何倍かより短くはしない。スコアを識別のワーカーで出すモデルでは
+     * 最短の間隔のまま、書き起こしのワーカーで出すモデル（SenseVoice）では、ワーカーが混むと延びて途中結果の時間を残す。
      */
     private var watchInterval = WATCH_INTERVAL_SAMPLES
 
@@ -167,7 +167,7 @@ class SpeechSegmenter(
         /** 届いていない区間の後に渡す文の判定。 */
         var afterWatch: (() -> Unit)? = null
 
-        /** 継ぎ目を探している間に話し終わった位置（聞き始めから）。継ぎ目の結果を受けてから閉じる。 */
+        /** 境界を探している間に話し終わった位置（聞き始めから）。境界の結果を受けてから閉じる。 */
         var speakingEndAt: Long? = null
     }
 
@@ -256,7 +256,7 @@ class SpeechSegmenter(
         }
     }
 
-    /** 頼んだ仕事の結果。届いた時点で、まだ意味のある結果だけを使う（閉じたカードの途中結果などは捨てる）。 */
+    /** 頼んだジョブの結果。届いた時点で、まだ意味のある結果だけを使う（閉じたカードの途中結果などは捨てる）。 */
     fun onResult(id: Long, output: RecognitionOutput) {
         if (closed) return
         handlers.remove(id)?.invoke(output)
@@ -385,7 +385,7 @@ class SpeechSegmenter(
     }
 
     /**
-     * 文を話し手の言語で書き起こす。点数を出すのに書き起こした認識器（SenseVoice）は、その書き起こし（[recognition]）を使う
+     * 文を話し手の言語で書き起こす。スコアを出すのに書き起こした認識器（SenseVoice）は、その書き起こし（[recognition]）を使う
      * （言語を指定できないので、書き起こし直しても同じ）。
      */
     private fun transcribePhrase(card: Card, phrase: Phrase, recognition: Recognition?) {
@@ -395,7 +395,7 @@ class SpeechSegmenter(
             finishIfReady(card)
         }
         if (recognition != null) {
-            trace { "書き起こし（文・点数のもの）${at(phrase.from)}〜${at(phrase.end)}: [${recognition.lang}] ${recognition.text}" }
+            trace { "書き起こし（文・スコアのもの）${at(phrase.from)}〜${at(phrase.end)}: [${recognition.lang}] ${recognition.text}" }
             done(recognition)
             return
         }
@@ -406,9 +406,9 @@ class SpeechSegmenter(
     private fun stitchedEnd(card: Card): Int = card.phrases.lastOrNull()?.let { rel(it.end) } ?: rel(card.start).coerceAtLeast(0)
 
     /**
-     * 話している最中の区間の点数で、カードの言語を決め、話し手の交代を監視する。カードの言語がまだ無ければ、話し始めからの音声
+     * 話している最中の区間のスコアで、カードの言語を決め、話し手の交代を監視する。カードの言語がまだ無ければ、話し始めからの音声
      * （[SegmentationProfile.cardLanguageSeconds] から）で決める。決まったら直近1.5秒を見る。区間の言語から、カードの言語・
-     * 交代（継ぎ目を探す [findSeam]）を決めるのは話し手の時系列（[SpeakerTrack.window]）。
+     * 交代（境界を探す [findSeam]）を決めるのは話し手の時系列（[SpeakerTrack.window]）。
      * 話し始めから長く話してもカードの言語が決まらなければ、前の話し手の言語を仮に使う（決まらないと途中結果を出せない）。
      */
     private fun watchLanguage(card: Card) {
@@ -462,16 +462,16 @@ class SpeechSegmenter(
 
     /**
      * 言語が代わった位置を探して区切る。話し手の時系列が示した範囲（カードの話し手だと分かっている最後の根拠から、新しい言語の
-     * 連なりの最初の区間の終わりの、調べる区間1つ分後ろまで）を0.25秒ずつずらした1秒の区間のうち、最初に新しい言語になったところを継ぎ目とみなし、
+     * 連続区間の最初の区間の終わりの、調べる区間1つ分後ろまで）を0.25秒ずつずらした1秒の区間のうち、最初に新しい言語になったところを境界とみなし、
      * その前後の区切る位置（[CutPoint.languageSeam]）で区切る。区間は二分探索で選ぶ（[RecognitionJob.Seam]）。見つからなければ
-     * 区切らない（区間の聞き違い）。静かさだけで探すと、話し手の継ぎ目に間が無いとき、新しい言語の文の中の小さな間を選び、
+     * 区切らない（区間の聞き違い）。静かさだけで探すと、話し手の境界に間が無いとき、新しい言語の文の中の小さな間を選び、
      * 新しい言語の最初の語が前のカードに入って消えた。
      */
     private fun findSeam(card: Card, seek: SpeakerTrack.Verdict.Seek) {
         val newLang = seek.lang
         card.seamPending = true
         val from = rel(seek.from).coerceIn(0, (buffer.size - LANG_PROBE_SAMPLES).coerceAtLeast(0))
-        // 交代は連なりの最初の区間の終わりより前にある。新しい言語の最初の区間は、新しい言語が後ろ半分だけでもそう決まるので、
+        // 交代は連続区間の最初の区間の終わりより前にある。新しい言語の最初の区間は、新しい言語が後ろ半分だけでもそう決まるので、
         // 調べる区間が交代の後ろに丸ごと入るよう、区間1つ分だけ後ろまで調べる
         val to = (rel(seek.to) + LANG_PROBE_SAMPLES).coerceIn(minOf(from + LANG_PROBE_SAMPLES, buffer.size), buffer.size)
         val fromAbs = abs(from)
@@ -487,13 +487,13 @@ class SpeechSegmenter(
             card.seamPending = false
             if (card !== open) return@job
             val seam = (out as? RecognitionOutput.SeamFound)?.at
-            trace { "継ぎ目 ${seam?.let { at(fromAbs + it) } ?: "なし"}（$previous→$newLang）" }
+            trace { "境界 ${seam?.let { at(fromAbs + it) } ?: "なし"}（$previous→$newLang）" }
             if (seam == null) {
                 card.track.seamMissed()
             } else {
                 val s = rel(fromAbs) + seam
                 val at = CutPoint.languageSeam(buffer, s - CutPoint.FRAME_SAMPLES * 2, s + CutPoint.FRAME_SAMPLES * 6)
-                // 後ろの話し手は、確かな連なりで決まっている
+                // 後ろの話し手は、確かな連続区間で決まっている
                 cutAt(at, "話し手の交代（話し中：$previous→$newLang）", manual = false, lang = newLang, sure = true)
             }
             closeAfterSeam(card)
@@ -501,7 +501,7 @@ class SpeechSegmenter(
     }
 
     /**
-     * 継ぎ目を探している間に話し終わっていたら、その位置で閉じる。まだ無音が続いていれば、次の音声の処理で話し終わりとして閉じる。
+     * 境界を探している間に話し終わっていたら、その位置で閉じる。まだ無音が続いていれば、次の音声の処理で話し終わりとして閉じる。
      * もう次の発話が始まっていれば、話し終わりの位置で区切り、次の発話は次のカードにする。
      */
     private fun closeAfterSeam(card: Card) {
@@ -536,7 +536,7 @@ class SpeechSegmenter(
      * カードを [at]（ためた音声の中の位置）で区切ると決める。書き起こした文をつなぎ、[restEnd] までのまだ書き起こしていない
      * 音声（区切る位置が文の途中なら、その文の頭から）を、カードの話し手の言語で書き起こす。話し手は話し手の時系列が決めたもので、
      * 残りだけで決め直さない（2026-11-15 の beta.3 の試用で、交代で区切った残りを決め直して新しい話し手の言語になり、
-     * 前の話し手の文を違う言語で書き起こした）。カードの言語がまだ無いときだけ、残りの点数を話し手の時系列に渡して決める。
+     * 前の話し手の文を違う言語で書き起こした）。カードの言語がまだ無いときだけ、残りのスコアを話し手の時系列に渡して決める。
      * 書き起こしがすべて届いたら確定を出す（[finishIfReady]）。
      */
     private fun close(card: Card, at: Int, reason: String, restEnd: Int, manual: Boolean = false, speakingEnd: Boolean = false) {
@@ -670,7 +670,7 @@ class SpeechSegmenter(
         return card.phrases.map { SpeechBreak(rel(it.end), sentence = true) } + partialBreaks
     }
 
-    // ---- 仕事と出来事 ----
+    // ---- ジョブと出来事 ----
 
     private fun job(make: (Long) -> RecognitionJob, handler: (RecognitionOutput) -> Unit) {
         val id = nextJob++
@@ -703,8 +703,8 @@ class SpeechSegmenter(
     }
 
     /**
-     * 聞き始めからの位置 [from]〜[to] の音声の、会話の言語ごとの点数を出してもらう。短すぎればすぐ null を返す。
-     * 書き起こして点数を出した認識器は、その書き起こし（後処理の後）も返す。
+     * 聞き始めからの位置 [from]〜[to] の音声の、会話の言語ごとのスコアを出してもらう。短すぎればすぐ null を返す。
+     * 書き起こしてスコアを出した認識器は、その書き起こし（後処理の後）も返す。
      */
     private fun scores(
         card: Card,
@@ -723,7 +723,7 @@ class SpeechSegmenter(
         job({ id -> RecognitionJob.Language(id, card.id, languageLane, priority, buffer.slice(start, end), to, purpose, languages) }) { out ->
             val scored = out as? RecognitionOutput.Scored
             val recognition = scored?.recognition?.let(TranscriptCleanup::clean)
-            trace { "点数（$purpose）${at(from)}〜${at(to)}: ${scored?.scores?.entries?.sortedByDescending { it.value }?.take(3)?.joinToString { "%s=%.2f".format(it.key, it.value) }}" }
+            trace { "スコア（$purpose）${at(from)}〜${at(to)}: ${scored?.scores?.entries?.sortedByDescending { it.value }?.take(3)?.joinToString { "%s=%.2f".format(it.key, it.value) }}" }
             then(scored?.scores, recognition)
         }
     }
@@ -759,10 +759,10 @@ class SpeechSegmenter(
         /** 途中結果は0.5秒ごとより頻繁には頼まない。 */
         private const val MIN_PARTIAL_INTERVAL = SAMPLE_RATE / 2
 
-        /** 話している最中に区間の点数を頼む最短の間隔（話した音声の長さ）。途中結果の間隔とは別に数える。 */
+        /** 話している最中に区間のスコアを頼む最短の間隔（話した音声の長さ）。途中結果の間隔とは別に数える。 */
         private const val WATCH_INTERVAL_SAMPLES = SAMPLE_RATE / 2
 
-        /** 監視の間隔を、監視にかかった時間の何倍より短くしないか（監視が担当の時間の3分の1より多くを取らない）。 */
+        /** 監視の間隔を、監視にかかった時間の何倍より短くしないか（監視がワーカーの時間の3分の1より多くを取らない）。 */
         private const val WATCH_COST_RATIO = 3
 
         /** 途中結果の間隔を、かかった時間の何倍にするか（書き起こしの重いモデルは2倍、ほかは3倍）。 */
@@ -781,7 +781,7 @@ class SpeechSegmenter(
         /** 話している最中の区間に使う、直近の音声の長さ。 */
         private const val LANG_WINDOW_SAMPLES = SAMPLE_RATE * 3 / 2
 
-        /** 言語の継ぎ目を探すときに、1回に判定する長さと、ずらす幅。 */
+        /** 言語の境界を探すときに、1回に判定する長さと、ずらす幅。 */
         private const val LANG_PROBE_SAMPLES = SAMPLE_RATE
         private const val LANG_PROBE_STEP_SAMPLES = SAMPLE_RATE / 4
 
@@ -793,10 +793,10 @@ class SpeechSegmenter(
         private const val SPLIT_SEARCH_SAMPLES = SAMPLE_RATE * 4
         private const val MIN_TAIL_SAMPLES = SAMPLE_RATE * 3 / 10
 
-        /** 点数を頼む目的（ログに出す）。区間の点数はカードごとに1件ずつ頼む。 */
+        /** スコアを頼む目的（ログに出す）。区間のスコアはカードごとに1件ずつ頼む。 */
         private const val PURPOSE_WATCH = "話し中の区間"
         private const val PURPOSE_PHRASE = "文の全体"
         private const val PURPOSE_REST = "区切った残り"
-        private const val PURPOSE_SEAM = "継ぎ目探し"
+        private const val PURPOSE_SEAM = "境界探し"
     }
 }

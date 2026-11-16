@@ -70,7 +70,7 @@ object SpeechEngines {
             heavy = model.heavy,
             // 区切りの経過は話した言葉を含むので、デバッグ版だけに出る（Logs.text）
             trace = { message -> Logs.text { "会話の認識: ${message()}" } },
-            // 仕事ごとの待ち時間と処理時間は、話した言葉を含まないので正式版でも書く（遅さの切り分けに使う）
+            // ジョブごとの待ち時間と処理時間は、話した言葉を含まないので正式版でも書く（遅さの切り分けに使う）
             timing = { message -> Logs.i("会話の認識: $message") },
         )
     }
