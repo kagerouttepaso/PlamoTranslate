@@ -7,7 +7,7 @@ package app.plamotranslate.llm
  * どの機能でどの言語を選べるかは、前段の認識器が読める・聞き分けられる言語で決まる（カメラ翻訳・会話翻訳）。
  * `app` の中では、カメラ翻訳・会話翻訳・読み上げの言語もこの型で持つ（画面翻訳の原文は認識器の種類 OcrLanguage で持ち、
  * 翻訳へ渡すときにこの型にする）。`core-asr`・`core-tts` は言語をコード（文字列）で、`core-ocr` は OcrLanguage で受けるので、
- * 境界で変換する（docs/11「9」、2026-11-09に独立したファイルへ移した）。
+ * 境界で変換する（`docs/判断/2026-11-09_Languageを独立したファイルへ分け共通のモジュールは作らない.md`）。
  */
 enum class Language(val code: String, val label: String) {
     JA("ja", "日本語"),

@@ -6,7 +6,7 @@ import app.plamotranslate.ocr.OcrLanguage
 
 /**
  * カメラ翻訳の設定（原文の言語・訳す先・表のモード）。端末に残し、次に開いたときも引き継ぐ
- * （docs/11「6」、2026-11-09に1つにまとめた）。
+ * （`docs/判断/2026-11-09_設定の保存は機能ごとのPreferencesにまとめDataStoreへ移さない.md`）。
  */
 internal class CameraPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("camera_translate", Context.MODE_PRIVATE)

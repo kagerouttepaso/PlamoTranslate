@@ -164,7 +164,7 @@ class SupertonicSpeaker(
             "id", "it", "lt", "lv", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "tr", "uk", "vi",
         )
 
-        /** [dir] に置くファイル。vocoderだけ公式のfp32版（int8版はザラつきが乗る。docs/04「読み上げ」）。 */
+        /** [dir] に置くファイル。vocoderだけ公式のfp32版（int8版はザラつきが乗る。`docs/判断/2026-11-08_読み上げのvocoderだけfp32版にし段数を既定8にする.md`）。 */
         val FILES = listOf(
             "duration_predictor.int8.onnx", "text_encoder.int8.onnx", "vector_estimator.int8.onnx",
             "vocoder.onnx", "tts.json", "unicode_indexer.bin", "voice.bin",
@@ -172,7 +172,7 @@ class SupertonicSpeaker(
 
         /**
          * 音を作る段数の範囲と既定。作る時間は段数にほぼ比例する（REDMAGIC 11 Proで10秒分の日本語が
-         * 5段3.6秒・8段6.1秒・16段9.9秒）。ザラつきは段数を増やすほど減る（2026-11-08、docs/04「読み上げ」）。
+         * 5段3.6秒・8段6.1秒・16段9.9秒）。ザラつきは段数を増やすほど減る（`docs/判断/2026-11-08_読み上げのvocoderだけfp32版にし段数を既定8にする.md`）。
          * 作者が5段ではザラつくと言ったので、既定は8。設定の画面のスライダーで変える。
          */
         val STEPS_RANGE = 3..16

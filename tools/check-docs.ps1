@@ -95,6 +95,13 @@ foreach ($t in $texts) {
             # 文書の中で docs/ の外を指すもの（README.md など直下のファイル名だけ）は、docs/ から解決できるときだけ見る
             $found += [pscustomobject]@{ Path = $path; Secs = $m.Groups['secs'].Value }
         }
+        # .md を書かずに節を付けた docs/ の参照（docs/xx「節」）は、ファイルもフォルダーも無ければ参照切れ
+        foreach ($m in [regex]::Matches($line, 'docs/(?<p>[^\s`''"「」（）()、。,：\[\]<>:*|]+?)(?<!\.md)「')) {
+            $p = $m.Groups['p'].Value
+            if (-not (Test-Path -LiteralPath (Join-Path $docs $p)) -and -not (Test-Path -LiteralPath (Join-Path $docs "$p.md"))) {
+                $errors.Add("$(Rel $src.FullName):$($i + 1) 参照先の文書が無い：docs/$p")
+            }
+        }
         if ($isDoc) {
             foreach ($m in [regex]::Matches($line, $linkPattern)) {
                 $found += [pscustomobject]@{ Path = $m.Groups['path'].Value; Secs = '' }

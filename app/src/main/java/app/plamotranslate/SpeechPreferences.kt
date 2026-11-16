@@ -11,7 +11,7 @@ enum class SpeechEngine(val label: String, val note: String) {
 
 /**
  * 読み上げの設定（読むもの・声・速さ・段数）。設定の画面（[SpeechCard]）が書き、[ReadAloud] が読むたびに読む
- * （docs/11「3」、2026-11-09に保存を再生から切り出した）。
+ * （`docs/判断/2026-11-09_設定の保存は機能ごとのPreferencesにまとめDataStoreへ移さない.md`）。
  */
 class SpeechPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("speech", Context.MODE_PRIVATE)

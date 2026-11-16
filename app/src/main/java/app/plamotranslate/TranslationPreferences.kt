@@ -7,7 +7,7 @@ import app.plamotranslate.models.TranslationModel
 
 /**
  * 翻訳モデルの設定（使うモデル・CPUの詳細）。端末に残し、次に起動したときも同じものを使う。
- * 設定の画面が書き、[EngineHolder] が読み込むときに読む（docs/11「1」、2026-11-09に保存だけを切り出した）。
+ * 設定の画面が書き、[EngineHolder] が読み込むときに読む（`docs/判断/2026-11-09_設定の保存は機能ごとのPreferencesにまとめDataStoreへ移さない.md`）。
  */
 class TranslationPreferences(context: Context) {
     private val translation = context.getSharedPreferences("translation", Context.MODE_PRIVATE)
