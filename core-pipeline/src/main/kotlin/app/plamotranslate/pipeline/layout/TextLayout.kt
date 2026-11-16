@@ -41,7 +41,7 @@ enum class UnitKind(val expandable: Boolean) {
  */
 data class TextUnit(val kind: UnitKind, val members: List<Int>, val box: Box, val vertical: Boolean)
 
-/** まとめる工程の差し替え口：どの行を1つの単位にするかだけを返す。どの行もちょうど1つの組に入る（`GroupersTest`）。 */
+/** まとめる工程のインターフェース：どの行を1つの単位にするかだけを返す。どの行もちょうど1つの組に入る（`GroupersTest`）。 */
 fun interface LineGrouper {
     fun group(lines: List<TextLine>): List<List<Int>>
 }
