@@ -10,6 +10,7 @@
     - SingleRequest（翻訳の契約を通らずにエンジンを使う）を、許した場所の外で使う
     - llama.cpp の JNI（LlamaNative）を core-llm の外で使う
     - ロガー（core-log の Logs）を通さずに logcat へ書く
+    - モジュールが、docs/設計/アーキテクチャ.md「層とモジュール」の表に無いモジュールに依存する
   注意（終了コードは変えない）：構造を見直す兆候
     - Kotlin のファイルが大きい（責務が集まり始めた兆候）
     - 直近のコミットで何度も変わったファイル（局所修正が重なっている兆候）
@@ -71,6 +72,30 @@ foreach ($hit in Grep @('-E', '__android_log_(print|write|vprint)', '--', '*.cpp
     # 許すのは plamo_llm.cpp の emit_log の逃げ道（「// logcat への逃げ道」のコメントを付けた行）だけ
     if ($file -ne 'core-llm/src/main/cpp/plamo_llm.cpp' -or $line -notmatch '// logcat への逃げ道') {
         $errors.Add("ネイティブのログがロガーを通っていない：$hit")
+    }
+}
+
+# 約束5：モジュールの依存は docs/設計/アーキテクチャ.md「層とモジュール」の表に書いたものだけ。表を正本にし、ここに依存の一覧を書き写さない
+$archLines = @(Get-Content -LiteralPath (Join-Path $root 'docs/設計/アーキテクチャ.md') -Encoding utf8)
+$allowedDeps = @{}
+$inLayers = $false
+foreach ($line in $archLines) {
+    if ($line -match '^#{1,6} ') { $inLayers = $line -match '^## 層とモジュール$'; continue }
+    if ($inLayers -and $line -match '^\| `(?<m>[a-z-]+)` \| (?<deps>.+?) \|$') {
+        $allowedDeps[$Matches['m']] = @([regex]::Matches($Matches['deps'], '`([a-z-]+)`') | ForEach-Object { $_.Groups[1].Value })
+    }
+}
+$modules = @(Get-ChildItem -LiteralPath $root -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'build.gradle.kts') } | ForEach-Object Name)
+if ($allowedDeps.Count -lt 3) {
+    $errors.Add('docs/設計/アーキテクチャ.md「層とモジュール」の依存の表を読めない（行の形が変わった）')
+} else {
+    foreach ($m in $modules) {
+        if (-not $allowedDeps.ContainsKey($m)) { $errors.Add("モジュール $m が依存の表に無い（docs/設計/アーキテクチャ.md「層とモジュール」に足す）"); continue }
+        $gradle = Get-Content -LiteralPath (Join-Path $root "$m/build.gradle.kts") -Encoding utf8 -Raw
+        foreach ($d in [regex]::Matches($gradle, 'project\(\s*"(?::)?(?<d>[a-z-]+)"\s*\)')) {
+            $dep = $d.Groups['d'].Value
+            if ($dep -notin $allowedDeps[$m]) { $errors.Add("$m が表に無いモジュールに依存している：$dep（docs/設計/アーキテクチャ.md「層とモジュール」）") }
+        }
     }
 }
 
