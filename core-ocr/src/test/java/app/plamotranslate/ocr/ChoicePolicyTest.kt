@@ -5,7 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 行を採る方針（[ChoicePolicy]）。読み手を足したら、ここの表の試験も足す。 */
+/** 行を採る方針（[ChoicePolicy]）。認識器を足したら、ここの表の試験も足す。 */
 class ChoicePolicyTest {
     @Test
     fun PP_OCR韓国語は確信度の下限未満の行を採らない() {
@@ -44,15 +44,15 @@ class ChoicePolicyTest {
     }
 
     @Test
-    fun 表の文字種ごとの読み手は得意な文字種がそろう() {
-        // 表に書いた読み手が、その文字種を得意とする読み手であること（読み手を足したときの書き間違いを防ぐ）
+    fun 表の文字種ごとの認識器は得意な文字種がそろう() {
+        // 表に書いた認識器が、その文字種を得意とする認識器であること（認識器を足したときの書き間違いを防ぐ）
         for ((script, sources) in ChoicePolicy.priority) {
             for (s in sources) assertEquals("$script の $s", script, s.specialty)
         }
     }
 
     @Test
-    fun 読み手はどれも採る方針を持つ() {
+    fun 認識器はどれも採る方針を持つ() {
         // accepts の when に足し忘れるとコンパイルで止まるが、表（priority）への足し忘れはここで止める
         val inTable = ChoicePolicy.priority.values.flatten().toSet()
         val vertical = Source.entries.filter { it.readsVertical }.toSet()

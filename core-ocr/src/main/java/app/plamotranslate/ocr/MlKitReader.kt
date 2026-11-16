@@ -11,7 +11,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * ML Kit の認識器1つを包む読み手。[keepGlyphs] なら、1文字ずつの位置も返す（中国語。縦書きの列を組み直すのに使う）。
+ * ML Kit の認識器1つを包む [LineReader]。[keepGlyphs] なら、1文字ずつの位置も返す（中国語。縦書きの列を組み直すのに使う）。
  * ML Kit の処理は途中では止まらず、取り消されたら読み終えた結果を捨てる。
  */
 internal class MlKitReader(

@@ -15,7 +15,7 @@ import java.time.format.DateTimeFormatter
  * プロセスごとのログのファイルへの出力先（docs/設計/アーキテクチャ.md「ログ」。名前と片付けの規則は中核の [ProcessLogs]）。
  * 端末の logcat はアプリのログを書かないことがある（REDMAGIC は既定で黙らせている）ので、アプリが自分で残す。
  *
- * 1行ごとに OS へ渡す（`FileOutputStream.write` は溜めない）。プロセスがネイティブの落ち方や OS の SIGKILL で終わっても、
+ * 1行ごとに OS へ渡す（`FileOutputStream.write` は溜めない）。プロセスがネイティブのクラッシュや OS の SIGKILL で終わっても、
  * OS へ渡した行はファイルに残る。大きさが [maxBytes] を超えたら、今の分を1つ前の分として残して書き直す
  * （[ProcessLogs.needsRotation]）。書くのは呼んだスレッドで、ほかのスレッドとは1行ずつ順に書く。
  */

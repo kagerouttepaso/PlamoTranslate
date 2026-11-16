@@ -42,7 +42,7 @@ internal fun selectTargets(
     chooseTargets(blocks, statusBarHeight, target).map { TranslationTarget(it, SlotLayout.slot(it, bitmap, fitBubbles)) }
 
 /**
- * 選ぶ工程：状態バー（時刻・通信速度など）にかかる単位と、訳す必要のない単位（[needsTranslation]）を除く。単位は作り変えない。
+ * 選ぶ工程：ステータスバー（時刻・通信速度など）にかかる単位と、訳す必要のない単位（[needsTranslation]）を除く。単位は作り変えない。
  */
 internal fun chooseTargets(blocks: List<TextBlock>, statusBarHeight: Int, target: Language): List<TextBlock> =
     blocks.filter { it.bounds.top >= statusBarHeight && it.needsTranslation(target) }

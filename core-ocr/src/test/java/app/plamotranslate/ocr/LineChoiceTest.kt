@@ -9,12 +9,12 @@ class LineChoiceTest {
         LineChoice.choose(readings.map { (s, t) -> Reading(s, t) }).source
 
     @Test
-    fun 縦書きを読める読み手の行はそのまま採る() {
+    fun 縦書きを読める認識器の行はそのまま採る() {
         assertEquals(Source.PADDLE_ZH_JA, choose(Source.PADDLE_ZH_JA to "你在干什么", Source.MLKIT_ZH to "你在干什么"))
     }
 
     @Test
-    fun 英語の行は英字専用の読み手を採る() {
+    fun 英語の行は英字専用の認識器を採る() {
         assertEquals(
             Source.MLKIT_LATIN,
             choose(Source.MLKIT_ZH to "HAVE FUN", Source.MLKIT_JA to "HAVE FUN", Source.MLKIT_KO to "HAVE FUN", Source.MLKIT_LATIN to "HAVE FUN"),
@@ -22,7 +22,7 @@ class LineChoiceTest {
     }
 
     @Test
-    fun 英字専用の読み手が無ければラテン文字を最も多く読めたものを採る() {
+    fun 英字専用の認識器が無ければラテン文字を最も多く読めたものを採る() {
         assertEquals(Source.MLKIT_JA, choose(Source.MLKIT_ZH to "HAVE", Source.MLKIT_JA to "HAVE FUN"))
     }
 

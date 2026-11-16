@@ -9,7 +9,7 @@ import java.io.File
 import kotlin.coroutines.coroutineContext
 
 /**
- * PP-OCR の読み手。検出（[PaddleDetector]）を1回動かし、見つけた行ごとに、求められた認識器（[PaddleRecognizer]）を当てる。
+ * PP-OCR の認識器。検出（[PaddleDetector]）を1回動かし、見つけた行ごとに、求められた認識器（[PaddleRecognizer]）を当てる。
  * 1行読むごとに取り消されていないかを確かめ、取り消されたらそこでやめる。
  */
 internal class PaddleReader(

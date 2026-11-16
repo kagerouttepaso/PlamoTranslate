@@ -21,7 +21,7 @@ import java.util.Locale
  * [app.plamotranslate.llm.TranslationEngine.load] のCPUでのやり直しが働かず、Androidがアプリを開き直すたびに同じ所で終わる。
  *
  * そこで、GPUで読み込む前に「読み込み中」のマーカー（プロセスID）を端末に書き、読み込みと初回の推論が済んだら消す。
- * 次の起動でマーカーが残っていれば、前回はGPUの読み込み中に終わっている。Androidが記録した前回の終わり方
+ * 次の起動でマーカーが残っていれば、前回はGPUの読み込み中に終わっている。Androidが記録した前回の終了理由
  * （[ProcessExits]）が異常終了（中核の [ExitJudge.abnormal]）ならすぐ、そうでなくても2回続けばCPUに切り替える。
  * 1回目の強制停止やメモリ不足で止められただけでGPUを外さないよう、異常終了でないものは2回まで待つ。
  * CPUへの退避は更新後も維持し、設定の画面から明示的にGPUを試し直す。
@@ -36,7 +36,7 @@ internal object GpuGuard {
         val build = buildKey(context)
         val pendingPid = preferences.gpuLoadingPid
         val exit = if (pendingPid != 0) ProcessExits.history(context, pendingPid, 1).firstOrNull()?.toProcessExit() else null
-        val exitLabel = exit?.let(ExitTexts::label) ?: "終わり方の記録なし"
+        val exitLabel = exit?.let(ExitTexts::label) ?: "終了理由の記録なし"
         val abnormal = exit?.let(ExitJudge::abnormal) ?: false
         val intended = exit?.let(ExitJudge::intended) ?: false
         return when (val decision = GpuStartupPolicy.decide(preferences.gpuDisabled != null, pendingPid != 0, preferences.gpuInterruptions, abnormal, intended, exitLabel)) {

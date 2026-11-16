@@ -47,13 +47,13 @@ class ProcessLogFileTest {
     }
 
     @Test
-    fun 終わり方を見たプロセスのログを消す() {
+    fun 終了理由を見たプロセスのログを消す() {
         // 前のプロセスのファイル（プロセスは終わっていて、ファイルは閉じている）
         File(dir.apply { mkdirs() }, "old.log").writeText("前")
         File(dir, "old.1.log").writeText("前の前")
         val now = ProcessLogFile(dir, "now")
         now.write(LogLevel.INFO, "PlamoTranslate", "今", null)
-        // 前のプロセスの終わり方を OS の記録で見たので消す。見ていないものは残す
+        // 前のプロセスの終了理由を OS の記録で見たので消す。見ていないものは残す
         File(dir, "unseen.log").writeText("まだ")
         ProcessLogFile.cleanUp(dir, "now", seenKeys = setOf("old"))
         assertEquals(setOf("now.log", "unseen.log"), dir.list()!!.toSet())

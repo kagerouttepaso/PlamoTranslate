@@ -39,20 +39,20 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- アイコンの長押しメニュー -->
+            <!-- アプリのショートカット -->
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
 
         <!-- 会話翻訳。上下2分割で上半分を180°回すので、縦向きに固定する。
-             アイコンの長押しメニューから直接開くため exported -->
+             アプリのショートカットから直接開くため exported -->
         <activity
             android:name=".conversation.ConversationActivity"
             android:exported="true"
             android:screenOrientation="portrait" />
 
-        <!-- カメラ翻訳。枠の位置の計算を簡単にするため縦向きに固定する。長押しメニューから開くため exported -->
+        <!-- カメラ翻訳。枠の位置の計算を簡単にするため縦向きに固定する。アプリのショートカットから開くため exported -->
         <activity
             android:name=".camera.CameraTranslateActivity"
             android:exported="true"

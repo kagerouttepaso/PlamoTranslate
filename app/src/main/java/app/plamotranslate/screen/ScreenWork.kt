@@ -46,7 +46,7 @@ internal class ScreenFrame(
     /** 撮った画面の大きさ。 */
     val width: Int,
     val height: Int,
-    /** 撮ったときの状態バーの高さ（px）。これより上の単位は訳さない。 */
+    /** 撮ったときのステータスバーの高さ（px）。これより上の単位は訳さない。 */
     val statusBar: Int,
     val choice: LayoutChoice,
 ) {

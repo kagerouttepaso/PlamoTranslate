@@ -10,7 +10,7 @@ enum class SpeechEngine(val label: String, val note: String) {
 }
 
 /**
- * 読み上げの設定（読むもの・声・速さ・段数）。設定の画面（[SpeechCard]）が書き、[ReadAloud] が読むたびに読む
+ * 読み上げの設定（読むもの・声・速さ・ステップ数）。設定の画面（[SpeechCard]）が書き、[ReadAloud] が読むたびに読む
  * （`docs/判断/2026-11-09_設定の保存は機能ごとのPreferencesにまとめDataStoreへ移さない.md`）。
  */
 class SpeechPreferences(context: Context) {
@@ -38,7 +38,7 @@ class SpeechPreferences(context: Context) {
         get() = prefs.getBoolean("supertonic_agreed", false)
         set(value) = prefs.edit().putBoolean("supertonic_agreed", value).apply()
 
-    /** Supertonic 3の音を作る段数（設定の画面のスライダー）。 */
+    /** Supertonic 3の音を作るステップ数（設定の画面のスライダー）。 */
     var steps: Int
         get() = prefs.getInt("steps", SupertonicSpeaker.DEFAULT_STEPS)
         set(value) = prefs.edit().putInt("steps", value).apply()

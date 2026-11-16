@@ -192,13 +192,13 @@ fun PerformanceCard(model: ModelState) {
             SettingSwitch("性能ヒント", "OSにCPUの周波数・配置を上げてもらう（ADPF）", options.boost, !busy) {
                 apply(options.copy(boost = it))
             }
-            SettingSwitch("回して待つ", "オフにすると、スレッドが仕事を待つ間は眠る", options.spinWait, !busy) {
+            SettingSwitch("待つ間もCPUを回し続ける", "オフにすると、スレッドが仕事を待つ間は眠る", options.spinWait, !busy) {
                 apply(options.copy(spinWait = it))
             }
             SettingSwitch("スレッドを常駐させる", "オフにすると、llama.cppが推論のたびにスレッドを用意する", options.threadPool, !busy) {
                 apply(options.copy(threadPool = it))
             }
-            SettingSwitch("ファイルの写像で読む（mmap）", "オフにすると、モデルをメモリへ全部読み込む", options.mmap, !busy) {
+            SettingSwitch("メモリマップで読む（mmap）", "オフにすると、モデルをメモリへ全部読み込む", options.mmap, !busy) {
                 apply(options.copy(mmap = it))
             }
             SettingSwitch("CPUだけで動かす", "Snapdragonの端末でもGPUを使わない（起動し直すと効く）", cpuOnly, !busy) {
@@ -206,7 +206,7 @@ fun PerformanceCard(model: ModelState) {
             }
 
             if (variants.isNotEmpty()) {
-                Text("CPUの計算部分の版（起動し直すと効く）", style = MaterialTheme.typography.titleSmall)
+                Text("CPU向けの処理の版（起動し直すと効く）", style = MaterialTheme.typography.titleSmall)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = options.variant.isEmpty(),
@@ -247,7 +247,7 @@ private fun SettingSwitch(title: String, note: String, checked: Boolean, enabled
     }
 }
 
-/** トップ画面を開き直してからプロセスを終える。計算部分のライブラリは起動ごとに1回だけ読み込むため。 */
+/** トップ画面を開き直してからプロセスを終える。バックエンドのライブラリは起動ごとに1回だけ読み込むため。 */
 private fun restartApp(context: android.content.Context) {
     // 意図して終えたことをOSの記録に残す。GPUの読み込み中でもGPUで落ちたとみなさず、不具合としても記録しない
     app.plamotranslate.diagnostics.ProcessMarks.markIntendedExit(context)

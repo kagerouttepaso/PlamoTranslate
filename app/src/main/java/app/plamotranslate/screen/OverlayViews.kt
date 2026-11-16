@@ -32,15 +32,15 @@ import app.plamotranslate.pipeline.layout.Rooms
 import kotlin.math.abs
 
 /**
- * 今の状態バーの高さ（px）。撮影画像の座標は画面の左上が原点なので、この高さより上は状態バー。
- * 撮るたびに今の画面から読む。全画面のアプリ（漫画・動画など）で状態バーが隠れていれば0、
+ * 今のステータスバーの高さ（px）。撮影画像の座標は画面の左上が原点なので、この高さより上はステータスバー。
+ * 撮るたびに今の画面から読む。全画面のアプリ（漫画・動画など）でステータスバーが隠れていれば0、
  * 横画面なら横画面の高さになる（2026-11-09。それまでは縦持ちの固定値を読み、全画面のアプリで一番上の文字を捨てていた）。
  */
 internal fun Context.statusBarHeight(): Int = runCatching {
     getSystemService(WindowManager::class.java).currentWindowMetrics.windowInsets
         .getInsets(WindowInsets.Type.statusBars()).top
 }.getOrElse {
-    // 読めない端末では、縦持ちの状態バーの高さ（システムの既定値）を使う
+    // 読めない端末では、縦持ちのステータスバーの高さ（システムの既定値）を使う
     val id = resources.getIdentifier("status_bar_height", "dimen", "android")
     if (id > 0) resources.getDimensionPixelSize(id) else 0
 }
@@ -82,7 +82,7 @@ internal object OverlayStyle {
 }
 
 /**
- * 自分のウィンドウ（フローティングボタン・メニュー・上部の小さな表示）に触れた時刻。[TouchWatcher] は自分のウィンドウに触れたときも「外側の操作」として
+ * 自分のウィンドウ（フローティングボタン・メニュー・ステータス表示）に触れた時刻。[TouchWatcher] は自分のウィンドウに触れたときも「外側の操作」として
  * 知らせるので、ほかのアプリへの操作と区別するのに使う。
  */
 internal object OwnTouch {
@@ -101,7 +101,7 @@ internal object OwnTouch {
 /**
  * 画面のどこかに触れたことを知るための、見えない1画素のウィンドウ（2026-11-12、作者の要望「自動翻訳で訳している途中に画面を操作したら、
  * 全処理を取り消す」）。`FLAG_WATCH_OUTSIDE_TOUCH` で、ウィンドウの外（ほかのアプリ）に触れるたびにイベントを受ける。
- * 撮影の間も隠さずに置いておくので、撮っている最中の操作にも気づける（上部の小さな表示は撮影の間は消えている）。
+ * 撮影の間も隠さずに置いておくので、撮っている最中の操作にも気づける（ステータス表示は撮影の間は消えている）。
  * 自分のウィンドウに触れたときもイベントが来るので、少し待ってから [OwnTouch] で除く。
  */
 @SuppressLint("ClickableViewAccessibility")
@@ -301,7 +301,7 @@ class FloatingButton(
     }
 }
 
-/** 撮影した画面の座標そのままに置くためのウィンドウの設定。状態バーや切り欠きの分ずらされないようにする。 */
+/** 撮影した画面の座標そのままに置くためのウィンドウの設定。ステータスバーや切り欠きの分ずらされないようにする。 */
 private fun absoluteParams(rect: Rect, flags: Int, type: Int = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY) = WindowManager.LayoutParams(
     rect.width(), rect.height(),
     type,
@@ -348,7 +348,7 @@ class TranslationOverlay(private val context: Context, private val windowManager
      */
     var opaqueWithAccessibility: () -> Boolean = { false }
 
-    /** 上部の小さな表示をタップしたとき（訳している途中なら取り消してから消すため、サービスが受ける）。無ければ消すだけ。 */
+    /** ステータス表示をタップしたとき（訳している途中なら取り消してから消すため、サービスが受ける）。無ければ消すだけ。 */
     var onStatusTap: (() -> Unit)? = null
 
     /** 訳の枠の範囲（画面の座標）。 */
@@ -364,10 +364,10 @@ class TranslationOverlay(private val context: Context, private val windowManager
         context.getSystemService(android.hardware.input.InputManager::class.java).maximumObscuringOpacityForTouch
     }.getOrDefault(0.8f)
 
-    /** 訳の枠か上部の小さな表示を出しているか。 */
+    /** 訳の枠かステータス表示を出しているか。 */
     val isShowing: Boolean get() = boxes.isNotEmpty() || statusView != null
 
-    /** [slots] の位置に空の訳の枠を並べる。[status] は画面上部の小さな表示。 */
+    /** [slots] の位置に空の訳の枠を並べる。[status] は画面上部のステータス表示。 */
     fun show(slots: List<OverlaySlot>, status: String) {
         clear()
         // ユーザー補助の重ね表示なら不透明のまま操作を通せる。ウィンドウはそのサービスの WindowManager から置く
@@ -422,7 +422,7 @@ class TranslationOverlay(private val context: Context, private val windowManager
             }.getOrNull()
     }
 
-    /** 自分が画面に出している範囲（訳の枠と上部の小さな表示）。画面が変わったかを見るとき、ここは比べない。 */
+    /** 自分が画面に出している範囲（訳の枠とステータス表示）。画面が変わったかを見るとき、ここは比べない。 */
     fun occupiedRects(): List<Rect> = buildList {
         addAll(boxRects)
         statusView?.takeIf { it.isAttachedToWindow }?.let { v ->
@@ -480,7 +480,7 @@ class TranslationOverlay(private val context: Context, private val windowManager
         view.text = "$text　（タップで消す）"
     }
 
-    /** 訳の枠と上部の小さな表示を消し、枠のウィンドウも外す。 */
+    /** 訳の枠とステータス表示を消し、枠のウィンドウも外す。 */
     fun clear() {
         // 外せなかったウィンドウは画面に残るので、記録する（2026-11-12、消したはずの訳の枠が撮影に写ったことがあった）
         layer?.let { v -> runCatching { layerHost?.removeView(v) }.onFailure { Logs.w("画面翻訳: 訳の枠のウィンドウを外せませんでした", it) } }

@@ -10,10 +10,10 @@ import app.plamotranslate.pipeline.diagnostics.ProcessExit
 import java.io.File
 
 /**
- * OS の終わり方の記録の取り込み（外とつなぐ部品）。起動のたびに前回までの終わり方を読み、何を記録するかを中核の
+ * OS の終了理由の記録の取り込み（アダプター）。起動のたびに前回までの終了理由を読み、何を記録するかを中核の
  * [ExitSelection.plan] に決めさせ、OS が残した様子と、そのプロセスのログ（[ProcessLogFile]）と一緒に記録へ書く。
- * ネイティブのライブラリでの落ち方・応答なし・OS に止められた終わり方は、例外のハンドラーでは受け止められないので、ここで知る。
- * 取り込んだ後、OS の記録で終わり方を見たプロセスのログのファイルを消す（[ProcessLogFile.cleanUp]）。
+ * ネイティブのライブラリでのクラッシュ・応答なし・OS に止められた終了は、例外のハンドラーでは受け止められないので、ここで知る。
+ * 取り込んだ後、OS の記録で終了理由を見たプロセスのログのファイルを消す（[ProcessLogFile.cleanUp]）。
  *
  * 命令 [collect] はすぐ戻り、裏のスレッドで読む。結果は記録の一覧（[CrashJournal.entries]）で届く。
  */
@@ -25,7 +25,7 @@ class ExitIntake(
     private val currentKey: String,
 ) {
     fun collect() {
-        Thread({ runCatching { collectNow() }.onFailure { Logs.w("不具合の記録：終わり方を読めませんでした", it) } }, "ExitIntake")
+        Thread({ runCatching { collectNow() }.onFailure { Logs.w("不具合の記録：終了理由を読めませんでした", it) } }, "ExitIntake")
             .apply { isDaemon = true }
             .start()
     }
@@ -40,12 +40,12 @@ class ExitIntake(
                 val log = ProcessLogFile.read(logDir, exit.processKey)
                 journal.record(CrashReports.ofExit(exit, device, log, traceOf(info)))
             }
-            Logs.i("不具合の記録：前回までの${selection.record.size}回の終わり方を記録した")
+            Logs.i("不具合の記録：前回までの${selection.record.size}回の終了理由を記録した")
         }
         preferences.exitsReadUntil = selection.readUntil
         ProcessLogFile.cleanUp(logDir, currentKey, seenKeys = history.map { it.second.processKey }.toSet())
     }
 
-    /** OS が残した様子（ネイティブの落ち方なら tombstone、応答なしならスレッドの様子）。無ければ null。 */
+    /** OS が残した様子（ネイティブのクラッシュなら tombstone、応答なしならスレッドの様子）。無ければ null。 */
     private fun traceOf(info: ApplicationExitInfo): ByteArray? = runCatching { info.traceInputStream?.use { it.readBytes() } }.getOrNull()
 }

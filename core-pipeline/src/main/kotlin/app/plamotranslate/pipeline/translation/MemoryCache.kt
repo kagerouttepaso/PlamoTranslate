@@ -1,9 +1,9 @@
 package app.plamotranslate.pipeline.translation
 
 /**
- * メモリのキャッシュ（1次の層。docs/設計/翻訳コア.md「キャッシュ」）。鍵は永続キャッシュと同じ「範囲＋チャンクの原文」で、訳と訳の確かさを持つ。
+ * メモリのキャッシュ（1次の層。docs/設計/翻訳コア.md「キャッシュ」）。キーは永続キャッシュと同じ「範囲＋チャンクの原文」で、訳と訳の品質を持つ。
  * ストリームごとに作るか、機能が持ってストリームどうしで共有する（画面翻訳は1回の翻訳ごとにストリームを作り直すので、サービスが1つ持って渡す）。
- * 範囲が鍵に入るので、範囲の違うストリームどうしで共有しても混ざらない。
+ * 範囲がキーに入るので、範囲の違うストリームどうしで共有しても混ざらない。
  *
  * ストリームはロックの中や推論のスレッドから同期で引く（訳している途中に頼まれたチャンクは、この層だけを見る）ので、インターフェースにせず、
  * 中核の具体的な型にする。どのスレッドから触ってもよい。
@@ -24,12 +24,12 @@ class MemoryCache(private val capacity: Int = 500) {
         }
     }
 
-    /** [scope] の [text] の訳のうち、確かさが [minQuality] 以上のもの。 */
+    /** [scope] の [text] の訳のうち、品質が [minQuality] 以上のもの。 */
     fun get(scope: CacheScope, text: String, minQuality: Int): String? = synchronized(map) {
         map[scope to text]?.takeIf { it.quality >= minQuality }?.translation
     }
 
-    /** [scope] の [text] の訳を入れる。より確かな訳があれば書き換えない。 */
+    /** [scope] の [text] の訳を入れる。より品質の高い訳があれば書き換えない。 */
     fun put(scope: CacheScope, text: String, translation: String, quality: Int) = synchronized(map) {
         val key = scope to text
         val old = map[key]

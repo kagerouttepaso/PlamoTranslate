@@ -9,7 +9,7 @@ import java.util.UUID
 import kotlin.system.exitProcess
 
 /**
- * プロセスの終わり方の記録を確かめる（docs/資料/端末の能力.md「プロセスの終わり方」）。不具合の記録の設計の前に、
+ * プロセスの終了理由の記録を確かめる（docs/資料/端末の能力.md「プロセスの終了理由」）。不具合の記録の設計の前に、
  * 次を1つずつ確かめる。
  *
  * - `setProcessStateSummary` で預けたマークが、次の起動で `ApplicationExitInfo.getProcessStateSummary` から戻るか。
@@ -28,19 +28,19 @@ object ExitLab {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val handlerTime = prefs.getLong("handler_time", 0L)
         val handlerPid = prefs.getInt("handler_pid", 0)
-        if (handlerTime != 0L) Lab.log("終わり方: 前回のハンドラー pid=$handlerPid 時刻=$handlerTime")
+        if (handlerTime != 0L) Lab.log("終了理由: 前回のハンドラー pid=$handlerPid 時刻=$handlerTime")
         for (e in am.getHistoricalProcessExitReasons(context.packageName, 0, 6)) {
             Lab.log(
-                "終わり方: pid=${e.pid} 時刻=${e.timestamp} ハンドラーとの差=${if (e.pid == handlerPid) e.timestamp - handlerTime else "-"}ms " +
+                "終了理由: pid=${e.pid} 時刻=${e.timestamp} ハンドラーとの差=${if (e.pid == handlerPid) e.timestamp - handlerTime else "-"}ms " +
                     "理由=${e.reason} 状態=${e.status} 重要度=${e.importance} マーク=${e.processStateSummary?.decodeToString()} 説明=${e.description}",
             )
         }
         val previous = previousLogLines()
-        Lab.log("終わり方: 前のプロセスのログの行=$previous")
+        Lab.log("終了理由: 前のプロセスのログの行=$previous")
 
         val id = UUID.randomUUID().toString().take(8)
         am.setProcessStateSummary("lab:$id".toByteArray())
-        Lab.log("終わり方: マーク=lab:$id pid=${Process.myPid()} 終え方=$mode")
+        Lab.log("終了理由: マーク=lab:$id pid=${Process.myPid()} 終え方=$mode")
         val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             prefs.edit().putLong("handler_time", System.currentTimeMillis()).putInt("handler_pid", Process.myPid()).commit()

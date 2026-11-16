@@ -47,7 +47,7 @@ class TranslationPreferences(context: Context) {
 
     /**
      * CPUの詳細設定を保存する。効かせるには翻訳モデルを読み直す（[EngineHolder.reload]）。
-     * 計算部分の版（[CpuOptions.variant]）と「CPUだけ」は、計算部分のライブラリを読み込むのがアプリの起動ごとに
+     * CPUバックエンドの版（[CpuOptions.variant]）と「CPUだけ」は、バックエンドのライブラリを読み込むのがアプリの起動ごとに
      * 1回だけなので、アプリを起動し直すと効く。
      */
     fun saveCpu(options: CpuOptions, cpuOnly: Boolean) {

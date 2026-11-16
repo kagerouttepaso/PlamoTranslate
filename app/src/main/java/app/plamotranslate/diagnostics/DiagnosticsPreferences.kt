@@ -7,7 +7,7 @@ class DiagnosticsPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("diagnostics", Context.MODE_PRIVATE)
 
     /**
-     * OS の終わり方の記録を、どの時刻まで取り込んだか。記録を消しても戻さない（同じ終わり方を取り込み直さない）。
+     * OS の終了理由の記録を、どの時刻まで取り込んだか。記録を消しても戻さない（同じ終了理由を取り込み直さない）。
      */
     var exitsReadUntil: Long
         get() = prefs.getLong("exits_read_until", 0L)

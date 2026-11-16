@@ -25,7 +25,7 @@ object ScreenSession {
         data class Recognizing(val session: Int) : Phase
         data class Translating(val session: Int, val total: Int, val done: Int) : Phase
 
-        /** 訳を出している（訳す文字が無かったときは、上部の表示だけを出している）。 */
+        /** 訳を出している（訳す文字が無かったときは、ステータス表示だけを出している）。 */
         data class Showing(val session: Int) : Phase
     }
 
@@ -81,7 +81,7 @@ object ScreenSession {
         /** 翻訳モデルを切り替えた。 */
         data object ModelChanged : SessionEvent
 
-        /** 上部の表示をタップした。 */
+        /** ステータス表示をタップした。 */
         data object StatusTapped : SessionEvent
     }
 

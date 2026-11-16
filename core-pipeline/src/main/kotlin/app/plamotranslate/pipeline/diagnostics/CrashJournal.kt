@@ -47,6 +47,6 @@ object CrashJournals {
     /** 件数が [keep] を超えたときに消す記録（古いもの）。 */
     fun toDrop(entries: List<CrashEntry>, keep: Int): List<CrashEntry> = entries.sortedByDescending { it.time }.drop(keep)
 
-    /** 記録のフォルダーの名前。時刻の順に並び、プロセスの鍵で見分けられる。 */
+    /** 記録のフォルダーの名前。時刻の順に並び、プロセスのキーで見分けられる。 */
     fun folderName(report: CrashReport): String = "%013d-%s".format(java.util.Locale.ROOT, report.time, report.process.filter { it.isLetterOrDigit() })
 }

@@ -7,7 +7,7 @@ import app.plamotranslate.pipeline.diagnostics.ProcessImportance
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** OS の終わり方の値の読み替え（[ProcessExits]）。 */
+/** OS の終了理由の値の読み替え（[ProcessExits]）。 */
 class ProcessExitsTest {
     @Test
     fun osの理由を原因に読み替える() {

@@ -35,7 +35,7 @@ set(OpenCL_LIBRARY ${OPENCL_ICD_DIR}/libOpenCL.so CACHE FILEPATH "" FORCE)
 
 # --- llama.cpp --------------------------------------------------------------
 # CPUの設定はイテレーション0で端末計測したCLIと同じ。GPUはOpenCL（docs/設計/翻訳コア.md）
-# GPU（OpenCL）とCPUの計算部分は、実行時に読み込む別のライブラリ（libggml-opencl.so、libggml-cpu-*.so）にする
+# GPU（OpenCL）とCPUバックエンドは、実行時に読み込む別のライブラリ（libggml-opencl.so、libggml-cpu-*.so）にする
 # （GGML_BACKEND_DL）。OpenCLの無い端末では libggml-opencl.so の読み込みだけが失敗し、CPUで動く。
 # CPUは世代ごとに最適化した版をすべて作り、端末に合う版を選ぶ（GGML_CPU_ALL_VARIANTS）。
 # 2026-11-06、APKを配布するため、REDMAGIC 11 Pro 以外の端末でも動くようにした（docs/設計/アーキテクチャ.md）。

@@ -74,7 +74,7 @@ android {
             // sherpa-onnxのAARはx86用だけONNX Runtimeを別ファイルで持ち、漫画用OCRのものと名前がぶつかる。
             // 同梱するのはarm64だけ（abiFilters）なので、x86の分は使わない
             excludes += "lib/x86/libonnxruntime.so"
-            // llama.cppの計算部分（libggml-opencl.so、libggml-cpu-*.so）は、実行時にフォルダーを探して読み込む。
+            // llama.cppのバックエンド（libggml-opencl.so、libggml-cpu-*.so）は、実行時にフォルダーを探して読み込む。
             // APKの中に圧縮せず置く既定の形だとファイルとして見えないので、インストール時に展開させる
             useLegacyPackaging = true
         }

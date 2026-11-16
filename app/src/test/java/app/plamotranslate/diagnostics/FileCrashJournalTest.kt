@@ -30,7 +30,7 @@ class FileCrashJournalTest {
         ProcessExit(time, pid, cause, mark = mark?.let { ProcessMark(it) })
 
     @Test
-    fun 落ちる直前の記録と次の起動で知った終わり方は同じプロセスの1件にまとめる() {
+    fun 落ちる直前の記録と次の起動で知った終了理由は同じプロセスの1件にまとめる() {
         val journal = FileCrashJournal(dir, worker = now)
         journal.recordNow(CrashReports.ofException(1_000L, 42, ProcessMark("m1"), "main", IllegalStateException("x"), "端末"))
         // 次の起動：記録を読み直してから、OS の記録を足す

@@ -3,8 +3,8 @@ package app.plamotranslate.ocr
 import android.graphics.Rect
 
 /**
- * 1つの読み手が返した1行（縦書きなら1列）。[bounds] は撮影画像の座標。
- * [source] と [confidence] は読み手から来た行だけが持つ（束ね直すときの行は持たない）。
+ * 1つの認識器が返した1行（縦書きなら1列）。[bounds] は撮影画像の座標。
+ * [source] と [confidence] は認識器から来た行だけが持つ（束ね直すときの行は持たない）。
  */
 internal data class Candidate(
     val text: String,
@@ -14,10 +14,10 @@ internal data class Candidate(
 )
 
 /**
- * 読み手ごとの行を、行ごとに文字種に合うものを選んで1つにする（docs/設計/画面翻訳.md「行の選び方とまとめ方」）。
+ * 認識器ごとの行を、行ごとに文字種に合うものを選んで1つにする（docs/設計/画面翻訳.md「行の選び方とまとめ方」）。
  *
  * 処理の順番：
- * 1. 縦書きの行を先に採る。縦書きを読める読み手（[Source.readsVertical]）があればその行を採り、無ければ ML Kit 中国語の
+ * 1. 縦書きの行を先に採る。縦書きを読める認識器（[Source.readsVertical]）があればその行を採り、無ければ ML Kit 中国語の
  *    1文字ずつの位置から列を組み直す（[VerticalColumns]）。その範囲に重なるほかの行（縦書きを横に読み違えた行）は捨てる。
  * 2. 残りの行を、位置が重なるものどうしで突き合わせ（[LineGroup]）、[LineChoice] に1つ選ばせる。
  * 3. 選んだ行を読み順に並べる。吹き出し・段落にまとめるのは、読む工程の後（中核の `LineGrouper`）。
@@ -25,12 +25,12 @@ internal data class Candidate(
  * 段落ごとに選ぶと、日本語の解説に韓国語の引用が混ざった段落で、片方の言語が崩れた文字列になった
  * （2026-11-05実機）。そのため行ごとに選ぶ。
  *
- * 読み手の能力は [Source]、採る方針（確信度の下限・優先順）は [ChoicePolicy] が持ち、ここでは読み手の名前で分岐しない。
+ * 認識器の能力は [Source]、採る方針（確信度の下限・優先順）は [ChoicePolicy] が持ち、ここでは認識器の名前で分岐しない。
  */
 internal object BlockMerger {
     private const val SAME_LINE_IOU = 0.4f
 
-    /** 同じ位置の行を、読み手ごとに読んだ版。 */
+    /** 同じ位置の行を、認識器ごとに読んだ版。 */
     private class LineGroup(val bounds: Rect) {
         val versions = mutableMapOf<Source, Candidate>()
 
@@ -41,15 +41,15 @@ internal object BlockMerger {
     }
 
     /**
-     * [read] は読み手ごとの行。動かさなかった読み手は入れない。採ってよい行（[ChoicePolicy.accepts]）だけをここで残す。
-     * [glyphs] は1文字ずつの位置（[Source.buildsColumns] の読み手のもの）で、縦書きを読める読み手が無いときに列を組み直すのに使う。
+     * [read] は認識器ごとの行。動かさなかった認識器は入れない。採ってよい行（[ChoicePolicy.accepts]）だけをここで残す。
+     * [glyphs] は1文字ずつの位置（[Source.buildsColumns] の認識器のもの）で、縦書きを読める認識器が無いときに列を組み直すのに使う。
      */
     fun merge(
         read: Map<Source, List<Candidate>>,
         glyphs: List<Glyph> = emptyList(),
     ): List<OcrLine> {
         val lines = read.mapValues { (source, list) -> list.filter { ChoicePolicy.accepts(source, it.text, it.confidence) } }
-        // 縦書きを読める読み手の行を先に採る。確信度が低く、韓国語の行と重なる範囲は韓国語の行に譲る
+        // 縦書きを読める認識器の行を先に採る。確信度が低く、韓国語の行と重なる範囲は韓国語の行に譲る
         val koreanLines = lines.flatMap { (source, list) -> list.filter { ChoicePolicy.isKoreanLine(it.reading(source)) } }
         val verticalSources = lines.keys.filter { it.readsVertical }
         val claimed = verticalSources.associateWith { source ->
@@ -57,7 +57,7 @@ internal object BlockMerger {
                 !ChoicePolicy.yieldsToKorean(v.reading(source)) || koreanLines.none { overlaps(it.bounds, v.bounds) }
             }
         }
-        // 縦書きを読める読み手が無いときだけ、1文字ずつの位置から縦書きの列を組み直す
+        // 縦書きを読める認識器が無いときだけ、1文字ずつの位置から縦書きの列を組み直す
         val columnSource = Source.entries.firstOrNull { it.buildsColumns && it in lines }
         val columns = if (verticalSources.isEmpty() && columnSource != null) {
             VerticalColumns.build(glyphs).map { it.copy(source = columnSource) }

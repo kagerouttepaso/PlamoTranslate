@@ -10,11 +10,11 @@ import app.plamotranslate.pipeline.diagnostics.ProcessImportance
 import app.plamotranslate.pipeline.diagnostics.ProcessMark
 
 /**
- * OS が残す前回までの終わり方（[ApplicationExitInfo]）を読み、中核の [ProcessExit] に読み替える（外とつなぐ部品）。
+ * OS が残す前回までの終了理由（[ApplicationExitInfo]）を読み、中核の [ProcessExit] に読み替える（アダプター）。
  * 読み替えだけを行い、異常終了か・記録するかの判定は中核の `ExitJudge` が行う。
  */
 object ProcessExits {
-    /** このアプリの終わり方の記録（新しい順）。[pid] が0なら全部、そうでなければそのプロセスの分だけ。 */
+    /** このアプリの終了理由の記録（新しい順）。[pid] が0なら全部、そうでなければそのプロセスの分だけ。 */
     fun history(context: Context, pid: Int = 0, max: Int = 0): List<ApplicationExitInfo> = runCatching {
         context.getSystemService(ActivityManager::class.java).getHistoricalProcessExitReasons(context.packageName, pid, max)
     }.getOrDefault(emptyList())

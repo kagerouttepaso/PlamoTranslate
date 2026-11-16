@@ -11,7 +11,7 @@ import app.plamotranslate.conversation.ConversationActivity
 
 /*
  * クイック設定（通知欄を下ろしたところ）のタイル。画面翻訳は始め・止める切り替え（screen/ScreenTranslateTileService）、
- * カメラ翻訳と会話翻訳は画面を開くだけ（2026-11-13、作者の要望）。開き方はアイコンの長押しメニュー（res/xml/shortcuts.xml）と同じ。
+ * カメラ翻訳と会話翻訳は画面を開くだけ（2026-11-13、作者の要望）。開き方はアプリのショートカット（res/xml/shortcuts.xml）と同じ。
  */
 
 /** 通知欄を閉じてから [intent] の画面を開く。 */

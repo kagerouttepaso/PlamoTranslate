@@ -22,13 +22,13 @@ data class CpuOptions(
     val threads: Int = 0,
     /** 性能ヒント（ADPF）で周波数・配置を上げてもらう。 */
     val boost: Boolean = true,
-    /** 仕事を待つ間に回して待つ（false なら眠って待つ）。 */
+    /** 仕事を待つ間にスピン待機する（`poll`。false なら眠って待つ）。 */
     val spinWait: Boolean = true,
     /** スレッドプールを常駐させる（false ならllama.cppが推論のたびに用意する）。 */
     val threadPool: Boolean = true,
-    /** モデルをファイルの写像（mmap）で読む（false ならメモリへ全部読み込む）。 */
+    /** モデルをメモリマップ（mmap）で読む（false ならメモリへ全部読み込む）。 */
     val mmap: Boolean = true,
-    /** CPUの計算部分の版（libggml-cpu-*.so）。空なら端末に合う一番新しい版。アプリを起動し直すと効く。 */
+    /** CPUバックエンドの版（libggml-cpu-*.so）。空なら端末に合う一番新しい版。アプリを起動し直すと効く。 */
     val variant: String = "",
 )
 
@@ -144,7 +144,7 @@ class TranslationEngine private constructor(
         /**
          * モデルを読み込む。数秒かかるので起動時に1回だけ呼ぶ。
          *
-         * [nativeLibDir] は計算部分のライブラリ（libggml-opencl.so、libggml-cpu-*.so）の置き場
+         * [nativeLibDir] はバックエンドのライブラリ（libggml-opencl.so、libggml-cpu-*.so）の置き場
          * （`applicationInfo.nativeLibraryDir`）。[preferGpu] が true なら、GPU（OpenCL）が使えれば全層を載せる。
          * GPUが無い・GPUでの読み込みに失敗したときは、CPUだけで読み込み直す（2026-11-06、APKを配布するため）。
          */
@@ -205,14 +205,14 @@ class TranslationEngine private constructor(
                 }.getOrDefault(0L)
             }
 
-        /** llama.cppの既定。仕事を待つ間、しばらく回して待ってから眠る。 */
+        /** llama.cppの既定。仕事を待つ間、しばらくスピン待機してから眠る。 */
         private const val DEFAULT_POLL = 50
 
-        /** 端末に入っているCPUの計算部分の版（ファイル名）。 */
+        /** 端末に入っているCPUバックエンドの版（ファイル名）。 */
         fun cpuVariants(nativeLibDir: String): List<String> =
             File(nativeLibDir).list()?.filter { it.startsWith("libggml-cpu") }?.sorted().orEmpty()
 
-        /** 読み込んだCPUの計算部分の版。まだ読み込んでいない、またはGPUの端末で自動選択したときは空。 */
+        /** 読み込んだCPUバックエンドの版。まだ読み込んでいない、またはGPUの端末で自動選択したときは空。 */
         fun cpuBackend(): String = LlamaNative.nativeCpuBackend()
 
         private fun errorMessage(code: Int) = when (code) {

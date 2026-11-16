@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- アイコンの長押しメニュー（2026-11-06）。使う頻度の順（会話→カメラ→画面→テキスト） -->
+<!-- アプリのショートカット（2026-11-06）。使う頻度の順（会話→カメラ→画面→テキスト） -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <shortcut
         android:shortcutId="conversation"

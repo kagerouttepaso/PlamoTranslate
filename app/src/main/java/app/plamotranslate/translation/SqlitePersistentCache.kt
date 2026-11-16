@@ -17,8 +17,8 @@ import kotlinx.coroutines.withContext
  * 永続キャッシュ（2次の層）を端末のデータベース（SQLite）に置く実装。今は画面翻訳だけが使う（docs/設計/画面翻訳.md「翻訳のキャッシュ」）。
  * 同じゲーム・アプリの画面は同じ文が何度も出るので、一度訳した文は画面翻訳を終えても、アプリを入れ直すまで使い回す。
  *
- * 鍵・確かさ・世代の約束はインターフェース（[PersistentCache]）と docs/設計/翻訳コア.md「キャッシュ」に従う。鍵の範囲は契約が作り
- * （[CacheScope.id] を列に入れる）、同じ原文に残る訳は、いちばん確かなモデルの1つだけ。
+ * キー・品質・世代の約束はインターフェース（[PersistentCache]）と docs/設計/翻訳コア.md「キャッシュ」に従う。キーの範囲は契約が作り
+ * （[CacheScope.id] を列に入れる）、同じ原文に残る訳は、いちばん品質の高いモデルの1つだけ。
  *
  * 件数は [MAX_ENTRIES] までにし、超えたら最後に使った時刻が古いものから消す。
  * Androidに入っている SQLite をそのまま使い、ライブラリ（Room など）は足さない。
@@ -36,7 +36,7 @@ class SqlitePersistentCache private constructor(context: Context) : PersistentCa
     override var generation = 0
         private set
 
-    /** [texts] のうち、確かさが [minQuality] 以上の訳がキャッシュにあるもの。使った時刻も新しくする。 */
+    /** [texts] のうち、品質が [minQuality] 以上の訳がキャッシュにあるもの。使った時刻も新しくする。 */
     override suspend fun lookup(scope: CacheScope, minQuality: Int, texts: Collection<String>): Map<String, CachedTranslation> = withContext(Dispatchers.IO) {
         if (texts.isEmpty()) return@withContext emptyMap()
         val key = scope.id
@@ -56,7 +56,7 @@ class SqlitePersistentCache private constructor(context: Context) : PersistentCa
 
     /**
      * 訳をまとめて書く（1回の実行ごとに1つのトランザクション）。空の訳は書かない（次も訳し直すため）。
-     * より確かなモデルの訳がある原文は書き換えない。[generation] が今と違えば書かない（消す前に始めた翻訳の訳を書き戻さない）。
+     * より品質の高いモデルの訳がある原文は書き換えない。[generation] が今と違えば書かない（消す前に始めた翻訳の訳を書き戻さない）。
      */
     override suspend fun store(scope: CacheScope, origin: ModelOrigin, generation: Int, translations: Map<String, String>) = withContext(Dispatchers.IO) {
         val entries = translations.filterValues { it.isNotBlank() }
@@ -138,13 +138,13 @@ class SqlitePersistentCache private constructor(context: Context) : PersistentCa
 
     companion object {
         private const val DB_NAME = "translation_cache.db"
-        /** 2：鍵からモデルを外し、モデルの確かさ（quality）の列を足した。3：鍵の範囲に form を足した（[CacheScope.id]）。 */
-        /** 訳の確かさ（TranslationModel.quality）の値を変えたら上げる（残った訳の確かさが食い違うため）。 */
+        /** 2：キーからモデルを外し、モデルの品質（quality）の列を足した。3：キーの範囲に form を足した（[CacheScope.id]）。 */
+        /** 訳の品質（TranslationModel.quality）の値を変えたら上げる（残った訳の品質が食い違うため）。 */
         private const val DB_VERSION = 3
         private const val TABLE = "translations"
 
         /**
-         * キャッシュする件数の上限。Chrome拡張（IndexedDB）と同じ値。1件は原文・訳・鍵と索引で数百バイトなので、2万件で約5〜10MB。
+         * キャッシュする件数の上限。Chrome拡張（IndexedDB）と同じ値。1件は原文・訳・キーと索引で数百バイトなので、2万件で約5〜10MB。
          * 引くのは主キーの索引なので、件数が増えても1回の画面翻訳（数十件）の読み書きは数ミリ秒で済む。
          * 画面翻訳は1回に約20件なので、新しい文ばかりでも約1000回分を覚えていられる。
          */

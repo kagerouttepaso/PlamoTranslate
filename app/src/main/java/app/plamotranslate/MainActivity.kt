@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
         handleShortcut(intent)
     }
 
-    /** アイコンの長押しメニューとクイック設定のタイルから「画面翻訳」で来たとき。 */
+    /** アプリのショートカットとクイック設定のタイルから「画面翻訳」で来たとき。 */
     private fun handleShortcut(intent: Intent?) {
         if (intent?.action != ACTION_SCREEN_TRANSLATE) return
         if (!ModelBundle.ready(this)) return

@@ -35,7 +35,7 @@ SPDX-FileCopyrightText: Copyright 2025-2026 Arm Limited and/or its affiliates <o
 SPDX-License-Identifier: MIT（上の MIT License の条件）
 
 ========================================
-Arm KleidiAI v1.32.0（ggml の CPU の計算部分に組み込み）
+Arm KleidiAI v1.32.0（ggml の CPU バックエンドに組み込み）
 ========================================
 SPDX-FileCopyrightText: Copyright 2024-2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
 一部のファイル：Copyright Meta Platforms, Inc. and affiliates.、Copyright Fujitsu Limited
@@ -530,7 +530,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ========================================
-OpenCL-Headers（GPU の計算部分のビルドに使うヘッダー）
+OpenCL-Headers（OpenCL バックエンドのビルドに使うヘッダー）
 ========================================
 Copyright (c) 2008-2026 The Khronos Group Inc.
 Apache License 2.0（apache-2.0.txt）

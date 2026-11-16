@@ -31,7 +31,7 @@ class StabilityTest {
     }
 
     @Test
-    fun 読み取りがそろうほど確かさが上がる() {
+    fun 読み取りがそろうほど確信度が上がる() {
         val shaky = fuse("C0LD BREW", "COLD BRCW", "CQLD 8REW").confidence
         val stable = fuse("COLD BREW", "COLD BREW", "COLD BREW").confidence
         assertEquals(1.0, stable, 1e-9)
@@ -169,7 +169,7 @@ class StabilityTest {
 
     @Test
     fun 鋭い1回の票だけではそろったとしない() {
-        // 鋭い1回とぶれた2回が互いに一致しない。確かさは高く出るが、票の重みの合計が2回分に足りない
+        // 鋭い1回とぶれた2回が互いに一致しない。確信度は高く出るが、票の重みの合計が2回分に足りない
         val t = track(Triple("abcd", 10.0, 20), Triple("wxyz", 1.0, 20), Triple("pqrs", 1.0, 20))
         assertFalse(t.settled())
     }

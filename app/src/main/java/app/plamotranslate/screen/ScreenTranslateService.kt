@@ -83,7 +83,7 @@ class ScreenTranslateService : Service() {
     private val preferences by lazy { ScreenPreferences(this) }
     private val ocr by lazy { MultiScriptOcr(ModelCatalog.ocrDir(this)) }
 
-    /** 翻訳のメモリのキャッシュ。1回の翻訳ごとに開く翻訳のストリームで共有する（モデルを切り替えても捨てず、確かさで選ぶ。永続キャッシュを消したら捨てる）。 */
+    /** 翻訳のメモリのキャッシュ。1回の翻訳ごとに開く翻訳のストリームで共有する（モデルを切り替えても捨てず、品質で選ぶ。永続キャッシュを消したら捨てる）。 */
     private val memoryCache = MemoryCache()
     private var debugReceiver: BroadcastReceiver? = null
     private var orientation = Configuration.ORIENTATION_UNDEFINED
@@ -310,7 +310,7 @@ class ScreenTranslateService : Service() {
         val targets = w.page?.targets
         if (frame == null || targets == null) {
             // 状態遷移は撮れて読めた後にだけ訳させるので、ここへは来ない。来ても翻訳中のまま止めない
-            dispatch(SessionEvent.TranslationFailed(session, "訳す材料がありません"))
+            dispatch(SessionEvent.TranslationFailed(session, "訳す文字がありません"))
             return
         }
         overlay?.show(targets.map { it.slot }, "${targets.size}件を翻訳中…")
@@ -362,7 +362,7 @@ class ScreenTranslateService : Service() {
         overlay?.showStatus("${page.targets.size}件・${"%.1f".format(total / 1000.0)}秒・${run.model}$stacked")
         val st = run.stats
         Logs.i("画面翻訳: ${page.lines}行・${page.units}単位中${page.targets.size}件（${frame.choice.grouping}）、撮影 ${frame.captureMillis}ms（${frame.frames}枚）、" +
-                "文字認識 ${page.ocrMillis}ms、翻訳 ${translateMillis}ms、モデル ${run.model}、重要度 ${importance()}、画面 ${frame.size}、状態バー ${frame.statusBar}px" +
+                "文字認識 ${page.ocrMillis}ms、翻訳 ${translateMillis}ms、モデル ${run.model}、重要度 ${importance()}、画面 ${frame.size}、ステータスバー ${frame.statusBar}px" +
                 (st?.let { "、キャッシュ メモリ${it.memoryHits}・データベース${it.storedHits}、訳した${it.pieces}チャンク（訳し直し${it.retried}、打ち切り${it.stopped}）" } ?: ""),
         )
     }
@@ -535,7 +535,7 @@ class ScreenTranslateService : Service() {
         })
     }
 
-    /** 翻訳モデルを切り替え、読み込みの進み具合を上部の小さな表示に出す。訳している途中なら取り消す（古いエンジンは閉じられる）。 */
+    /** 翻訳モデルを切り替え、読み込みの進み具合をステータス表示に出す。訳している途中なら取り消す（古いエンジンは閉じられる）。 */
     private fun switchModel(model: TranslationModel) {
         dispatch(SessionEvent.ModelChanged)
         EngineHolder.select(this, model)

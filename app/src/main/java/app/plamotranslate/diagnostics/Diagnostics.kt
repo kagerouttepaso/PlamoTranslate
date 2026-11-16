@@ -16,7 +16,7 @@ import java.io.OutputStream
  *
  * 部品は、プロセスのマーク（[ProcessMarks]）、ログの出力先（[LogcatSink]・[ProcessLogFile]。ロガーは core-log の [Logs]）、
  * 記録の保存（[FileCrashJournal]。インターフェースは中核の [CrashJournal]）、例外のハンドラー（[CrashRecorder]）、
- * OS の終わり方の取り込み（[ExitIntake]）に分かれ、ここでつなぐ。
+ * OS の終了理由の取り込み（[ExitIntake]）に分かれ、ここでつなぐ。
  */
 object Diagnostics {
     private const val RECORDS_DIR = "diagnostics"
@@ -35,7 +35,7 @@ object Diagnostics {
 
     /**
      * プロセスが始まるときに1度呼ぶ（`App.onCreate`）。プロセスのマークを預け、ログの出力先を差し込み、例外のハンドラーを置き、
-     * 前回までの終わり方を取り込む。調べるための仕組みがアプリを止めないよう、ここでの失敗はアプリを止めない。
+     * 前回までの終了理由を取り込む。調べるための仕組みがアプリを止めないよう、ここでの失敗はアプリを止めない。
      */
     fun install(context: Context) {
         val app = context.applicationContext

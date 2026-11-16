@@ -41,7 +41,7 @@ class CrashJournalsTest {
     }
 
     @Test
-    fun 例外の記録とOSの記録は同じプロセスの鍵を持つ() {
+    fun 例外の記録とOSの記録は同じプロセスのキーを持つ() {
         val mark = ProcessMark("m1")
         val exception = CrashReports.ofException(1, 9, mark, "main", IllegalStateException(), "端末")
         val exit = CrashReports.ofExit(ProcessExit(2, 9, ExitCause.EXCEPTION, mark = mark), "端末", "log".toByteArray(), null)
@@ -68,7 +68,7 @@ class CrashJournalsTest {
     }
 
     @Test
-    fun ログのファイルは鍵ごとに古い順に並び今のプロセスのもの以外を消す() {
+    fun ログのファイルはキーごとに古い順に並び今のプロセスのもの以外を消す() {
         assertEquals(listOf("m1.1.log", "m1.log"), ProcessLogs.filesOf("m1"))
         assertEquals("m1", ProcessLogs.keyOf("m1.log"))
         assertEquals("m1", ProcessLogs.keyOf("m1.1.log"))
@@ -79,7 +79,7 @@ class CrashJournalsTest {
     }
 
     @Test
-    fun 終わり方を見たプロセスのログを消し見ていないものは新しい順に残す() {
+    fun 終了理由を見たプロセスのログを消し見ていないものは新しい順に残す() {
         val files = mapOf(
             "now.log" to 900L,
             "seen.log" to 800L, "seen.1.log" to 700L,

@@ -4,7 +4,7 @@ import app.plamotranslate.llm.JapaneseForm
 import app.plamotranslate.llm.Language
 
 /**
- * 翻訳のキャッシュの範囲（docs/設計/翻訳コア.md「キャッシュ」）。訳を変える依頼の条件で、どの層も「範囲＋チャンクの原文」を鍵にする。
+ * 翻訳のキャッシュの範囲（docs/設計/翻訳コア.md「キャッシュ」）。訳を変える依頼の条件で、どの層も「範囲＋チャンクの原文」をキーにする。
  * 契約が [TranslationStream.Options] から作り（[TranslationStream.Options.cacheScope]）、機能も層の実装も組まない。
  * 原文の言語の自動（[source] が null）と明示は、プロンプトが変わるので別の範囲にする。
  */
@@ -14,12 +14,12 @@ data class CacheScope(val source: Language?, val target: Language, val form: Jap
 }
 
 /**
- * 訳したモデル。[id] は重みの識別子（記録用）、[quality] は訳の確かさ（大きいほど確か）。
- * キャッシュは、今のモデル以上の確かさの訳だけを使い、より確かな訳があれば書き換えない。
+ * 訳したモデル。[id] は重みの識別子（記録用）、[quality] は訳の品質（大きいほど品質が高い）。
+ * キャッシュは、今のモデル以上の品質の訳だけを使い、より品質の高い訳があれば書き換えない。
  */
 data class ModelOrigin(val id: String, val quality: Int)
 
-/** キャッシュにある訳と、それを訳したモデルの確かさ。層から層へ移しても確かさを保つ。 */
+/** キャッシュにある訳と、それを訳したモデルの品質。層から層へ移しても品質を保つ。 */
 data class CachedTranslation(val translation: String, val quality: Int)
 
 /**
@@ -33,9 +33,9 @@ interface PersistentCache {
      */
     val generation: Int
 
-    /** [texts] のうち、[scope] で確かさが [minQuality] 以上の訳があるチャンクの訳と、その確かさ。 */
+    /** [texts] のうち、[scope] で品質が [minQuality] 以上の訳があるチャンクの訳と、その品質。 */
     suspend fun lookup(scope: CacheScope, minQuality: Int, texts: Collection<String>): Map<String, CachedTranslation>
 
-    /** 訳し終えたチャンクを書く。[generation] が今と違えば書かない。同じ鍵に [origin] より確かな訳があれば書き換えない。 */
+    /** 訳し終えたチャンクを書く。[generation] が今と違えば書かない。同じキーに [origin] より品質の高い訳があれば書き換えない。 */
     suspend fun store(scope: CacheScope, origin: ModelOrigin, generation: Int, translations: Map<String, String>)
 }

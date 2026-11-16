@@ -77,7 +77,7 @@ class ValidityJudge(private val p: ValidityParams) {
     val active: Boolean get() = reference != null
 
     /**
-     * 新しく届いたグリッド [raw] で判定する。[boxes] は訳の枠（まだ出していなければ空）、[own] は自分の表示全部（訳の枠・上部の表示・フローティングボタン）。
+     * 新しく届いたグリッド [raw] で判定する。[boxes] は訳の枠（まだ出していなければ空）、[own] は自分の表示全部（訳の枠・ステータス表示・フローティングボタン）。
      * [watchOutside] は規則3を使うか（自動で訳すとき）。
      */
     fun feed(raw: Thumb, boxes: List<Box>, own: List<Box>, watchOutside: Boolean): Validity {
@@ -93,7 +93,7 @@ class ValidityJudge(private val p: ValidityParams) {
         val ringLimit = p.ring
         if (ringLimit != null && boxes.isNotEmpty()) {
             val ring = ScreenChange.ring(t, boxes, p.ringMargin)
-            // 外周のうち、自分の表示（上部の表示・フローティングボタン・ほかの訳の枠）にかかるセルは比べない
+            // 外周のうち、自分の表示（ステータス表示・フローティングボタン・ほかの訳の枠）にかかるセルは比べない
             val compare = BooleanArray(ring.size) { !ring[it] || ownMask[it] }
             if (ScreenChange.counted(compare) > 0) {
                 val moved = ScreenChange.changedFraction(ref, t, compare)

@@ -7,14 +7,14 @@ import app.plamotranslate.ThemeMode
 import app.plamotranslate.ThemePreferences
 
 /**
- * ほかのアプリの画面の上に出す部品（画面翻訳のフローティングボタン・メニュー・状態の表示）の色（docs/設計/デザイン言語.md「色」）。
+ * ほかのアプリの画面の上に出す部品（画面翻訳のフローティングボタン・メニュー・ステータス表示）の色（docs/設計/デザイン言語.md「色」）。
  * アプリのテーマ（夜の鳥・さえずりの紙）に合わせる。Android View で描くので MaterialTheme を使えず、値をここに置く
  * （値は Theme.kt の2つのテーマと同じ）。下の画面の明るさによらず見分けられるよう、面は少しだけ透かし、フローティングボタンにはプライマリカラーの縁を付ける。
  */
 class OverlayPalette private constructor(
     /** 面。 */
     val surface: Int,
-    /** フローティングボタンと状態の表示の面。 */
+    /** フローティングボタンとステータス表示の面。 */
     val surfaceRaised: Int,
     /** プライマリカラー（コーラル・朱）と、その上の文字。 */
     val primary: Int,

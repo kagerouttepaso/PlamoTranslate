@@ -37,7 +37,7 @@ class SupertonicSpeaker(
     var voice: Int = 0,
     /** 読む速さ（1が標準）。 */
     var speed: Float = 1f,
-    /** 音を作る段数（[STEPS_RANGE]）。増やすと話している最中のザラつきが減り、そのぶん遅くなる。 */
+    /** 音を作るステップ数（[STEPS_RANGE]）。増やすと話している最中のザラつきが減り、そのぶん遅くなる。 */
     var steps: Int = DEFAULT_STEPS,
 ) : Speaker {
     private var tts: OfflineTts? = null
@@ -164,16 +164,16 @@ class SupertonicSpeaker(
             "id", "it", "lt", "lv", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "tr", "uk", "vi",
         )
 
-        /** [dir] に置くファイル。vocoderだけ公式のfp32版（int8版はザラつきが乗る。`docs/判断/2026-11-08_読み上げのvocoderだけfp32版にし段数を既定8にする.md`）。 */
+        /** [dir] に置くファイル。vocoderだけ公式のfp32版（int8版はザラつきが乗る。`docs/判断/2026-11-08_読み上げのvocoderだけfp32版にしステップ数を既定8にする.md`）。 */
         val FILES = listOf(
             "duration_predictor.int8.onnx", "text_encoder.int8.onnx", "vector_estimator.int8.onnx",
             "vocoder.onnx", "tts.json", "unicode_indexer.bin", "voice.bin",
         )
 
         /**
-         * 音を作る段数の範囲と既定。作る時間は段数にほぼ比例する（REDMAGIC 11 Proで10秒分の日本語が
-         * 5段3.6秒・8段6.1秒・16段9.9秒）。ザラつきは段数を増やすほど減る（`docs/判断/2026-11-08_読み上げのvocoderだけfp32版にし段数を既定8にする.md`）。
-         * 作者が5段ではザラつくと言ったので、既定は8。設定の画面のスライダーで変える。
+         * 音を作るステップ数の範囲と既定。作る時間はステップ数にほぼ比例する（REDMAGIC 11 Proで10秒分の日本語が
+         * 5ステップ3.6秒・8ステップ6.1秒・16ステップ9.9秒）。ザラつきはステップ数を増やすほど減る（`docs/判断/2026-11-08_読み上げのvocoderだけfp32版にしステップ数を既定8にする.md`）。
+         * 作者が5ステップではザラつくと言ったので、既定は8。設定の画面のスライダーで変える。
          */
         val STEPS_RANGE = 3..16
         const val DEFAULT_STEPS = 8

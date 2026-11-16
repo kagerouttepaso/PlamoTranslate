@@ -25,12 +25,12 @@ internal object LlamaNative {
     }
 
     /**
-     * 計算部分のライブラリを [nativeLibDir] から読み込む。[loadGpu] が false ならCPUの部分だけ。
+     * バックエンドのライブラリを [nativeLibDir] から読み込む。[loadGpu] が false ならCPUバックエンドだけ。
      * 最初の1回だけ有効で、GPUのデバイスが使えるようになったかを返す。[nativeLoad] より前に呼ぶ。
      */
     external fun nativeInit(nativeLibDir: String, loadGpu: Boolean, cpuVariant: String): Boolean
 
-    /** 読み込んだCPUの計算部分のファイル名（libggml-cpu-*.so）。GPUの端末で自動選択したときは空。 */
+    /** 読み込んだCPUバックエンドのファイル名（libggml-cpu-*.so）。GPUの端末で自動選択したときは空。 */
     external fun nativeCpuBackend(): String
 
     /** 失敗したら 0 を返す。 */

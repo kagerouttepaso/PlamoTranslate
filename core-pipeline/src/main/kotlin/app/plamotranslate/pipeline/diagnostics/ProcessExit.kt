@@ -3,8 +3,8 @@ package app.plamotranslate.pipeline.diagnostics
 import java.util.UUID
 
 /**
- * プロセスの終わり方の原因。OS が残す前回の終わり方（Android の `ApplicationExitInfo` の理由）を、判断に要る分だけに分けたもの。
- * OS の値からの読み替えは `app` の外とつなぐ部品（`diagnostics/ProcessExits.kt`）が行う。
+ * プロセスの終了理由。OS が残す前回の終了理由（Android の `ApplicationExitInfo` の理由）を、判断に要る分だけに分けたもの。
+ * OS の値からの読み替えは `app` のアダプター（`diagnostics/ProcessExits.kt`）が行う。
  */
 enum class ExitCause {
     /** Java・Kotlin の例外で落ちた。 */
@@ -60,9 +60,9 @@ enum class ProcessImportance {
 }
 
 /**
- * プロセスに付ける識別子。起動のたびに新しい [id] を作って OS に預け（`setProcessStateSummary`）、次の起動で OS の終わり方の記録から
+ * プロセスに付ける識別子。起動のたびに新しい [id] を作って OS に預け（`setProcessStateSummary`）、次の起動で OS の終了理由の記録から
  * 受け取る。同じプロセスの記録を見分けるのと、アプリが意図して終えたか（[intended]）を知るのに使う。
- * どの終わり方でも OS の記録に戻ることを確かめてある（docs/資料/端末の能力.md「プロセスの終わり方」）。
+ * どの終了理由でも OS の記録に戻ることを確かめてある（docs/資料/端末の能力.md「プロセスの終了理由」）。
  */
 data class ProcessMark(val id: String, val intended: Boolean = false) {
     /** OS に預ける形（128バイトまで）。 */
@@ -84,7 +84,7 @@ data class ProcessMark(val id: String, val intended: Boolean = false) {
 }
 
 /**
- * プロセスの終わり方の1件。
+ * プロセスの終了理由の1件。
  *
  * @property time 終わった時刻（エポックからのミリ秒）
  * @property status [ExitCause.EXIT_SELF] なら終了コード、[ExitCause.SIGNALED] ならシグナルの番号
@@ -105,17 +105,17 @@ data class ProcessExit(
     val pssKb: Long = 0,
     val rssKb: Long = 0,
 ) {
-    /** 同じプロセスの記録を見分ける鍵（[keyOf]）。 */
+    /** 同じプロセスの記録を見分けるキー（[keyOf]）。 */
     val processKey: String get() = keyOf(mark, pid)
 
     companion object {
-        /** プロセスの鍵。識別子があれば識別子、無ければ pid。記録とログのファイルで同じ鍵を使う。 */
+        /** プロセスのキー。識別子があれば識別子、無ければ pid。記録とログのファイルで同じキーを使う。 */
         fun keyOf(mark: ProcessMark?, pid: Int): String = mark?.id ?: "pid$pid"
     }
 }
 
 /**
- * 終わり方の判定。GPU を外すか（`GpuGuard`）と、不具合として記録するか（不具合の記録）で同じ判定を使う。
+ * 終了理由の判定。GPU を外すか（`GpuGuard`）と、不具合として記録するか（不具合の記録）で同じ判定を使う。
  */
 object ExitJudge {
     /** 強制停止や OS による終了で送られるシグナル。 */
@@ -125,7 +125,7 @@ object ExitJudge {
     fun intended(exit: ProcessExit): Boolean = exit.mark?.intended == true
 
     /**
-     * 異常終了か。例外・ネイティブの落ち方・応答なし・起動の失敗に加え、終了コードが0でない自分での終了
+     * 異常終了か。例外・ネイティブのクラッシュ・応答なし・起動の失敗に加え、終了コードが0でない自分での終了
      * （llama.cpp の OpenCL はカーネルの組み立てに失敗すると `exit(1)` する）と、SIGKILL 以外のシグナルも異常とみなす。
      * アプリが意図して終えたものは異常としない。
      */
@@ -141,15 +141,15 @@ object ExitJudge {
 
     /**
      * 本人が使っている最中に終わっても、落ちたのではないと分かっている原因（本人の強制停止と、更新・権限の変更など OS 側の理由）。
-     * 使っている最中の終わり方は、これ以外を全部記録する。知らない理由（[ExitCause.OTHER]）も記録する。落ち方を数え上げると、
-     * 知らない終わり方を見落とすため（2026-11-13、画面翻訳中に終了コード0で自分で終わったのを記録できなかった）。
+     * 使っている最中の終了理由は、これ以外を全部記録する。知らない理由（[ExitCause.OTHER]）も記録する。クラッシュの種類を数え上げると、
+     * 知らない終了理由を見落とすため（2026-11-13、画面翻訳中に終了コード0で自分で終わったのを記録できなかった）。
      */
     private val BENIGN_WHILE_IN_USE = setOf(ExitCause.USER_STOPPED, ExitCause.SYSTEM_CHANGE)
 
     /**
      * 不具合として記録するか。異常終了は、いつでも記録する。本人が使っている最中に終わったものは、落ちたのではないと
      * 分かっている原因（[BENIGN_WHILE_IN_USE]）を除いて記録する。本人には「落ちた」と見えるため。
-     * 裏に回った後に OS が片付けた終わり方と、アプリが意図して終えたものは記録しない。
+     * 裏に回った後に OS が片付けた終了と、アプリが意図して終えたものは記録しない。
      */
     fun recordable(exit: ProcessExit): Boolean = !intended(exit) && (
         abnormal(exit) || (inUse(exit) && exit.cause !in BENIGN_WHILE_IN_USE)
@@ -160,7 +160,7 @@ object ExitJudge {
         if (a.mark != null && b.mark != null) a.mark.id == b.mark.id else a.pid == b.pid
 }
 
-/** 終わり方の説明の文（画面と記録に出す）。 */
+/** 終了理由の説明の文（画面と記録に出す）。 */
 object ExitTexts {
     fun label(exit: ProcessExit): String = when (exit.cause) {
         ExitCause.EXCEPTION -> "例外で落ちた"
@@ -178,15 +178,15 @@ object ExitTexts {
 }
 
 /**
- * OS の終わり方の記録のうち、何を取り込むかの計画（[plan]）。
+ * OS の終了理由の記録のうち、何を取り込むかの計画（[plan]）。
  *
- * @property record 記録する終わり方（古い順）
+ * @property record 記録する終了理由（古い順）
  * @property readUntil 次に取り込むときの読み取り位置（ここまでの時刻を読んだ）
  */
 class ExitSelection<T>(val record: List<T>, val readUntil: Long) {
     companion object {
         /**
-         * [items]（OS の記録。[exitOf] で終わり方に読み替える）から、[readUntil] より後のものを読む。
+         * [items]（OS の記録。[exitOf] で終了理由に読み替える）から、[readUntil] より後のものを読む。
          * 同じプロセスの記録が2件あれば1件にする（例外で落ちると、OS は例外のハンドラーの直後と、「停止しました」を閉じた後の2件を残す。
          * 識別子のある先のほうを採る）。そのうえで記録するもの（[ExitJudge.recordable]）を選ぶ。
          */

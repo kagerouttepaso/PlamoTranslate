@@ -62,15 +62,15 @@ foreach ($hit in Grep @('-E', '\bLlamaNative\b', '--', '*.kt', ':(exclude)core-l
     $errors.Add("core-llm の外で JNI を使っている：$hit")
 }
 
-# 約束4：ログはすべてロガー（core-log の Logs）を通す。logcat へ直接書いてよいのは、出力先の実装とネイティブの逃げ道だけ
+# 約束4：ログはすべてロガー（core-log の Logs）を通す。logcat へ直接書いてよいのは、出力先の実装とネイティブのフォールバックだけ
 foreach ($hit in Grep @('-E', 'android\.util\.Log|Log\.[diwev]\(', '--', 'app/src', ':(glob)core-*/src/**', ':(exclude)app/src/main/java/app/plamotranslate/diagnostics/LogcatSink.kt')) {
     $errors.Add("ロガー（Logs）を通さずに logcat へ書いている：$hit")
 }
 foreach ($hit in Grep @('-E', '__android_log_(print|write|vprint)', '--', '*.cpp', '*.c', '*.h', ':(exclude)third_party')) {
     $file = ($hit -split ':', 2)[0]
     $line = ($hit -split ':', 3)[2]
-    # 許すのは plamo_llm.cpp の emit_log の逃げ道（「// logcat への逃げ道」のコメントを付けた行）だけ
-    if ($file -ne 'core-llm/src/main/cpp/plamo_llm.cpp' -or $line -notmatch '// logcat への逃げ道') {
+    # 許すのは plamo_llm.cpp の emit_log のフォールバック（「// logcat へのフォールバック」のコメントを付けた行）だけ
+    if ($file -ne 'core-llm/src/main/cpp/plamo_llm.cpp' -or $line -notmatch '// logcat へのフォールバック') {
         $errors.Add("ネイティブのログがロガーを通っていない：$hit")
     }
 }

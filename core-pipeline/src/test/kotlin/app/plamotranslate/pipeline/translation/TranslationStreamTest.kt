@@ -75,7 +75,7 @@ class TranslationStreamTest {
     }
 
     /**
-     * 偽の永続キャッシュ。[saved] は「範囲の id|原文」→ 訳と確かさ。書いた呼び出しは [stores] に残す。
+     * 偽の永続キャッシュ。[saved] は「範囲の id|原文」→ 訳と品質。書いた呼び出しは [stores] に残す。
      * [io] なら本物と同じく IO のスレッドへ移って書く（取り消されていれば止まる）。
      */
     private class FakePersistent(val io: Boolean = false) : PersistentCache {
@@ -268,7 +268,7 @@ class TranslationStreamTest {
     }
 
     @Test
-    fun 永続キャッシュの訳は確かさを保ってメモリのキャッシュに入れる() {
+    fun 永続キャッシュの訳は品質を保ってメモリのキャッシュに入れる() {
         // 小さいモデルのストリームが大きいモデルの訳を永続キャッシュから引いたら、大きいモデルに替えた後もメモリのキャッシュで当たる
         val persistent = FakePersistent()
         persistent.saved["${TranslationStream.Options(Language.EN, Language.JA).cacheScope.id}|Hello"] = "大「Hello」" to LARGE.quality
@@ -331,7 +331,7 @@ class TranslationStreamTest {
     }
 
     @Test
-    fun メモリのキャッシュは今のモデル以上の確かさの訳だけを使う() {
+    fun メモリのキャッシュは今のモデル以上の品質の訳だけを使う() {
         // モデルを切り替えてもキャッシュは捨てない。小さいモデルの訳は大きいモデルでは使わず、大きいモデルの訳は小さいモデルでも使う
         val small = FakeEngine(parallel = 1) { "小「$it」" }
         val large = FakeEngine(parallel = 1) { "大「$it」" }

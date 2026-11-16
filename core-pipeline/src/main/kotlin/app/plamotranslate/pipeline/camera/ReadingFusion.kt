@@ -16,7 +16,7 @@ package app.plamotranslate.pipeline.camera
  * 文字はコードポイントの単位で数える（拡張漢字・絵文字のサロゲートペアを分けない）。
  */
 object ReadingFusion {
-    /** 合わせた文と、その確かさ（土台の文字の位置ごとの、採った文字の得票（重みの合計）の割合の平均。0〜1）。 */
+    /** 合わせた文と、その確信度（土台の文字の位置ごとの、採った文字の得票（重みの合計）の割合の平均。0〜1）。 */
     data class Fused(val text: String, val confidence: Double)
 
     /** [readings] を合わせる。[backbone] は土台にする読み取りの位置、[weights] は読み取りごとの票の重み（0より大きい）。 */

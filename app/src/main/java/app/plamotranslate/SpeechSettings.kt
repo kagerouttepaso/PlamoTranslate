@@ -114,7 +114,7 @@ fun SpeechCard() {
                     )
                 }
                 if (present) {
-                    Text("音質（段数 $steps）", style = MaterialTheme.typography.titleSmall)
+                    Text("音質（ステップ数 $steps）", style = MaterialTheme.typography.titleSmall)
                     Slider(
                         value = steps.toFloat(),
                         onValueChange = { steps = it.roundToInt() },

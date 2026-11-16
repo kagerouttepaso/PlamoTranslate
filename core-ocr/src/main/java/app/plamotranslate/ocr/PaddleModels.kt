@@ -13,7 +13,7 @@ object PaddleModels {
 
     internal class Files(val model: String, val dict: String)
 
-    /** 読み手ごとの認識のモデルと文字の表。 */
+    /** 認識器ごとの認識のモデルと文字の表。 */
     internal val recognizers: Map<Source, Files> = mapOf(
         Source.PADDLE_ZH_JA to Files(MANGA_REC, MANGA_DICT),
         Source.PADDLE_KO to Files(KOREAN_REC, KOREAN_DICT),

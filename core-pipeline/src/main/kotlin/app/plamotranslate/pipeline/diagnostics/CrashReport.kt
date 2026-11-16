@@ -5,8 +5,8 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * 不具合の記録に書く1件の中身。[process] は同じプロセスの記録を見分ける鍵（[ProcessExit.processKey]）で、
- * 保存の側が同じ鍵の記録にまとめる（[CrashJournals.target]）。[files] は記録に入れるファイルの名前と中身。
+ * 不具合の記録に書く1件の中身。[process] は同じプロセスの記録を見分けるキー（[ProcessExit.processKey]）で、
+ * 保存の側が同じキーの記録にまとめる（[CrashJournals.target]）。[files] は記録に入れるファイルの名前と中身。
  */
 class CrashReport(
     val time: Long,
@@ -15,7 +15,7 @@ class CrashReport(
     val files: Map<String, ByteArray>,
 )
 
-/** 記録の中身の組み立て。どこから知ったか（例外のハンドラー・OS の終わり方の記録）ごとに、入れるファイルを決める。 */
+/** 記録の中身の組み立て。どこから知ったか（例外のハンドラー・OS の終了理由の記録）ごとに、入れるファイルを決める。 */
 object CrashReports {
     const val REPORT = "report.txt"
     const val EXIT = "exit.txt"
@@ -33,7 +33,7 @@ object CrashReports {
 
     /**
      * 例外のハンドラーで、落ちる直前に書く記録。プロセスが終わる前に書き切るため、ログの写しは入れない
-     * （次の起動で OS の終わり方の記録を取り込むときに、同じプロセスの記録へ足す）。
+     * （次の起動で OS の終了理由の記録を取り込むときに、同じプロセスの記録へ足す）。
      */
     fun ofException(time: Long, pid: Int, mark: ProcessMark?, thread: String, error: Throwable, device: String): CrashReport {
         val exit = ProcessExit(time, pid, ExitCause.EXCEPTION, mark = mark)
@@ -48,8 +48,8 @@ object CrashReports {
     }
 
     /**
-     * OS の終わり方の記録から作る記録。[log] はそのプロセスのログ（[ProcessLogs]）、[trace] は OS が残した様子
-     * （ネイティブの落ち方なら tombstone の protobuf、応答なしならスレッドの様子の文字）。
+     * OS の終了理由の記録から作る記録。[log] はそのプロセスのログ（[ProcessLogs]）、[trace] は OS が残した様子
+     * （ネイティブのクラッシュなら tombstone の protobuf、応答なしならスレッドの様子の文字）。
      */
     fun ofExit(exit: ProcessExit, device: String, log: ByteArray?, trace: ByteArray?): CrashReport {
         val label = ExitTexts.label(exit)

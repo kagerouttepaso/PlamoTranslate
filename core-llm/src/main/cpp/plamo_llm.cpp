@@ -53,7 +53,7 @@ void emit_log(int priority, const char *text) {
         if (!env->ExceptionCheck()) return;
         env->ExceptionClear();
     }
-    __android_log_write(priority, TAG, text);  // logcat への逃げ道
+    __android_log_write(priority, TAG, text);  // logcat へのフォールバック
 }
 
 void plamo_log(int priority, const char *format, ...) {
@@ -183,7 +183,7 @@ void log_callback(ggml_log_level level, const char *text, void *) {
 
 std::once_flag g_backend_once;
 
-// CPUの計算部分（libggml-cpu-*.so）は実行時に読み込むので、スレッドプールの関数も読み込んだ後に探す
+// CPUバックエンド（libggml-cpu-*.so）は実行時に読み込むので、スレッドプールの関数も読み込んだ後に探す
 using threadpool_new_fn = decltype(ggml_threadpool_new) *;
 using threadpool_free_fn = decltype(ggml_threadpool_free) *;
 threadpool_new_fn g_threadpool_new = nullptr;
@@ -192,7 +192,7 @@ threadpool_free_fn g_threadpool_free = nullptr;
 // GPU（OpenCL）のデバイスが使えるようになったか。読み込めない端末では false
 bool g_has_gpu = false;
 
-// 読み込んだCPUの計算部分のファイル名（設定の画面に出す）
+// 読み込んだCPUバックエンドのファイル名（設定の画面に出す）
 std::string g_cpu_backend;
 
 void find_cpu_functions() {
@@ -267,7 +267,7 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
     return JNI_VERSION_1_6;
 }
 
-// アプリのネイティブライブラリの置き場（nativeLibraryDir）から、計算部分のライブラリを読み込む。
+// アプリのネイティブライブラリの置き場（nativeLibraryDir）から、バックエンドのライブラリを読み込む。
 // load_gpu が false なら、GPU（OpenCL）の部分は読み込まずCPUだけにする。最初の1回だけ有効。
 // 戻り値は、GPUのデバイスが使えるようになったか。
 extern "C" JNIEXPORT jboolean JNICALL
@@ -330,7 +330,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
     LOGI("起動診断: model=%s gpu_layers=%d n_ctx=%d", path.substr(path.find_last_of('/') + 1).c_str(), n_gpu_layers, n_ctx);
     startup_stage("モデル読込 開始");
     llama_model_params mparams = llama_model_default_params();
-    // false なら、モデルをファイルの写像（mmap）ではなくメモリへ読み込む
+    // false なら、モデルをメモリマップ（mmap）ではなくメモリへ読み込む
     if (!use_mmap) mparams.load_mode = LLAMA_LOAD_MODE_NONE;
     // 0ならCPUだけ、99なら全層をGPU（OpenCL、Adreno）に載せる
     mparams.n_gpu_layers = n_gpu_layers;
@@ -373,7 +373,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
     const auto before = list_threads();
     ggml_threadpool_params tp_params = ggml_threadpool_params_default(n_threads);
     // use_pool が false なら作らず、llama.cppが推論のたびにスレッドを用意する既定の動きにする。
-    // poll は仕事を待つ間に回して待つ度合い（0は眠って待つ、既定50）
+    // poll は仕事を待つ間のスピン待機の度合い（0は眠って待つ、既定50）
     tp_params.poll = (uint32_t) poll;
     engine->threadpool = use_pool && g_threadpool_new ? g_threadpool_new(&tp_params) : nullptr;
     if (engine->threadpool) {

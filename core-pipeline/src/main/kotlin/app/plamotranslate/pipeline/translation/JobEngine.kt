@@ -37,7 +37,7 @@ interface JobSource {
 }
 
 /**
- * 依頼を1つだけ出す口（読み込み直後の空訳しと、速さの計測に使う）。機能の翻訳は [TranslationStream] を使う。
+ * 依頼を1つだけ出す口（読み込み直後のウォームアップと、速さの計測に使う）。機能の翻訳は [TranslationStream] を使う。
  */
 class SingleRequest(private val request: TranslationRequest) : JobSource {
     private var sent = false

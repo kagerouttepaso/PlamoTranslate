@@ -65,8 +65,8 @@ enum class TranslationModel(val label: String, val note: String, val quality: In
 
     /**
      * 翻訳のキャッシュで使う、訳したモデル（docs/設計/翻訳コア.md「キャッシュ」）。識別子は重みの SHA-256 の先頭、
-     * 訳の確かさ（[quality]、大きいほど確か）は端末のデータベースに残るので、並び順でなく値で持つ。キャッシュは確かなモデルの訳を優先する。
-     * モデルを足すときは既存の値を変えずに値を割り当てる。既存の値を変えるなら、残った訳の確かさが食い違うので
+     * 訳の品質（[quality]、大きいほど品質が高い）は端末のデータベースに残るので、並び順でなく値で持つ。キャッシュは品質の高いモデルの訳を優先する。
+     * モデルを足すときは既存の値を変えずに値を割り当てる。既存の値を変えるなら、残った訳の品質が食い違うので
      * SqlitePersistentCache の DB_VERSION を上げてキャッシュを作り直す。
      */
     val origin: ModelOrigin get() = ModelOrigin(file.sha256.take(16), quality)
@@ -243,7 +243,7 @@ object ModelCatalog {
     /**
      * 読み上げのモデル（Supertonic 3、約220MB）。設定の画面で「読み上げ」をSupertonic 3にしたときだけ取る
      * （2026-11-08、作者の要望）。sherpa-onnx向けのint8版を使い、vocoderだけ公式のfp32版にする。
-     * int8のvocoderは話している最中にザラつきが乗り、段数を増やしても消えなかったため（作者が聞いて指摘、`docs/判断/2026-11-08_読み上げのvocoderだけfp32版にし段数を既定8にする.md`）。
+     * int8のvocoderは話している最中にザラつきが乗り、ステップ数を増やしても消えなかったため（作者が聞いて指摘、`docs/判断/2026-11-08_読み上げのvocoderだけfp32版にしステップ数を既定8にする.md`）。
      * sherpa-onnxのint8版のonnxは公式版をそのまま量子化したもので、公式のvocoderと差し替えて動く。
      * モデルのライセンスはOpenRAIL-M（用途の制限つき）。
      */

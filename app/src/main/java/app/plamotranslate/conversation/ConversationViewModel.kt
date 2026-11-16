@@ -89,7 +89,7 @@ data class ConversationUiState(
 )
 
 /**
- * 会話翻訳の外とつなぐ部分（docs/設計/会話翻訳.md「全体の流れ」）。マイクの音声を音声認識のスレッドで [SpeechEngine] に流し、
+ * 会話翻訳のアダプター（docs/設計/会話翻訳.md「全体の流れ」）。マイクの音声を音声認識のスレッドで [SpeechEngine] に流し、
  * 届いた出来事を中核の [ConversationSession] に渡して、返ってきた作業（確定訳・途中訳・途中訳の取り消し）を翻訳のストリームで行う。
  * 何をいつ訳すか、方向、カードと聞き取り中の表示は [ConversationSession] が決める。翻訳モデルは [EngineHolder] のものを使う。
  * [ConversationSession] は画面のスレッドだけから呼ぶ。

@@ -21,7 +21,7 @@ import kotlinx.coroutines.withContext
  * - 購読：[updates] で文ごとの途中の訳・確定の訳・失敗を受け取る（購読するのは1か所だけ）。
  *
  * 文は、エンジンの「同時に訳す数」に合うコア（[coreFor]）でチャンクに分けて訳し、チャンクの訳をつないで文の訳に戻す。同じチャンクは1回だけ訳す。
- * キャッシュは2層で、鍵はどちらも「範囲（[Options.cacheScope]）＋チャンクの原文」（docs/設計/翻訳コア.md「キャッシュ」）。
+ * キャッシュは2層で、キーはどちらも「範囲（[Options.cacheScope]）＋チャンクの原文」（docs/設計/翻訳コア.md「キャッシュ」）。
  * メモリのキャッシュ（[cache]。ストリームどうしで共有できる）を引き、外れたチャンクは渡されていれば永続キャッシュ（[Backend.persistent]）を引く。
  * 訳している間に頼まれた文も、空いたシーケンスですぐ訳す（永続キャッシュを引くのは、訳し始める前に頼まれた文だけ）。
  *
@@ -46,7 +46,7 @@ class TranslationStream(
         val cacheScope: CacheScope get() = CacheScope(source, target, form, context)
     }
 
-    /** 訳すのに使う部品。[origin] は訳すモデルで、キャッシュはその確かさ以上の訳だけを使う。[persistent] は永続キャッシュ（無ければ使わない）。 */
+    /** 訳すのに使う部品。[origin] は訳すモデルで、キャッシュはその品質以上の訳だけを使う。[persistent] は永続キャッシュ（無ければ使わない）。 */
     class Backend(val engine: JobEngine, val origin: ModelOrigin, val persistent: PersistentCache? = null)
 
     /** 訳した結果の数（ログ用）。 */
@@ -274,7 +274,7 @@ class TranslationStream(
             val hit = hits[p]
             if (hit != null) {
                 storedHits++
-                // 永続キャッシュの確かさのまま入れる（低く入れると、モデルを上げたときに途中で頼まれたチャンクが1次で外れる）
+                // 永続キャッシュの品質のまま入れる（低く入れると、モデルを上げたときに途中で頼まれたチャンクが1次で外れる）
                 cache.put(cacheScope, p, hit.translation, hit.quality)
                 pieceFinal(p, hit.translation, fromEngine = false)
             } else {

@@ -38,7 +38,7 @@ import kotlinx.coroutines.withContext
 
 /*
  * 配布のための表示（docs/判断/2026-11-13_ライセンスの表示を同梱した全文と明記にする.md）。
- * - モデルはアプリに同梱せず、端末が取り先から取る。名前・作者・ライセンス名・元のモデルと取り先を明記し、全文かその置き場を示す。
+ * - モデルはアプリに同梱せず、端末が入手元から取る。名前・作者・ライセンス名・元のモデルと入手元を明記し、全文かその置き場を示す。
  * - アプリに組み込んだソフトウェアは、ライセンス文の全文を assets/licenses/ に同梱し、ここから読めるようにする（MIT・BSD・Apache-2.0 の条件）。
  *   全文の作り方は docs/手順/開発環境.md「ライセンス文を集め直す」。
  * - PLaMo Community License 第4条の「Built with PLaMo」の明示と、契約の写し（条文へのリンク）。
@@ -213,7 +213,7 @@ fun LicensesCard() {
                         }
                         m.source?.let { src ->
                             TextButton(onClick = { openUrl(context, src) }, contentPadding = PaddingValues(start = 16.dp)) {
-                                Text("取り先", style = MaterialTheme.typography.labelSmall)
+                                Text("入手元", style = MaterialTheme.typography.labelSmall)
                             }
                         }
                         m.text?.let { t ->

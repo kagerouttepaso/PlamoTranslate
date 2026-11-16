@@ -17,8 +17,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
 /**
- * ファイルに置く [CrashJournal]（外とつなぐ部品。規則は中核の [CrashJournals] に従う）。
- * 1件を1つのフォルダー（[CrashJournals.folderName]）にし、題・時刻・プロセスの鍵を `entry.properties` に書く。
+ * ファイルに置く [CrashJournal]（アダプター。規則は中核の [CrashJournals] に従う）。
+ * 1件を1つのフォルダー（[CrashJournals.folderName]）にし、題・時刻・プロセスのキーを `entry.properties` に書く。
  *
  * 命令（[record]・[clear]）と最初の読み込みは、1本の裏のスレッド（[worker]）で順に行う。ファイルに触る処理は [lock] で
  * 1つずつにし、裏のスレッドの書き込み・落ちる直前の書き込み（[recordNow]）・書き出し（[export]）が重ならないようにする。

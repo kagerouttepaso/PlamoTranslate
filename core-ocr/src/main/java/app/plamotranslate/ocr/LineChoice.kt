@@ -1,16 +1,16 @@
 package app.plamotranslate.ocr
 
-/** 同じ行を1つの読み手が読んだ版。位置は持たない（[LineChoice] は位置を見ない）。 */
+/** 同じ行を1つの認識器が読んだ版。位置は持たない（[LineChoice] は位置を見ない）。 */
 internal data class Reading(val source: Source, val text: String, val confidence: Float? = null)
 
 /**
  * 同じ行の読みの一覧から1つを選ぶ（docs/設計/画面翻訳.md「行の選び方とまとめ方」の手順3）。
- * 読み手が得意な文字種の字をいくつ読めたかで行の文字種を決め、[ChoicePolicy.priority] の順で採る。崩れた読み（[TextQuality]）は飛ばす。
- * 読み手の名前では分岐しない。
+ * 認識器が得意な文字種の字をいくつ読めたかで行の文字種を決め、[ChoicePolicy.priority] の順で採る。崩れた読み（[TextQuality]）は飛ばす。
+ * 認識器の名前では分岐しない。
  */
 internal object LineChoice {
     fun choose(readings: List<Reading>): Reading {
-        // 縦書きを読める読み手の行は、手順1で先に採ってある
+        // 縦書きを読める認識器の行は、手順1で先に採ってある
         readings.firstOrNull { it.source.readsVertical }?.let { return it }
         val ordered = readings.sortedBy { it.source.ordinal }
         val counts = Script.entries.associateWith { script -> count(ordered, script) }
@@ -18,7 +18,7 @@ internal object LineChoice {
         val hangul = counts.getValue(Script.HANGUL)
         val han = counts.getValue(Script.HAN)
 
-        // 英語（ラテン文字だけの行）：英字専用の読み手を優先し、読めていなければ、崩れずラテン文字を最も多く読めたもの
+        // 英語（ラテン文字だけの行）：英字専用の認識器を優先し、読めていなければ、崩れずラテン文字を最も多く読めたもの
         if (kana == 0 && hangul == 0 && han == 0) {
             pick(ordered, Script.LATIN) { ScriptDetector.hasLatin(it.text) }?.let { return it }
             ordered.filter { ok(it) && ScriptDetector.hasLatin(it.text) }
@@ -37,7 +37,7 @@ internal object LineChoice {
         }
         for (script in order) pick(ordered, script)?.let { return it }
         // どれも崩れている場合は、後段（訳す対象の判定）で落とす
-        // 英字専用の読み手だけが読んだ行（崩れた英字など）もここに来る（2026-11-06、カメラで落ちた）
+        // 英字専用の認識器だけが読んだ行（崩れた英字など）もここに来る（2026-11-06、カメラで落ちた）
         return ChoicePolicy.fallback.firstNotNullOfOrNull { script -> inOrder(ordered, script).firstOrNull() } ?: ordered.first()
     }
 
@@ -54,7 +54,7 @@ internal object LineChoice {
         return sources.mapNotNull { s -> readings.firstOrNull { it.source == s } }
     }
 
-    /** 得意な文字種が [script] の読み手が、その文字種の字をいくつ読めたか（読み手が複数なら多い方）。 */
+    /** 得意な文字種が [script] の認識器が、その文字種の字をいくつ読めたか（認識器が複数なら多い方）。 */
     private fun count(readings: List<Reading>, script: Script): Int =
         readings.filter { it.source.specialty == script }.maxOfOrNull { r -> r.text.count { matches(script, it) } } ?: 0
 

@@ -13,11 +13,11 @@ import kotlinx.coroutines.coroutineScope
 import java.io.File
 
 /**
- * 原文の言語で決めた読み手を並列に動かし、行ごとに文字種に合う読みを選んでまとめる（docs/設計/画面翻訳.md「読む流れ」）。
- * このクラスは流れの順番だけを持つ。読み手は [LineReader]、行の選び方とまとめ方は [BlockMerger]、言語ごとの読み手の組は [Recognizers]。
+ * 原文の言語で決めた認識器を並列に動かし、行ごとに文字種に合う読みを選んでまとめる（docs/設計/画面翻訳.md「読む流れ」）。
+ * このクラスは流れの順番だけを持つ。認識器は [LineReader]、行の選び方とまとめ方は [BlockMerger]、言語ごとの認識器の組は [Recognizers]。
  *
  * - ML Kitの中国語・日本語・韓国語・英字の認識器（横書き）。
- * - [paddleDir]（`files/models/ocr/`）に PP-OCR のモデルがあれば、その読み手も動かす（[PaddleReader]）。
+ * - [paddleDir]（`files/models/ocr/`）に PP-OCR のモデルがあれば、その認識器も動かす（[PaddleReader]）。
  *
  * 返すのは1行ずつの読み取り（[OcrLine]）。吹き出し・段落にまとめるのは呼ぶ側（中核の `LineGrouper`）。
  */
@@ -32,14 +32,14 @@ class MultiScriptOcr(paddleDir: File? = null) : OcrEngine {
         MlKitReader(Source.MLKIT_LATIN, TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)),
     )
 
-    /** PP-OCR で読める読み手の一覧（評価・ログ用）。 */
+    /** PP-OCR で読める認識器の一覧（評価・ログ用）。 */
     val paddleSources: Set<String> get() = paddle?.sources.orEmpty().map { it.name }.toSet()
 
     override suspend fun recognize(bitmap: Bitmap, language: OcrLanguage): List<OcrLine> = read(bitmap, Recognizers.of(language))
 
     /**
      * 白縁取り・白抜きの文字にも強く読む（画面翻訳の動く画面のモード。[OutlinedText]）。元の画像と、RGBの最小値を取った画像を
-     * 並べて読み、行ごとに崩れの少ない方を採る。文字認識が1回分多くかかる。最小値の画像には重い読み手（PP-OCR）を使わない。
+     * 並べて読み、行ごとに崩れの少ない方を採る。文字認識が1回分多くかかる。最小値の画像には重い認識器（PP-OCR）を使わない。
      */
     suspend fun recognizeOutlined(bitmap: Bitmap, language: OcrLanguage): List<OcrLine> = coroutineScope {
         val use = Recognizers.of(language)
@@ -56,7 +56,7 @@ class MultiScriptOcr(paddleDir: File? = null) : OcrEngine {
         OutlinedText.pick(primary.await(), variant.await())
     }
 
-    /** [light] なら重い読み手（[LineReader.heavy]）を使わない。 */
+    /** [light] なら重い認識器（[LineReader.heavy]）を使わない。 */
     private suspend fun read(bitmap: Bitmap, use: Set<Source>, light: Boolean = false): List<OcrLine> = coroutineScope {
         val readings = readers.filter { r -> r.sources.any { it in use } && !(light && r.heavy) }
             .map { r -> async { r.read(bitmap, use) } }
@@ -71,8 +71,8 @@ class MultiScriptOcr(paddleDir: File? = null) : OcrEngine {
 }
 
 /**
- * 原文の言語ごとに動かす読み手の組（docs/設計/画面翻訳.md「原文の言語の指定」）。
- * 言語を決めると要らない読み手を止めるので速い（韓国語の漫画1ページ4.0秒→2.0秒、2026-11-05）。
+ * 原文の言語ごとに動かす認識器の組（docs/設計/画面翻訳.md「原文の言語の指定」）。
+ * 言語を決めると要らない認識器を止めるので速い（韓国語の漫画1ページ4.0秒→2.0秒、2026-11-05）。
  *
  * - 中国語：PP-OCR 漫画用（縦書き）＋ML Kit 中国語（横書き・ラテン文字）。
  * - 韓国語：PP-OCR 韓国語＋ML Kit 韓国語（PP-OCR 漫画用は韓国語を読めない）。PP-OCR 韓国語は飾り文字に強く、ML Kit は字の間の空白を保つ。
