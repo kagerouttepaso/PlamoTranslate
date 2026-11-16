@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.dp
 import app.plamotranslate.log.Logs
 
 /**
- * 詳細設定の控え（SharedPreferences の `advanced`）。ふつうは触らない調整と、不具合や遅さを調べるための記録の選択。
+ * 詳細設定の保存先（SharedPreferences の `advanced`）。ふつうは触らない調整と、不具合や遅さを調べるための記録の選択。
  * 正式版でも、設定の画面の下の「詳細設定を表示」で出せる（2026-11-15、作者の要望。調整の値をデバッグ版だけにせず、
  * 正式の署名の版で出先でも測れるようにする）。
  */

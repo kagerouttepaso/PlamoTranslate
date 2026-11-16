@@ -49,7 +49,7 @@ data class PartnerMode(val fixed: Language?) {
 data class Direction(val source: Language, val target: Language?, val mine: Boolean = source == Language.JA)
 
 /**
- * 言語の状態と、発話ごとの訳す方向（docs/作業中/会話翻訳の流れを重いモデルの前提から組み直す.md「言語の状態」）。
+ * 言語の状態と、発話ごとの訳す方向（docs/作業中/会話翻訳の処理を重いモデルの前提から組み直す.md「言語の状態」）。
  * 会話の話し手は自分と相手の2人なので、状態は2段だけにする。
  * - 相手不明（自動の始まり）：音声認識は、自分の言語か、聞けるほかの言語（[heard]）のどれかを決める。
  * - 相手確定：相手を固定したときは最初から。自動では、相手の発話が1回確定したら、その言語を相手にする。音声認識は自分と相手の2択。

@@ -91,7 +91,7 @@ object AppUpdater {
             _state.value = try {
                 val includeBeta = UpdatePreferences(app).includeBeta
                 val release = fetchLatest(currentVersion(app), includeBeta)
-                // 正式版のみなら、pre-release の印を付け忘れたベータ（-beta のタグ）も受け取らない
+                // 正式版のみなら、pre-release に指定し忘れたベータ（-beta のタグ）も受け取らない
                 val acceptable = includeBeta || AppVersion.prerelease(release.tag).isEmpty()
                 if (acceptable && AppVersion.isNewer(release.tag, currentVersion(app))) UpdateState.Available(release)
                 else UpdateState.UpToDate(release.tag)

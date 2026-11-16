@@ -3,7 +3,7 @@ package app.plamotranslate.update
 /**
  * 版（`0.4.0`、リリースのタグ `v0.4.0`、ベータは `v0.11.0-beta.1`）を比べる。
  * 数字の部分を左から順に比べ、足りない桁は0とみなす（`0.4` と `0.4.0` は同じ）。
- * 数字が同じなら、`-` の後ろ（ベータの印）が無い方が新しい（`0.11.0-beta.2 < 0.11.0`）。ベータの印どうしは、
+ * 数字が同じなら、`-` の後ろ（ベータの識別子）が無い方が新しい（`0.11.0-beta.2 < 0.11.0`）。ベータの識別子どうしは、
  * `.` で区切った部分を左から、数字は数として、ほかは文字として比べる（`beta.2 < beta.10`）。
  * ベータを入れた端末にも、後で出る正式版が新しい版として届くようにするため。
  */
@@ -15,7 +15,7 @@ object AppVersion {
         return parts.ifEmpty { null }
     }
 
-    /** `v0.11.0-beta.1` → [beta, 1]。ベータの印が無ければ空。 */
+    /** `v0.11.0-beta.1` → [beta, 1]。ベータの識別子が無ければ空。 */
     fun prerelease(text: String): List<String> {
         val rest = text.trim().substringAfter('-', "").substringBefore('+')
         return rest.split('.').filter { it.isNotEmpty() }

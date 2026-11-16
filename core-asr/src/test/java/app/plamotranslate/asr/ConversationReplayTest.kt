@@ -46,7 +46,7 @@ class ConversationReplayTest {
 
     /**
      * 採点の物差し：録音の全体を見通して、0.25秒ごとに「どの言語の声か」を決める（`tools/score-speaker.py` が読む）。
-     * 2秒の窓を0.5秒ずつずらして Whisper tiny で点数を出し、0.25秒ごとに重なる窓の点数を足して一番の言語にする。
+     * 2秒の区間を0.5秒ずつずらして Whisper tiny で点数を出し、0.25秒ごとに重なる区間の点数を足して一番の言語にする。
      * 声の無いところ（端末と同じ Silero VAD が話していないとするところ）は `-` にする。
      * 話し中の判定と違い、後ろの音声も使えて時間の制約も無いので、区切りの判断より確かな物差しになる（ただし正解そのものではない）。
      * PLAMO_REFERENCE_OUT（書く先）・PLAMO_REPLAY_WAV・PLAMO_REPLAY_ASR・PLAMO_SHERPA_LIB・PLAMO_REFERENCE_LANGS（候補。既定 ja,en）で動かす。

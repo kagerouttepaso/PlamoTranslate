@@ -305,8 +305,8 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     /**
-     * 翻訳の CPU のスレッド数を変える（0 なら設定の画面の値か既定に戻す）。エンジンの設定なので、翻訳の流れを通さずエンジンを直接使う
-     * （docs/設計/翻訳コア.md「流れを通さない呼び出し」）。
+     * 翻訳の CPU のスレッド数を変える（0 なら設定の画面の値か既定に戻す）。エンジンの設定なので、翻訳のストリームを通さずエンジンを直接使う
+     * （docs/設計/翻訳コア.md「ストリームを通さない呼び出し」）。
      */
     private suspend fun configureTranslation(threads: Int) {
         val ready = model.value as? ModelState.Ready ?: return

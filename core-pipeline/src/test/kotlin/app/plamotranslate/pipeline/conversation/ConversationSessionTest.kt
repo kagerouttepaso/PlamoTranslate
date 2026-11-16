@@ -41,7 +41,7 @@ class ConversationSessionTest {
         val live = s.live!!
         assertEquals("", live.text)
         assertEquals(Language.KO, live.direction?.source)
-        // 話し始めの時刻は、言語の知らせでは変えない（画面は話し始めからの秒数を出す）
+        // 話し始めの時刻は、言語のイベントでは変えない（画面は話し始めからの秒数を出す）
         assertEquals(1_000L, live.startedAtMs)
     }
 

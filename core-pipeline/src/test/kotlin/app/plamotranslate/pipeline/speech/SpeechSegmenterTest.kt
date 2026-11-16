@@ -394,7 +394,7 @@ class SpeechSegmenterTest {
         assertTrue(card.text, card.text.all { it == 'あ' })
         // カードは6秒あるが、1回に書き起こすのは1つの文（文の前の間と、文の終わりを見つけるまでの無音を入れても4秒未満）だけ
         assertTrue("${asr.transcribed}", asr.transcribed.max() < SAMPLE_RATE * 4)
-        // 言語の見張りは識別だけで行い、カードの言語が決まった後の書き起こしは言語を指定する（識別を繰り返さない）
+        // 言語の監視は識別だけで行い、カードの言語が決まった後の書き起こしは言語を指定する（識別を繰り返さない）
         assertTrue(asr.identified > 0)
         assertEquals(0, asr.unspecified)
     }
@@ -426,19 +426,19 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun カードの言語を判定できなければ同じ窓を繰り返さず広い窓で判定し直す() {
-        // 3秒より短い窓は判定できない（会話の外の言語と判定する）識別
+    fun カードの言語を判定できなければ同じ区間を繰り返さず広い区間で判定し直す() {
+        // 3秒より短い区間は判定できない（会話の外の言語と判定する）識別
         val asr = HeavyRecognizer { samples, lang -> lang.takeIf { samples >= SAMPLE_RATE * 3 } }
         val s = Harness(asr, profile, heavy = true, languages = SpeechLanguages(setOf("ja", "ko"), primary = "ja"))
         val events = s.feed(Sound.KO to 4.0, Sound.SILENCE to 3.0)
         val head = asr.identifiedWindows.filter { it >= SAMPLE_RATE * 2 }
-        // 同じ長さの窓を何度も頼まない
+        // 同じ長さの区間を何度も頼まない
         assertEquals(head.distinct().size, head.size)
         assertEquals("ko", finals(events).single().lang)
     }
 
     @Test
-    fun 一番広い窓でも判定できなければ自分の言語として書き起こす() {
+    fun 一番広い区間でも判定できなければ自分の言語として書き起こす() {
         val asr = HeavyRecognizer { _, _ -> null }
         val s = Harness(asr, profile, heavy = true, languages = SpeechLanguages(setOf("ja", "ko"), primary = "ja"))
         // 最初の文はカードの言語が決まる前に終わる（言語を指定せずに書き起こしを頼む）
@@ -451,8 +451,8 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun 話し中の窓で判定できなくても文の全体で話し手を決めて区切る() {
-        // 2.5秒より短い窓は判定できない識別。韓国語の文の後、間を空けて日本語の文（3秒）
+    fun 話し中の区間で判定できなくても文の全体で話し手を決めて区切る() {
+        // 2.5秒より短い区間は判定できない識別。韓国語の文の後、間を空けて日本語の文（3秒）
         val asr = HeavyRecognizer { samples, lang -> lang.takeIf { samples >= SAMPLE_RATE * 5 / 2 } }
         val cards = finals(phraseSegmenter(asr).feed(Sound.KO to 3.0, Sound.SILENCE to 1.0, Sound.JA to 3.0, Sound.SILENCE to 3.0))
         assertEquals(listOf("ko", "ja"), cards.map { it.lang })
@@ -470,13 +470,13 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun 言語の判定が遅いときは話し中の見張りの間隔を延ばして担当の時間を残す() {
-        // 言語を自分で識別するモデル（SenseVoice）では、見張りは書き起こしの担当で動く
+    fun 言語の判定が遅いときは話し中の監視の間隔を延ばして担当の時間を残す() {
+        // 言語を自分で識別するモデル（SenseVoice）では、監視は書き起こしの担当で動く
         fun watches(languageLatency: Int): Int {
             val s = Harness(FakeRecognizer(::soundOf), profile, heavy = false, languages = SpeechLanguages(setOf("ja", "ko")),
                 languageLatencyChunks = languageLatency)
             s.feed(Sound.JA to 10.0, Sound.SILENCE to 3.0)
-            return s.languagePurposes.count { it == "話し中の窓" }
+            return s.languagePurposes.count { it == "話し中の区間" }
         }
         val fast = watches(0)
         val slow = watches(5)
@@ -493,9 +493,9 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun 話し始めの窓が誤っても話し手が確かになる前は区切らず仮の言語を替える() {
-        // 話し始めの窓（2〜2.5秒の音声）だけ、日本語を韓国語と判定する識別（PC で、日本語の頭の窓を韓国語 0.95 と判定した）。
-        // 続く窓（1.5秒）と文の全体では正しく判定する
+    fun 話し始めの区間が誤っても話し手が確かになる前は区切らず仮の言語を替える() {
+        // 話し始めの区間（2〜2.5秒の音声）だけ、日本語を韓国語と判定する識別（PC で、日本語の頭の区間を韓国語 0.95 と判定した）。
+        // 続く区間（1.5秒）と文の全体では正しく判定する
         val asr = HeavyRecognizer { samples, lang ->
             if (samples > SAMPLE_RATE * 3 / 2 && samples <= SAMPLE_RATE * 5 / 2 && lang == "ja") "ko" else lang
         }
@@ -514,9 +514,9 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun 待ち行列で窓の判定を待っている間にカードを閉じても確定が出る() {
-        // 識別の担当が1件ずつ処理し、判定に0.7秒かかる。文が終わった直後に話し、窓の判定が文の判定の後ろの待ち行列に
-        // 残ったまま（その後ろに次の文の判定が控えたまま）手で区切る。捨てた窓に結果を返さないと、カードが確定しなかった
+    fun 待ち行列で区間の判定を待っている間にカードを閉じても確定が出る() {
+        // 識別の担当が1件ずつ処理し、判定に0.7秒かかる。文が終わった直後に話し、区間の判定が文の判定の後ろの待ち行列に
+        // 残ったまま（その後ろに次の文の判定が並んだまま）手で区切る。捨てた区間に結果を返さないと、カードが確定しなかった
         val s = Harness(
             HeavyRecognizer(), profile, heavy = true, languages = SpeechLanguages(setOf("ja", "ko")),
             languageLatencyChunks = 7, oneJobPerLane = true,
@@ -535,8 +535,8 @@ class SpeechSegmenterTest {
     }
 
     @Test
-    fun 継ぎ目を探す窓で新しい言語が見つからなければ話し中に区切らない() {
-        // 日本語だけの話で、話し中の窓（1.5秒）が続けて4回、韓国語と聞き違える識別。継ぎ目を探す短い窓は正しい
+    fun 継ぎ目を探す区間で新しい言語が見つからなければ話し中に区切らない() {
+        // 日本語だけの話で、話し中の区間（1.5秒）が続けて4回、韓国語と聞き違える識別。継ぎ目を探す短い区間は正しい
         var windows = 0
         val asr = HeavyRecognizer { samples, lang ->
             if (samples == SAMPLE_RATE * 3 / 2 && ++windows in 5..8) "ko" else lang

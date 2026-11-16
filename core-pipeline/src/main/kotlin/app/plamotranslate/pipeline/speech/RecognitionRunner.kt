@@ -2,7 +2,7 @@ package app.plamotranslate.pipeline.speech
 
 /**
  * 認識の仕事（[RecognitionJob]）を1件処理する（認識の担当のスレッドが呼ぶ。試験では同じスレッドから呼ぶ）。
- * 差し込み口の [recognizer] を、仕事の種類に合わせて呼び分ける。
+ * 認識のインターフェース [recognizer] を、仕事の種類に合わせて呼び分ける。
  */
 class RecognitionRunner(private val recognizer: SpeechRecognizer) {
     /** 仕事を1件処理する（担当のスレッド）。 */
@@ -38,9 +38,9 @@ class RecognitionRunner(private val recognizer: SpeechRecognizer) {
         SpeakerJudge.decide(scored(samples, languages, strict).scores, languages, confidence)
 
     /**
-     * 言語の継ぎ目：窓を [RecognitionJob.Seam.step] ずつずらし、新しい言語になった最初の窓を二分探索で探す
-     * （前は元の言語、後ろは新しい言語と見る。10個の窓を4回ほどの判定で済ませる）。交代かどうかは頼んだ側（話し手の時系列の
-     * 窓の連なり）が決めているので、ここは位置を探すだけにする。
+     * 言語の継ぎ目：区間を [RecognitionJob.Seam.step] ずつずらし、新しい言語になった最初の区間を二分探索で探す
+     * （前は元の言語、後ろは新しい言語と見る。10個の区間を4回ほどの判定で済ませる）。交代かどうかは頼んだ側（話し手の時系列の
+     * 区間の連なり）が決めているので、ここは位置を探すだけにする。
      */
     private fun seam(job: RecognitionJob.Seam): Int? {
         val count = (job.samples.size - job.probe) / job.step + 1

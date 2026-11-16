@@ -30,7 +30,7 @@ dependencies {
     // ライブラリ名がぶつからない。AARは tools/get-sherpa-onnx.ps1 で取得する（Gitに入れない）。2026-11-06作者承認（大きな依存）。
     // ライブラリモジュールはローカルAARを同梱できないので、ここではコンパイルだけに使い、appで同梱する
     compileOnly(files(sherpaAar))
-    // 中核の差し込み口（VoiceActivity・SpeechRecognizer）を実装し、中核の区切り（SpeechEngine）を返す
+    // 中核のインターフェース（VoiceActivity・SpeechRecognizer）を実装し、中核の区切り（SpeechEngine）を返す
     api(project(":core-pipeline"))
     implementation(project(":core-log"))
     // 言語の識別の点数（Whisper tiny を直接動かす）。漫画用OCRと同じ版（sherpa-onnx は ONNX Runtime を静的に組み込んでいて、名前がぶつからない）

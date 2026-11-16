@@ -41,7 +41,7 @@ object Diagnostics {
         val app = context.applicationContext
         // 利用者の文は、詳しい記録を残すとき（デバッグ版の既定、正式版は詳細設定で本人が選ぶ）だけログに書く（Logs.text）
         val userText = runCatching { AdvancedPreferences(app).detailedRecords }.getOrDefault(false)
-        // まず logcat を差す。印を預けるときのログも残すため。ファイルは、プロセスの鍵が決まってから足す
+        // まず logcat を差す。プロセスのマーク（ProcessMark）を預けるときのログも残すため。ファイルは、プロセスの鍵が決まってから足す
         Logs.install(listOf(LogcatSink), userText = userText)
         ProcessMarks.begin(app)
         val key = ProcessExit.keyOf(ProcessMarks.current, Process.myPid())

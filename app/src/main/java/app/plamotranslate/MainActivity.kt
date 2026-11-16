@@ -247,7 +247,7 @@ private fun BrandHeader(modelLabel: String, onOpenSettings: () -> Unit) {
     }
 }
 
-/** アプリの印と名前（「Mocking」と主の色の「word」）。トップ画面と初回の準備の画面の上の帯。 */
+/** アプリのロゴと名前（「Mocking」とプライマリカラーの「word」）。トップ画面と初回の準備の画面の上の帯。 */
 @Composable
 internal fun BrandName(modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
@@ -267,7 +267,7 @@ internal fun BrandName(modifier: Modifier = Modifier) {
     }
 }
 
-/** アプリのアイコン（アダプティブアイコンの背景と前景）を、角の丸い四角に切り出して描く。前景は108の格子の真ん中72が見える範囲。 */
+/** アプリのアイコン（アダプティブアイコンの背景と前景）を、角の丸い四角に切り出して描く。前景は108四方の真ん中72四方が見える範囲。 */
 @Composable
 private fun AppMark(modifier: Modifier) {
     BoxWithConstraints(modifier.clip(RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {

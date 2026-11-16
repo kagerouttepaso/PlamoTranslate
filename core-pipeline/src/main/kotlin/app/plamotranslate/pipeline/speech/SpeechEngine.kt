@@ -99,7 +99,7 @@ data class Recognition(val text: String, val lang: String?, val breaks: List<Spe
 /** 認識した文の切れ目。[sentence] が true なら文の終わり（句点・疑問符・感嘆符）、false なら読点。 */
 data class SpeechBreak(val at: Int, val sentence: Boolean)
 
-/** 差し込み口：音声を文字にし、言語を判定する。実装は `core-asr`（SenseVoice・Qwen3-ASR）。 */
+/** インターフェース：音声を文字にし、言語を判定する。実装は `core-asr`（SenseVoice・Qwen3-ASR）。 */
 interface SpeechRecognizer : AutoCloseable {
     fun recognize(samples: FloatArray): Recognition
 

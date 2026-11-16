@@ -292,7 +292,7 @@ internal fun LiveCard(live: LiveSpeech, reader: Reader?, level: Float, lagSecond
 @Composable
 internal fun QueuedCard(card: LiveSpeech, reader: Reader?) = LiveCard(card, reader, level = 0f, lagSeconds = 0f, queued = true)
 
-/** 書き起こし待ちのカードの見出し。相手の面は言語に依らない印にする。 */
+/** 書き起こし待ちのカードの見出し。相手の面は言語に依らない記号（⏳）にする。 */
 private fun queuedStatus(d: Direction?, reader: Reader?): String = when {
     reader == Reader.PARTNER -> if (d == null) "⏳" else "⏳ ${ownName(d.source)}"
     d == null -> "⏳ 区切りました・書き起こし中"

@@ -44,7 +44,7 @@ sealed interface RecognitionJob {
     /**
      * 会話の言語ごとの点数を出す（話し手は区切りが [SpeakerJudge] で決める）。点数を出せる認識器は識別の担当
      * （[RecognitionLane.IDENTIFY]）が、出せない認識器は書き起こしの担当が書き起こして、その言語を点数1とする。
-     * [priority] は、文の全体（[RecognitionPriority.PHRASE_LANGUAGE]）か、話し中の窓（[RecognitionPriority.LANGUAGE]）か。
+     * [priority] は、文の全体（[RecognitionPriority.PHRASE_LANGUAGE]）か、話し中の区間（[RecognitionPriority.LANGUAGE]）か。
      */
     class Language(
         override val id: Long,
@@ -58,9 +58,9 @@ sealed interface RecognitionJob {
     ) : RecognitionJob
 
     /**
-     * 言語の継ぎ目を探す。[samples] の中で、[probe] の長さの窓を [step] ずつずらし、[newLang] に変わった最初の窓の
-     * 頭の位置（[samples] の中のサンプル数）を返す。前は元の言語、後ろは新しい言語と見て、二分探索で窓の数を減らす。
-     * どの窓も [newLang] でなければ、継ぎ目は無いとする。
+     * 言語の継ぎ目を探す。[samples] の中で、[probe] の長さの区間を [step] ずつずらし、[newLang] に変わった最初の区間の
+     * 頭の位置（[samples] の中のサンプル数）を返す。前は元の言語、後ろは新しい言語と見て、二分探索で区間の数を減らす。
+     * どの区間も [newLang] でなければ、継ぎ目は無いとする。
      */
     class Seam(
         override val id: Long,
@@ -91,7 +91,7 @@ enum class RecognitionLane { TRANSCRIBE, IDENTIFY }
 
 /**
  * 仕事の優先順位（小さいほど先）。確定に要る仕事（区切った残り・文の書き起こし・文の話し手の判定）を先にし、
- * 話し中の窓の判定、途中結果の順に後回しにする。確定（区切った残り）は、前のカードの文の書き起こしより先に出ることがある
+ * 話し中の区間の判定、途中結果の順に後回しにする。確定（区切った残り）は、前のカードの文の書き起こしより先に出ることがある
  * （出来事はカードの順に出すので、結果の順は崩れない）。
  */
 enum class RecognitionPriority {
@@ -104,10 +104,10 @@ enum class RecognitionPriority {
 /**
  * 判定：認識の仕事の待ち行列（担当ごと）。次に処理する仕事と、要らなくなった仕事を決める。スレッドに依らない。
  * - 優先順位の高いものから、同じ順位は頼んだ順に出す（文の書き起こしは、つなぐ順に届く）。
- * - 閉じたカードの途中結果と話し中の窓の判定は捨てる（[dropStale]）。確定に要る仕事は捨てない。
+ * - 閉じたカードの途中結果と話し中の区間の判定は捨てる（[dropStale]）。確定に要る仕事は捨てない。
  *   捨てた仕事は返し、呼び手は空の結果（[RecognitionRunner.empty]）を区切りに渡す。頼んだ仕事には、処理しても捨てても
  *   必ず1回だけ結果が返る（結果を待って次を決める区切りが、捨てられた仕事を待ち続けて止まらないようにする）。
- * 途中結果と言語の見張りは、区切りがカードごとに1件ずつしか頼まないので、ここでは間引かない。
+ * 途中結果と言語の監視は、区切りがカードごとに1件ずつしか頼まないので、ここでは間引かない。
  */
 class RecognitionQueue {
     private val jobs = mutableListOf<RecognitionJob>()
@@ -125,7 +125,7 @@ class RecognitionQueue {
         return next
     }
 
-    /** [openCard] 以外のカードの、途中結果と話し中の窓の判定を捨てて返す（確定に要る仕事は残す）。 */
+    /** [openCard] 以外のカードの、途中結果と話し中の区間の判定を捨てて返す（確定に要る仕事は残す）。 */
     fun dropStale(openCard: Long?): List<RecognitionJob> {
         val stale = jobs.filter { it.card != openCard && it.priority >= RecognitionPriority.LANGUAGE }
         jobs.removeAll(stale)

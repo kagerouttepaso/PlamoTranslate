@@ -47,7 +47,7 @@ enum class SpeechModel(
     }
 }
 
-/** 差し込み口：話された言語を見分ける（認識モデルに依らない既定の層）。実装は `core-asr`（Whisper tiny）。 */
+/** インターフェース：話された言語を見分ける（認識モデルに依らない既定の層）。実装は `core-asr`（Whisper tiny）。 */
 interface LanguageIdentifier : AutoCloseable {
     /**
      * 候補の言語（[candidates]、"ja"・"ru" などのコード。null なら識別器が知るすべての言語）ごとの確率（合計1）。

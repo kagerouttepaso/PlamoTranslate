@@ -5,25 +5,25 @@ package app.plamotranslate.pipeline.speech
  * 位置の付いた根拠から決める。カードの話し手と区切る位置の判断はここだけで行い、[SpeechSegmenter] は返した判定（[Verdict]）を
  * 実行する（区切る・継ぎ目を探す・書き起こす）。判定し直しはしない。
  *
- * 根拠は1本の時系列にする：話し中の窓（短い音声の言語）を、続けて同じ言語だった窓ごとにまとめた「連なり」にする。
- * 連なりが2回以上の判定からなり、窓が覆った音声が [minTurn] 以上なら、その言語の話し手が話したとみなす（連なりが確か）。
+ * 根拠は1本の時系列にする：話し中の区間（短い音声の言語）を、続けて同じ言語だった区間ごとにまとめた「連なり」にする。
+ * 連なりが2回以上の判定からなり、区間が覆った音声が [minTurn] 以上なら、その言語の話し手が話したとみなす（連なりが確か）。
  * 言語の識別は短い音声では外れるので、それより短い交代は取りにいかない（docs/設計/会話翻訳.md「取りにいくことと諦めること」）。
  * 1回の判定は、音声が長くても外れることがある（PC で、話し始めの2秒の日本語を韓国語 0.95 と判定した）ので、それだけでは決めない。
- * 回数ではなく音声の長さで数えるのは、窓の間隔が端末の速さで変わるため。
+ * 回数ではなく音声の長さで数えるのは、区間の間隔が端末の速さで変わるため。
  *
  * - カードの言語と違う連なりが確かになった：カードの話し手が確かなら継ぎ目を探させる（[Verdict.Seek]）。継ぎ目は、
- *   カードの話し手だと分かっている最後の根拠（カードの言語と同じだった最後の窓・文の頭）から、連なりの最初の窓の終わりまでで探す。
+ *   カードの話し手だと分かっている最後の根拠（カードの言語と同じだった最後の区間・文の頭）から、連なりの最初の区間の終わりまでで探す。
  *   交代はこの間にあり、気づくまでの遅れに依らない。交代の根拠は連なりなので、継ぎ目探しは位置を探すだけで、後ろの音声の
- *   全体で確かめ直さない（2人の話が行き来する区間では、全体の多数決が新しい言語にならず、区切れなかった）。まだ確かでなければ、仮の言語（話し始めの短い窓・前の話し手の引き継ぎ）が
+ *   全体で確かめ直さない（2人の話が行き来する区間では、全体の多数決が新しい言語にならず、区切れなかった）。まだ確かでなければ、仮の言語（話し始めの短い区間・前の話し手の引き継ぎ）が
  *   誤りだったとみなし、カードの言語を替える。
  * - 文の全体（文が終わったときの点数）：多数決なので、2人をまたぐ文では少ない方の話し手が消える（2026-11-15、作者の会話の録音で、
- *   英語 0.86〜0.98 の窓が続いた区間を、またいだ文の全体が日本語 0.97〜1.00 として、英語の文を日本語で書き起こした）。
- *   文の中に [minTurn] に届いた連なりがあれば、話し手は窓が決めているので、文の全体は使わない。無ければ（短い文・窓の無い文）、
+ *   英語 0.86〜0.98 の区間が続いた範囲を、またいだ文の全体が日本語 0.97〜1.00 として、英語の文を日本語で書き起こした）。
+ *   文の中に [minTurn] に届いた連なりがあれば、話し手は区間が決めているので、文の全体は使わない。無ければ（短い文・区間の無い文）、
  *   確かなカードの話し手と違えば文の頭で区切らせ（[Verdict.Cut]。カードの頭から始まる文なら言語を替える）、
  *   確かでなければ文の話し手をカードの話し手にする。
  * - 閉じた後（[close]）：区切らせない。確かな話し手は変えず、届いた文もカードの話し手の言語で書き起こさせる。
  *   まだ確かでなければ、届いた文で決める。
- * 決められなかった窓（null）は、連なりを伸ばしも切りもしない（覆った長さにも数えないので、離れた2回の判定は確かにならない）。
+ * 決められなかった区間（null）は、連なりを伸ばしも切りもしない（覆った長さにも数えないので、離れた2回の判定は確かにならない）。
  * 継ぎ目が見つからなかった連なり（[seamMissed]）は聞き違いとして、確かな根拠から外す。
  *
  * 位置は聞き始めからのサンプル数。[start] はカードの始まり、[minTurn] はサンプル数。
@@ -37,14 +37,14 @@ class SpeakerTrack(private val start: Long, private val minTurn: Long) {
     var sure = false
         private set
 
-    /** 続けて同じ言語だった窓のまとまり。[from]〜[to] は窓の範囲を合わせたもの、[lastFrom] は最後の窓の頭。 */
+    /** 続けて同じ言語だった区間の連なり。[from]〜[to] は区間の範囲を合わせたもの、[lastFrom] は最後の区間の頭。 */
     private inner class Run(val lang: String, val from: Long, var to: Long, var lastFrom: Long) {
-        /** 最初の窓の終わり。交代はこれより前にある。 */
+        /** 最初の区間の終わり。交代はこれより前にある。 */
         val firstTo = to
 
         var judgments = 1
 
-        /** 窓が覆った音声の長さ（重なりは1回だけ数える）。 */
+        /** 区間が覆った音声の長さ（重なりは1回だけ数える）。 */
         var covered = to - from
 
         /** 継ぎ目が見つからず、聞き違いとみなした。 */
@@ -69,7 +69,7 @@ class SpeakerTrack(private val start: Long, private val minTurn: Long) {
     /** 継ぎ目を探させている言語。結果が届くまで、同じ交代で探させ直さない。 */
     private var seeking: String? = null
 
-    /** カードの話し手だと分かっている最後の根拠（カードの言語と同じだった窓・文）の始まり。無ければカードの始まり。 */
+    /** カードの話し手だと分かっている最後の根拠（カードの言語と同じだった区間・文）の始まり。無ければカードの始まり。 */
     private var lastAgreeFrom = start
 
     /** カードを区切ると決めたか。 */
@@ -98,7 +98,7 @@ class SpeakerTrack(private val start: Long, private val minTurn: Long) {
         return changed
     }
 
-    /** [from]〜[to] の話し中の窓の話し手が [judged] と決まった（決められなければ null）。 */
+    /** [from]〜[to] の話し中の区間の話し手が [judged] と決まった（決められなければ null）。 */
     fun window(from: Long, to: Long, judged: String?): Verdict {
         judged ?: return Verdict.Keep
         val run = extend(judged, from, to)
@@ -133,7 +133,7 @@ class SpeakerTrack(private val start: Long, private val minTurn: Long) {
         closed = true
     }
 
-    /** 継ぎ目が見つからなかった（窓の聞き違い）。その連なりは使い終え、次の窓から数え直す。 */
+    /** 継ぎ目が見つからなかった（区間の聞き違い）。その連なりは使い終え、次の区間から数え直す。 */
     fun seamMissed() {
         seeking = null
         runs.lastOrNull()?.refuted = true
@@ -142,7 +142,7 @@ class SpeakerTrack(private val start: Long, private val minTurn: Long) {
     /** [from]〜[to] の文の全体の話し手が [judged] と決まった（決められなければ null）。 */
     fun phrase(from: Long, to: Long, judged: String?): Verdict {
         judged ?: return Verdict.Keep
-        // 文の中で窓が話し手を決めていれば、文の全体の多数決で上書きしない
+        // 文の中で区間が話し手を決めていれば、文の全体の多数決で上書きしない
         if (runs.any { it.establishedWithin(from, to) }) return Verdict.Keep
         val current = lang
         if (current != null && sure && judged != current) {
@@ -159,7 +159,7 @@ class SpeakerTrack(private val start: Long, private val minTurn: Long) {
         return Verdict.Keep
     }
 
-    /** 窓を連なりに足す。最後の連なりと同じ言語なら伸ばし、違えば新しい連なりを始める。 */
+    /** 区間を連なりに足す。最後の連なりと同じ言語なら伸ばし、違えば新しい連なりを始める。 */
     private fun extend(judged: String, from: Long, to: Long): Run {
         val last = runs.lastOrNull()
         if (last != null && last.lang == judged && !last.refuted) {

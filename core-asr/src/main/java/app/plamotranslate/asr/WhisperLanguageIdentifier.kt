@@ -47,7 +47,7 @@ class WhisperLanguageIdentifier private constructor(
         textState = meta.getValue("n_text_state").toInt()
     }
 
-    /** デコーダーの自己注意の控え（1手だけなので常に0）。毎回作り直さない。 */
+    /** デコーダーの自己注意のキャッシュ（1手だけなので常に0）。毎回作り直さない。 */
     private val emptyCache = FloatArray(layers * textCtx * textState)
 
     /** 聞ける言語のコード（Whisper の表記）。 */
@@ -127,7 +127,7 @@ class WhisperLanguageIdentifier private constructor(
 }
 
 /**
- * Whisper の log-mel 特徴量（openai/whisper の `log_mel_spectrogram` と同じ計算）。窓 400（ハン窓）、ずらし 160、
+ * Whisper の log-mel 特徴量（openai/whisper の `log_mel_spectrogram` と同じ計算）。フレーム長 400（Hann window）、ずらし 160、
  * 両端を反転で足す（center）、メルは Slaney の80本。音声の後ろに30秒の無音を足して最初の3000フレームを取り、
  * log10 を「最大 − 8」で下を切って (x + 4) / 4 にする。無音のフレームは値が決まっているので計算しない。
  */

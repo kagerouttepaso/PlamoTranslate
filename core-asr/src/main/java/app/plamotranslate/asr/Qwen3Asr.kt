@@ -10,7 +10,7 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import java.io.File
 
 /**
- * 差し込み口 [SpeechRecognizer] の実装：Qwen3-ASR-0.6B（30言語）。自己回帰で1文字ずつ生成する。
+ * インターフェース [SpeechRecognizer] の実装：Qwen3-ASR-0.6B（30言語）。自己回帰で1文字ずつ生成する。
  * sherpa-onnx 2.0.1 はモデルが出す言語の頭（「language Russian」）を取り除き、言語も時刻も返さない
  * （2026-11-15、PCで確かめた。トークン列にも残らない）。言語は前に置く識別（[WhisperLanguageIdentifier]）で決め、
  * [recognizeAs] で指定する。
@@ -28,7 +28,7 @@ class Qwen3Recognizer private constructor(private val recognizer: OfflineRecogni
             NAMES[language]?.let { stream.setOption("language", it) }
             stream.acceptWaveform(samples, SpeechEngine.SAMPLE_RATE)
             recognizer.decode(stream)
-            // 終わりの印（<|endoftext|> など）の後ろは、モデルが作り出した続き（2026-11-15のベータで、日本語の後に英語の記事の文を出した）
+            // 終わりのトークン（<|endoftext|> など）の後ろは、モデルが作り出した続き（2026-11-15のベータで、日本語の後に英語の記事の文を出した）
             val text = recognizer.getResult(stream).text.substringBefore("<|").trim()
             return Recognition(if (isRoleLeak(text)) "" else text, lang = null)
         } finally {

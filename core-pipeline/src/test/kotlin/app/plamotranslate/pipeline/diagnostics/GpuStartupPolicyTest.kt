@@ -12,7 +12,7 @@ class GpuStartupPolicyTest {
     @Test fun 保存したCPU退避は新しい起動でも解除しない() {
         assertEquals(Decision.KeepCpu, decide(saved = true, pending = false))
         assertEquals(Decision.KeepCpu, decide(saved = true, intended = true))
-        // 明示的な再試行で退避と準備中の印を消した後だけ、通常の選択へ戻る。
+        // 明示的な再試行で退避と準備中のマーカーを消した後だけ、通常の選択へ戻る。
         assertEquals(Decision.Normal, decide(saved = false, pending = false))
     }
 
