@@ -9,6 +9,7 @@
     - docs/現在地.md が100行を超える
     - docs/判断/ のファイルの名前や書式が欠けている
     - 使わない言い換え（docs/設計/アーキテクチャ.md の表）が、文書・コード・画面・ファイル名にある
+    - docs/現在地.md・docs/バックログ.md に予定・やることの節がある、または個人のフォルダーのパスがある
   注意（終了コードは変えない）：
     - 今の姿を書く文書（docs/設計/・docs/手順/）に日付がある（経緯が混ざった兆候）
     - docs/作業中/ に文書が残っている（作業が終わったら畳んで消す）
@@ -182,6 +183,23 @@ foreach ($dir in '設計', '手順') {
             if ($plain -match '20\d\d-\d\d-\d\d') { $warnings.Add("$(Rel $f.FullName):$($i + 1) 日付がある（経緯なら判断の記録へ）") }
         }
     }
+}
+
+# 公開するリポジトリに置かない記録（CLAUDE.md「公開するリポジトリに置く記録を分ける」）。機械で見分けられる形だけを見る：
+# 現在地とバックログの、予定・やることを表す節の見出しと、個人のフォルダーのパス（文書・コードのどこでも）
+foreach ($name in '現在地.md', 'バックログ.md') {
+    $f = Join-Path $docs $name
+    if (-not (Test-Path -LiteralPath $f)) { continue }
+    $lines = @(Get-Content -LiteralPath $f -Encoding utf8)
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^#{1,6} .*(次の作業|次にやる|予定|やること|TODO|日誌)') {
+            $errors.Add("docs/${name}:$($i + 1) 予定・やることの節は置かない（リポジトリの外の非公開の記録へ）：$($lines[$i])")
+        }
+    }
+}
+$privatePath = '[A-Za-z]:[\\/]+Users[\\/]|/home/[a-z]|/Users/[A-Za-z]|Obsidian|Vault'
+foreach ($hit in @(git -C $root -c core.quotepath=false grep -n -I -E $privatePath -- . ':(exclude)third_party' ':(exclude)tools/check-docs.ps1' 2>$null | Where-Object { $_ })) {
+    $errors.Add("個人のフォルダーのパスを書かない：$hit")
 }
 
 # 作業中の残り
