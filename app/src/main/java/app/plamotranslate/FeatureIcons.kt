@@ -9,7 +9,7 @@ import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.unit.dp
 
 /**
- * 機能と操作のアイコン（docs/設計/デザイン言語.md「アイコン」）。24の格子に、太さ2の丸い端の線で描く。
+ * 機能と操作のアイコン（docs/設計/デザイン言語.md「アイコン」）。24のグリッドに、太さ2の丸い端の線で描く。
  * 色は持たず、使う側の文字の色で塗る（Icon の tint）。絵文字は端末ごとに絵が変わり、テーマの色にも乗らないので使わない。
  */
 object FeatureIcons {

@@ -6,11 +6,11 @@ import app.plamotranslate.log.Logs
 import app.plamotranslate.pipeline.diagnostics.ProcessMark
 
 /**
- * プロセスの印を OS に預ける（外とつなぐ部品。中核の [ProcessMark]）。印は次の起動で OS の終わり方の記録から戻り、
+ * プロセスのマークを OS に預ける（外とつなぐ部品。中核の [ProcessMark]）。マークは次の起動で OS の終わり方の記録から戻り、
  * 同じプロセスの記録を見分けるのと、アプリが意図して終えたかを知るのに使う（不具合の記録と `GpuGuard`）。
  */
 object ProcessMarks {
-    /** このプロセスの印。預けられなかったら null。 */
+    /** このプロセスのマーク。預けられなかったら null。 */
     @Volatile
     var current: ProcessMark? = null
         private set
@@ -31,5 +31,5 @@ object ProcessMarks {
 
     private fun put(context: Context, mark: ProcessMark): Boolean = runCatching {
         context.getSystemService(ActivityManager::class.java).setProcessStateSummary(mark.encode())
-    }.onFailure { Logs.w("プロセスの印を預けられませんでした", it) }.isSuccess
+    }.onFailure { Logs.w("プロセスのマークを預けられませんでした", it) }.isSuccess
 }

@@ -97,10 +97,10 @@ class BenchActivity : ComponentActivity() {
             val ocrMillis = SystemClock.uptimeMillis() - t0
             val targets = selectTargets(blocks, bitmap, statusBar, SCREEN_TARGET)
 
-            // 画像ごとに新しい翻訳の流れを開き、前の画像の訳の控えを使わない（画面翻訳と同じ契約で訳す）
+            // 画像ごとに新しい翻訳のストリームを開き、前の画像の翻訳のキャッシュを使わない（画面翻訳と同じ契約で訳す）
             val translations = Array(targets.size) { StringBuilder() }
             val t1 = SystemClock.uptimeMillis()
-            // 訳す対象が無い画像（日本語だけ・空の画面）では流れを開かない。空の依頼は何も流さないので、確定を待つと止まる
+            // 訳す対象が無い画像（日本語だけ・空の画面）ではストリームを開かない。空の依頼は何も流さないので、確定を待つと止まる
             if (targets.isNotEmpty()) coroutineScope {
                 val stream = TranslationStream(this, { TranslationStream.Backend(ready.engine, ready.model.origin) }, TranslationStream.Options(language.sourceLanguage, SCREEN_TARGET))
                 try {

@@ -8,8 +8,9 @@
     - コード・CLAUDE.md・docs/ から参照している文書のファイルや節（「…」）が無い
     - docs/現在地.md が100行を超える
     - docs/判断/ のファイルの名前や書式が欠けている
+    - 使わない言い換え（docs/設計/アーキテクチャ.md の表）が、文書・コード・画面・ファイル名にある
   注意（終了コードは変えない）：
-    - 今の姿を書く文書（docs/設計/・docs/手順/）に日付がある（経緯が混ざった合図）
+    - 今の姿を書く文書（docs/設計/・docs/手順/）に日付がある（経緯が混ざった兆候）
     - docs/作業中/ に文書が残っている（作業が終わったら畳んで消す）
 #>
 param()
@@ -181,6 +182,54 @@ $wip = Join-Path $docs '作業中'
 if (Test-Path -LiteralPath $wip) {
     foreach ($f in Get-ChildItem -LiteralPath $wip -Recurse -File -Filter *.md) {
         $warnings.Add("$(Rel $f.FullName) 作業中の文書が残っている（終わったら畳んで消す）")
+    }
+}
+
+# 独自の呼び名（docs/設計/アーキテクチャ.md「使わない言い換え」）。表の「検査の形」を読み、文書・コード・画面・ファイル名に戻っていないかを見る。
+# 表を正本にし、語をこのスクリプトに書き写さない（表と検査を二重に持たない）
+$glossaryFile = Join-Path $docs '設計/アーキテクチャ.md'
+$glossary = @()
+$glossaryLines = @(Get-Content -LiteralPath $glossaryFile -Encoding utf8)
+$inTable = $false
+$tableStart = 0; $tableEnd = 0
+for ($i = 0; $i -lt $glossaryLines.Count; $i++) {
+    $line = $glossaryLines[$i]
+    if ($line -match '^#{1,6} ') {
+        if ($inTable) { $tableEnd = $i; break }
+        $inTable = $line -match '^#{1,6} 使わない言い換え$'
+        if ($inTable) { $tableStart = $i + 1 }
+        continue
+    }
+    # 行の形：| 使わない語 | 使う語 | `検査の形` |（検査の形の中の | は \| と書く）
+    if ($inTable -and $line -match '^\| (?<word>.+?) \| (?<use>.+?) \| `(?<pattern>.+)` \|$') {
+        $glossary += [pscustomobject]@{ Word = $Matches['word']; Use = $Matches['use']; Pattern = [regex]::new($Matches['pattern'].Replace('\|', '|')) }
+    }
+}
+if ($inTable -and $tableEnd -eq 0) { $tableEnd = $glossaryLines.Count }
+if ($glossary.Count -lt 10) {
+    $errors.Add('docs/設計/アーキテクチャ.md「使わない言い換え」の表を読めない（行の形が変わった）')
+} else {
+    $glossaryRel = Rel $glossaryFile
+    # 対象：Git が追う（または追い得る）文字のファイル。外のライブラリと、翻訳に渡す文の組・評価の結果（利用者の文のデータで、このリポジトリの書き方ではない）は除く
+    $files = git -C $root -c core.quotepath=false ls-files --cached --others --exclude-standard -- . ':(exclude)third_party' ':(exclude)*.tsv' ':(exclude)tools/testdata' ':(exclude)tools/bench-results' 2>$null
+    $textExt = '.md', '.kt', '.kts', '.java', '.xml', '.ps1', '.py', '.sh', '.cpp', '.h', '.c', '.pro', '.json', '.properties', '.txt', '.toml', '.yml', '.yaml', '.gitignore', '.gitattributes'
+    foreach ($rel in $files) {
+        foreach ($g in $glossary) {
+            if ($g.Pattern.IsMatch($rel)) { $errors.Add("$rel ファイル名に使わない語「$($g.Word)」→ $($g.Use)") }
+        }
+        $ext = [IO.Path]::GetExtension($rel)
+        if (-not $ext) { $ext = [IO.Path]::GetFileName($rel) }
+        if ($ext -notin $textExt -and $rel -notmatch '(^|/)pre-commit$') { continue }
+        $full = Join-Path $root $rel
+        if (-not (Test-Path -LiteralPath $full)) { continue }
+        $lines = @(Get-Content -LiteralPath $full -Encoding utf8)
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            # 表そのものは除く
+            if ($rel -eq $glossaryRel -and $i -ge $tableStart -and $i -lt $tableEnd) { continue }
+            foreach ($g in $glossary) {
+                if ($g.Pattern.IsMatch($lines[$i])) { $errors.Add("${rel}:$($i + 1) 使わない語「$($g.Word)」→ $($g.Use)") }
+            }
+        }
     }
 }
 

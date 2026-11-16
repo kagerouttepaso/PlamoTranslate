@@ -82,7 +82,7 @@ internal object OverlayStyle {
 }
 
 /**
- * 自分の窓（浮遊ボタン・メニュー・上部の小さな表示）に触れた時刻。[TouchWatcher] は自分の窓に触れたときも「外側の操作」として
+ * 自分のウィンドウ（フローティングボタン・メニュー・上部の小さな表示）に触れた時刻。[TouchWatcher] は自分のウィンドウに触れたときも「外側の操作」として
  * 知らせるので、ほかのアプリへの操作と区別するのに使う。
  */
 internal object OwnTouch {
@@ -94,22 +94,22 @@ internal object OwnTouch {
         lastAt = SystemClock.uptimeMillis()
     }
 
-    /** 直近 [withinMillis] 以内に自分の窓に触れたか。 */
+    /** 直近 [withinMillis] 以内に自分のウィンドウに触れたか。 */
     fun recent(withinMillis: Long = 300): Boolean = SystemClock.uptimeMillis() - lastAt <= withinMillis
 }
 
 /**
- * 画面のどこかに触れたことを知るための、見えない1画素の窓（2026-11-12、作者の要望「自動翻訳で訳している途中に画面を操作したら、
- * 全処理を取り消す」）。`FLAG_WATCH_OUTSIDE_TOUCH` で、窓の外（ほかのアプリ）に触れるたびに知らせを受ける。
+ * 画面のどこかに触れたことを知るための、見えない1画素のウィンドウ（2026-11-12、作者の要望「自動翻訳で訳している途中に画面を操作したら、
+ * 全処理を取り消す」）。`FLAG_WATCH_OUTSIDE_TOUCH` で、ウィンドウの外（ほかのアプリ）に触れるたびにイベントを受ける。
  * 撮影の間も隠さずに置いておくので、撮っている最中の操作にも気づける（上部の小さな表示は撮影の間は消えている）。
- * 自分の窓に触れたときも知らせが来るので、少し待ってから [OwnTouch] で除く。
+ * 自分のウィンドウに触れたときもイベントが来るので、少し待ってから [OwnTouch] で除く。
  */
 @SuppressLint("ClickableViewAccessibility")
 internal class TouchWatcher(context: Context, private val windowManager: WindowManager, onTouch: () -> Unit) {
     private val view = View(context).apply {
         setOnTouchListener { v, e ->
             if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) {
-                // 自分のボタン・メニューへの操作は、その窓の処理が先に OwnTouch に記録するのを待ってから除く
+                // 自分のボタン・メニューへの操作は、そのウィンドウの処理が先に OwnTouch に記録するのを待ってから除く
                 v.postDelayed({ if (!OwnTouch.recent()) onTouch() }, OWN_TOUCH_SETTLE_MS)
             }
             false
@@ -153,7 +153,7 @@ class FloatingButton(
     /** 鳥の入る丸の大きさ。 */
     private val faceSize = context.dp(56)
 
-    /** ボタンの窓の大きさ。丸の外に、自動のときの輪を描く分の余白を取る。 */
+    /** ボタンのウィンドウの大きさ。丸の外に、自動のときの輪を描く分の余白を取る。 */
     private val size = faceSize + context.dp(10)
 
     /** 今の画面の大きさ。画面を回したら [fitToScreen] で更新する。 */
@@ -164,13 +164,13 @@ class FloatingButton(
     }
 
     /**
-     * アプリの印。アプリのアイコンの背景と前景を、アイコンの色のまま重ねて描く（印はテーマで色を変えない。
+     * アプリのロゴ。アプリのアイコンの背景と前景を、アイコンの色のまま重ねて描く（ロゴはテーマで色を変えない。
      * アプリのアイコンを変えれば、ここも変わる）。文字の「訳」は使わない（docs/設計/デザイン言語.md「アイコン」）。
      */
     private val markBackground = ImageView(context).apply { setImageResource(R.drawable.ic_launcher_background) }
     private val mark = ImageView(context).apply { setImageResource(R.drawable.ic_launcher_foreground) }
 
-    /** 原文の言語を決めているときだけ出す、右下の小さな札（中・韓・英・日）。 */
+    /** 原文の言語を決めているときだけ出す、右下の小さなバッジ（中・韓・英・日）。 */
     private val badge = TextView(context).apply {
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
         typeface = Typeface.DEFAULT_BOLD
@@ -182,7 +182,7 @@ class FloatingButton(
     /** 鳥の入る丸。印は、この丸の形で切り抜く（輪や縁の線が鳥に重ならない）。影は付けない（平らなボタン。縁で見分ける）。 */
     private val face = FrameLayout(context).apply {
         clipToOutline = true
-        // アイコンの格子108のうち、真ん中の72（アダプティブアイコンの見える範囲）を丸いっぱいに描く。
+        // アイコンのグリッド108のうち、真ん中の72（アダプティブアイコンの見える範囲）を丸いっぱいに描く。
         // 108全体を丸に収めると図柄が小さくなる。はみ出した外周は丸で切れる
         val full = faceSize * 108 / 72
         addView(markBackground, FrameLayout.LayoutParams(full, full, Gravity.CENTER))
@@ -199,8 +199,8 @@ class FloatingButton(
     private var auto = false
 
     /**
-     * 今のテーマの色で塗り直す（作ったとき、テーマや端末の明暗が変わったとき、訳し方を変えたとき）。印はアイコンの色のままで、
-     * その周りの縁・輪・札をテーマの主の色にする。縁は、暗い画面の上でも紺の印が埋もれないようにする（docs/設計/デザイン言語.md「色」）。
+     * 今のテーマの色で塗り直す（作ったとき、テーマや端末の明暗が変わったとき、訳し方を変えたとき）。ロゴはアイコンの色のままで、
+     * その周りの縁・輪・バッジをテーマのプライマリカラーにする。縁は、暗い画面の上でも紺のロゴが埋もれないようにする（docs/設計/デザイン言語.md「色」）。
      */
     fun applyPalette() {
         val palette = OverlayPalette.current(context)
@@ -209,7 +209,7 @@ class FloatingButton(
             shape = GradientDrawable.OVAL
             setColor(palette.primary)
         }
-        // 丸の形（切り抜きの形）と、印の上に重ねる縁
+        // 丸の形（切り抜きの形）と、ロゴの上に重ねる縁
         face.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(palette.surfaceRaised) }
         face.foreground = GradientDrawable().apply { shape = GradientDrawable.OVAL; setStroke(context.dp(2), palette.primary) }
         view.background = if (!auto) null else GradientDrawable().apply {
@@ -260,7 +260,7 @@ class FloatingButton(
         }
     }
 
-    /** 訳し方を出す。[language] は原文の言語の札（自動なら null）、[auto] は自動で訳すか。 */
+    /** 訳し方を出す。[language] は原文の言語のバッジ（自動なら null）、[auto] は自動で訳すか。 */
     fun setMode(language: String?, auto: Boolean) {
         badge.text = language.orEmpty()
         badge.visibility = if (language == null) View.GONE else View.VISIBLE
@@ -301,7 +301,7 @@ class FloatingButton(
     }
 }
 
-/** 撮影した画面の座標そのままに置くための窓の設定。状態バーや切り欠きの分ずらされないようにする。 */
+/** 撮影した画面の座標そのままに置くためのウィンドウの設定。状態バーや切り欠きの分ずらされないようにする。 */
 private fun absoluteParams(rect: Rect, flags: Int, type: Int = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY) = WindowManager.LayoutParams(
     rect.width(), rect.height(),
     type,
@@ -318,16 +318,16 @@ private fun absoluteParams(rect: Rect, flags: Int, type: Int = WindowManager.Lay
 
 /**
  * 訳を元の文字の位置に重ねる（docs/設計/画面翻訳.md「訳文の重ね表示」）。
- * 訳の枠は全部、枠全体を囲む長方形の1つの触れない窓（[layer]）の中に並べる。窓の数は枠の数に依らず1つにする
- * （2026-11-13。それまでは枠1つに窓1つを置いていて、訳す単位の多い画面で REDMAGIC の「1つのアプリの窓が60を超えたら
+ * 訳の枠は全部、枠全体を囲む長方形の1つの触れないウィンドウ（[layer]）の中に並べる。ウィンドウの数は枠の数に依らず1つにする
+ * （2026-11-13。それまでは枠1つにウィンドウ1つを置いていて、訳す単位の多い画面で REDMAGIC の「1つのアプリのウィンドウが60を超えたら
  * System.exit する」決まりに当たり、画面翻訳中にアプリが終わった。docs/資料/端末の能力.md）。
- * 窓を画面全体にしないのは、ほかのアプリから見て覆われる範囲（触れた操作に「覆われている」印が付く範囲）を、枠のある所までに
+ * ウィンドウを画面全体にしないのは、ほかのアプリから見て覆われる範囲（触れた操作に「覆われている」フラグが付く範囲）を、枠のある所までに
  * とどめるため。
  *
  * 訳の枠は触れても反応せず、触れた操作は奥のアプリへそのまま届く（2026-11-12、作者の指摘「訳をタップすると1つだけ消える機能より、
- * 字幕の上をスワイプして奥のDiscordの投稿をスクロールできる方が嬉しい。消すのは浮遊ボタンで一括でよい」）。
- * Android 12以降は、ほかのアプリの重ね表示を通り抜ける操作は、窓の不透明度がシステムの上限（既定0.8）以下でないと捨てられる。
- * そのため枠の窓の不透明度を上限に合わせ、原文がわずかに透ける。
+ * 字幕の上をスワイプして奥のDiscordの投稿をスクロールできる方が嬉しい。消すのはフローティングボタンで一括でよい」）。
+ * Android 12以降は、ほかのアプリの重ね表示を通り抜ける操作は、ウィンドウの不透明度がシステムの上限（既定0.8）以下でないと捨てられる。
+ * そのため枠のウィンドウの不透明度を上限に合わせ、原文がわずかに透ける。
  *
  * 画面のどこかに触れたときの扱い（消す・取り消す・枠の下をのぞく）は、サービスが [TouchWatcher] で受けて決める。
  */
@@ -336,7 +336,7 @@ class TranslationOverlay(private val context: Context, private val windowManager
     private val boxes = mutableListOf<View>()
     private val boxRects = mutableListOf<Rect>()
 
-    // 訳の枠を並べる、枠全体を囲む1つの触れない窓と、それを置いた先（ユーザー補助のサービスの WindowManager か、自分の
+    // 訳の枠を並べる、枠全体を囲む1つの触れないウィンドウと、それを置いた先（ユーザー補助のサービスの WindowManager か、自分の
     // WindowManager）。枠を出すときに置き、消すとき（撮る前・取り消し）に同じ先から外す
     private var layer: FrameLayout? = null
     private var layerHost: WindowManager? = null
@@ -359,7 +359,7 @@ class TranslationOverlay(private val context: Context, private val windowManager
         layer?.visibility = if (visible) View.VISIBLE else View.INVISIBLE
     }
 
-    /** 通り抜ける操作が捨てられない、窓の不透明度の上限。 */
+    /** 通り抜ける操作が捨てられない、ウィンドウの不透明度の上限。 */
     private val passThroughAlpha = runCatching {
         context.getSystemService(android.hardware.input.InputManager::class.java).maximumObscuringOpacityForTouch
     }.getOrDefault(0.8f)
@@ -370,7 +370,7 @@ class TranslationOverlay(private val context: Context, private val windowManager
     /** [slots] の位置に空の訳の枠を並べる。[status] は画面上部の小さな表示。 */
     fun show(slots: List<OverlaySlot>, status: String) {
         clear()
-        // ユーザー補助の重ね表示なら不透明のまま操作を通せる。窓はそのサービスの WindowManager から置く
+        // ユーザー補助の重ね表示なら不透明のまま操作を通せる。ウィンドウはそのサービスの WindowManager から置く
         val a11y = if (opaqueWithAccessibility()) OverlayAccessibilityService.instance else null
         val host = a11y?.getSystemService(WindowManager::class.java) ?: windowManager
         val viewContext: Context = a11y ?: context
@@ -394,7 +394,7 @@ class TranslationOverlay(private val context: Context, private val windowManager
                         box.setHalo(slot.colors.background)
                     }
                 }
-                // 窓は枠全体を囲む長方形に置くので、枠はその左上からの位置に並べる
+                // ウィンドウは枠全体を囲む長方形に置くので、枠はその左上からの位置に並べる
                 layer.first.addView(box, FrameLayout.LayoutParams(rect.width(), rect.height()))
                 box.x = (rect.left - origin.left).toFloat()
                 box.y = (rect.top - origin.top).toFloat()
@@ -406,7 +406,7 @@ class TranslationOverlay(private val context: Context, private val windowManager
     }
 
     /**
-     * 枠全体を囲む長方形に、枠を並べる窓を置く。窓と、その画面での範囲を返す。枠が無いか、置けなければ null（枠は出さない）。
+     * 枠全体を囲む長方形に、枠を並べるウィンドウを置く。ウィンドウと、その画面での範囲を返す。枠が無いか、置けなければ null（枠は出さない）。
      */
     private fun placeLayer(rects: List<Rect>, host: WindowManager, viewContext: Context, type: Int, alpha: Float): Pair<FrameLayout, Rect>? {
         if (rects.isEmpty()) return null
@@ -414,7 +414,7 @@ class TranslationOverlay(private val context: Context, private val windowManager
         val params = absoluteParams(bounds, WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE, type).apply { this.alpha = alpha }
         val created = FrameLayout(viewContext)
         return runCatching { host.addView(created, params) }
-            .onFailure { Logs.w("画面翻訳: 訳の枠の窓を置けませんでした", it) }
+            .onFailure { Logs.w("画面翻訳: 訳の枠のウィンドウを置けませんでした", it) }
             .map {
                 layer = created
                 layerHost = host
@@ -446,7 +446,7 @@ class TranslationOverlay(private val context: Context, private val windowManager
         }
     }
 
-    /** 画面上部の中央に、件数・所要時間などを小さく出す。訳以外に触れると全体を消す合図にも使う。 */
+    /** 画面上部の中央に、件数・所要時間などを小さく出す。訳以外に触れたら全体を消すのにも使う。 */
     @SuppressLint("ClickableViewAccessibility")
     fun showStatus(text: String) {
         val palette = OverlayPalette.current(context)
@@ -480,10 +480,10 @@ class TranslationOverlay(private val context: Context, private val windowManager
         view.text = "$text　（タップで消す）"
     }
 
-    /** 訳の枠と上部の小さな表示を消し、枠の窓も外す。 */
+    /** 訳の枠と上部の小さな表示を消し、枠のウィンドウも外す。 */
     fun clear() {
-        // 外せなかった窓は画面に残るので、記録する（2026-11-12、消したはずの訳の枠が撮影に写ったことがあった）
-        layer?.let { v -> runCatching { layerHost?.removeView(v) }.onFailure { Logs.w("画面翻訳: 訳の枠の窓を外せませんでした", it) } }
+        // 外せなかったウィンドウは画面に残るので、記録する（2026-11-12、消したはずの訳の枠が撮影に写ったことがあった）
+        layer?.let { v -> runCatching { layerHost?.removeView(v) }.onFailure { Logs.w("画面翻訳: 訳の枠のウィンドウを外せませんでした", it) } }
         layer = null
         layerHost = null
         boxes.clear()

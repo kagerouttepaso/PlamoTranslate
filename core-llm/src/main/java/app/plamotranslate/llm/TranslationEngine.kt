@@ -33,8 +33,8 @@ data class CpuOptions(
 )
 
 /**
- * PLaMo 3 Translateを1つ保持し、中核の翻訳のエンジンの差し込み口（[JobEngine]）として訳す（docs/設計/翻訳コア.md「翻訳の契約」）。
- * 機能はこのクラスを直接呼ばず、中核の翻訳の流れ（`TranslationStream`）を通す。
+ * PLaMo 3 Translateを1つ保持し、中核の翻訳のエンジンのインターフェース（[JobEngine]）として訳す（docs/設計/翻訳コア.md「翻訳の契約」）。
+ * 機能はこのクラスを直接呼ばず、中核の翻訳のストリーム（`TranslationStream`）を通す。
  * llama.cppのコンテキストは同時に使えないため、すべての呼び出しを1本のスレッドへ寄せる。
  */
 class TranslationEngine private constructor(
@@ -54,9 +54,9 @@ class TranslationEngine private constructor(
 
     /**
      * [source] から依頼を受け取り、最大 [slots] 本（[MAX_PARALLEL] まで）を同時に訳す（2026-11-12）。
-     * 1回の計算で全部の流れを1トークンずつ進めるので、1件ずつ訳すより合計が速い。訳し終わった流れには、ほかの流れを
+     * 1回の計算で全部のシーケンスを1トークンずつ進めるので、1件ずつ訳すより合計が速い。訳し終わったシーケンスには、ほかのシーケンスを
      * 待たずにすぐ次の依頼を入れる（docs/設計/翻訳コア.md「複数の文を同時に訳す」）。[source] に依頼が無くなり、
-     * 全部の流れが訳し終えたら戻る。戻り値は全部の依頼を合わせた生成トークン数。1文だけ訳すときも、流れ1本でこれを使う
+     * 全部のシーケンスが訳し終えたら戻る。戻り値は全部の依頼を合わせた生成トークン数。1文だけ訳すときも、シーケンス1本でこれを使う
      * （2026-11-12に1文用の入口と生成の処理を取り除いた。翻訳の契約を1本にするため）。
      */
     override suspend fun run(slots: Int, source: JobSource, maxTokens: Int): Int =
@@ -87,7 +87,7 @@ class TranslationEngine private constructor(
             result
         }
 
-    /** 推論のスレッドでだけ読み書きする。閉じた後の翻訳を止めるための印。 */
+    /** 推論のスレッドでだけ読み書きする。閉じた後の翻訳を止めるためのフラグ。 */
     private var closed = false
 
     /**
@@ -113,7 +113,7 @@ class TranslationEngine private constructor(
         const val DEFAULT_CONTEXT = 4096
         const val DEFAULT_MAX_TOKENS = 1024
 
-        /** 同時に訳せる文の数の上限（読み込むときに流れの数として確保する）。 */
+        /** 同時に訳せる文の数の上限（読み込むときにシーケンスの数として確保する）。 */
         const val MAX_PARALLEL = 8
 
         /**
@@ -178,7 +178,7 @@ class TranslationEngine private constructor(
         fun defaultThreads(): Int = threadsFor(coreMaxFrequencies())
 
         /**
-         * 最高周波数が一番低いまとまり（小さいコア）がコアの半分以下なら、それ以外のコア（大きいコア）の数にする。
+         * 最高周波数が一番低いクラスター（小さいコア）がコアの半分以下なら、それ以外のコア（大きいコア）の数にする。
          * 小さいコアに仕事が回ると、ほかのスレッドが待たされて全体が遅くなる（2026-11-08、15T Pro（2.4GHz×4、
          * 3.3GHz×3、3.73GHz×1）で6スレッドは0.3〜0.8トークン/秒、4スレッドは56〜62トークン/秒）。
          * 小さいコアが半分より多い、または周波数が読めない端末は、今までどおり「コア数−2」にする

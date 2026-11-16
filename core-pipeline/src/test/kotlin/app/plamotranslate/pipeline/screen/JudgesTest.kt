@@ -5,15 +5,15 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 開始の判定A（[StartJudge]）と有効性の判定B（[ValidityJudge]）。作った格子の並びで判断を確かめる。 */
+/** 開始の判定A（[StartJudge]）と有効性の判定B（[ValidityJudge]）。作ったグリッドの並びで判断を確かめる。 */
 class JudgesTest {
-    /** 480×480 の画面を 48×48 の格子にしたもの。[fill] でます目ごとの明るさを決める。 */
+    /** 480×480 の画面を 48×48 のグリッドにしたもの。[fill] でセルごとの明るさを決める。 */
     private fun grid(fill: (col: Int, row: Int) -> Int): Thumb {
         val n = ScreenChange.COLS
         return Thumb(480, 480, n, n, IntArray(n * n) { fill(it % n, it / n) })
     }
 
-    /** ます目（10px）で長方形を作る。 */
+    /** セル（10px）で長方形を作る。 */
     private fun cells(c0: Int, r0: Int, c1: Int, r1: Int) = Box(c0 * 10, r0 * 10, c1 * 10, r1 * 10)
 
     @Test
@@ -42,7 +42,7 @@ class JudgesTest {
         assertTrue(ready)
     }
 
-    /** 背景（明るさ50）に、訳す原文の吹き出し（ます目10〜20、明るさ250）がある画面。 */
+    /** 背景（明るさ50）に、訳す原文の吹き出し（セル10〜20、明るさ250）がある画面。 */
     private val reference = grid { c, r -> if (c in 10..19 && r in 10..19) 250 else 50 }
     private val bubble = cells(12, 12, 18, 18)
 
@@ -65,7 +65,7 @@ class JudgesTest {
 
     @Test
     fun 判定B_動く画面で背景が動いても原文の周りが同じなら有効() {
-        // 2026-11-12までは、動いたます目を外した結果、画面の8割を見ずに判定していた。ここでは外周だけを見る
+        // 2026-11-12までは、動いたセルを外した結果、画面の8割を見ずに判定していた。ここでは外周だけを見る
         val judge = ValidityJudge(SceneProfile.MOTION.validity)
         judge.begin(reference)
         for (t in 0 until 6) {
@@ -148,7 +148,7 @@ class JudgesTest {
     fun 外周は箱のすぐ外だけ() {
         val ring = ScreenChange.ring(reference, listOf(cells(10, 10, 12, 12)), margin = 1)
         val marked = ring.indices.filter { ring[it] }.map { it % ScreenChange.COLS to it / ScreenChange.COLS }.toSet()
-        // 箱は 10〜11 のます目、外周は 9 と 12 の帯
+        // 箱は 10〜11 のセル、外周は 9 と 12 の帯
         assertEquals(12, marked.size)
         assertTrue((9 to 9) in marked && (12 to 12) in marked)
         assertFalse((10 to 10) in marked)

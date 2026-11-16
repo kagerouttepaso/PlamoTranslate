@@ -13,7 +13,7 @@ import kotlin.math.roundToInt
 /**
  * PP-OCR の文字の検出（DB）。画像から文字の行の範囲を見つける。どの言語のモデルでも前処理と後処理は同じ。
  *
- * 長辺960px（32の倍数）、BGRで (x/255 − mean)/std。確率が0.3を超える画素のまとまりを1行とし、
+ * 長辺960px（32の倍数）、BGRで (x/255 − mean)/std。確率が0.3を超える画素の連結成分を1行とし、
  * 平均確率0.6未満は捨てる。DBの後処理の広げ幅（面積×1.5÷周長）で枠を広げる。
  * OpenCVは使わず、後処理はこのクラスで行う（APKを大きくしないため）。
  */
@@ -42,7 +42,7 @@ internal class PaddleDetector private constructor(
         val boxes = mutableListOf<Rect>()
         for (start in prob.indices) {
             if (visited[start] || prob[start] <= THRESH) continue
-            // 4近傍でつながった画素のまとまりを1行とみなす
+            // 4近傍でつながった画素の連結成分を1行とみなす
             var head = 0
             var tail = 0
             queue[tail++] = start

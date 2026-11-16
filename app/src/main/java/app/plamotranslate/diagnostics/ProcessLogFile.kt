@@ -12,7 +12,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * プロセスごとのログのファイルへの書き先（docs/設計/アーキテクチャ.md「ログ」。名前と片付けの規則は中核の [ProcessLogs]）。
+ * プロセスごとのログのファイルへの出力先（docs/設計/アーキテクチャ.md「ログ」。名前と片付けの規則は中核の [ProcessLogs]）。
  * 端末の logcat はアプリのログを書かないことがある（REDMAGIC は既定で黙らせている）ので、アプリが自分で残す。
  *
  * 1行ごとに OS へ渡す（`FileOutputStream.write` は溜めない）。プロセスがネイティブの落ち方や OS の SIGKILL で終わっても、

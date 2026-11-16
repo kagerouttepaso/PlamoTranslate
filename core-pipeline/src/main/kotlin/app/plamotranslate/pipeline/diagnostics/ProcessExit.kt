@@ -60,7 +60,7 @@ enum class ProcessImportance {
 }
 
 /**
- * プロセスに付ける印。起動のたびに新しい [id] を作って OS に預け（`setProcessStateSummary`）、次の起動で OS の終わり方の記録から
+ * プロセスに付ける識別子。起動のたびに新しい [id] を作って OS に預け（`setProcessStateSummary`）、次の起動で OS の終わり方の記録から
  * 受け取る。同じプロセスの記録を見分けるのと、アプリが意図して終えたか（[intended]）を知るのに使う。
  * どの終わり方でも OS の記録に戻ることを確かめてある（docs/資料/端末の能力.md「プロセスの終わり方」）。
  */
@@ -74,7 +74,7 @@ data class ProcessMark(val id: String, val intended: Boolean = false) {
 
         fun create(): ProcessMark = ProcessMark(UUID.randomUUID().toString().replace("-", "").take(16))
 
-        /** OS から戻った形を読む。このアプリの印でなければ null。 */
+        /** OS から戻った形を読む。このアプリの識別子でなければ null。 */
         fun decode(bytes: ByteArray?): ProcessMark? {
             val text = bytes?.decodeToString()?.takeIf { it.startsWith(PREFIX) } ?: return null
             val body = text.removePrefix(PREFIX)
@@ -88,7 +88,7 @@ data class ProcessMark(val id: String, val intended: Boolean = false) {
  *
  * @property time 終わった時刻（エポックからのミリ秒）
  * @property status [ExitCause.EXIT_SELF] なら終了コード、[ExitCause.SIGNALED] ならシグナルの番号
- * @property mark そのプロセスに付けた印。印を付ける前の版の記録や、OS が印を残さなかった記録では null
+ * @property mark そのプロセスに付けた識別子。識別子を付ける前の版の記録や、OS が識別子を残さなかった記録では null
  * @property rawReason OS の理由の値（[ExitCause.OTHER] の説明に使う）
  * @property description OS が添えた説明
  */
@@ -109,7 +109,7 @@ data class ProcessExit(
     val processKey: String get() = keyOf(mark, pid)
 
     companion object {
-        /** プロセスの鍵。印があれば印、無ければ pid。記録とログのファイルで同じ鍵を使う。 */
+        /** プロセスの鍵。識別子があれば識別子、無ければ pid。記録とログのファイルで同じ鍵を使う。 */
         fun keyOf(mark: ProcessMark?, pid: Int): String = mark?.id ?: "pid$pid"
     }
 }
@@ -155,7 +155,7 @@ object ExitJudge {
         abnormal(exit) || (inUse(exit) && exit.cause !in BENIGN_WHILE_IN_USE)
         )
 
-    /** 同じプロセスの記録か。印が両方にあれば印で、どちらかに無ければ pid で見る（1つのプロセスは1度しか終わらない）。 */
+    /** 同じプロセスの記録か。識別子が両方にあれば識別子で、どちらかに無ければ pid で見る（1つのプロセスは1度しか終わらない）。 */
     fun sameProcess(a: ProcessExit, b: ProcessExit): Boolean =
         if (a.mark != null && b.mark != null) a.mark.id == b.mark.id else a.pid == b.pid
 }
@@ -181,14 +181,14 @@ object ExitTexts {
  * OS の終わり方の記録のうち、何を取り込むかの計画（[plan]）。
  *
  * @property record 記録する終わり方（古い順）
- * @property readUntil 次に取り込むときの目印（ここまでの時刻を読んだ）
+ * @property readUntil 次に取り込むときの読み取り位置（ここまでの時刻を読んだ）
  */
 class ExitSelection<T>(val record: List<T>, val readUntil: Long) {
     companion object {
         /**
          * [items]（OS の記録。[exitOf] で終わり方に読み替える）から、[readUntil] より後のものを読む。
-         * 同じプロセスの記録が2件あれば1件にする（例外で落ちると、OS は受け口の直後と、「停止しました」を閉じた後の2件を残す。
-         * 印のある先のほうを採る）。そのうえで記録するもの（[ExitJudge.recordable]）を選ぶ。
+         * 同じプロセスの記録が2件あれば1件にする（例外で落ちると、OS は例外のハンドラーの直後と、「停止しました」を閉じた後の2件を残す。
+         * 識別子のある先のほうを採る）。そのうえで記録するもの（[ExitJudge.recordable]）を選ぶ。
          */
         fun <T> plan(items: List<T>, exitOf: (T) -> ProcessExit, readUntil: Long): ExitSelection<T> {
             val fresh = items.filter { exitOf(it).time > readUntil }

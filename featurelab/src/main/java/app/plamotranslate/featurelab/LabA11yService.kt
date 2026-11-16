@@ -20,7 +20,7 @@ import android.view.accessibility.AccessibilityWindowInfo
  * 機能テストのユーザー補助（問い1・2・3・4。docs/資料/端末の能力.md）。
  * - 届いた出来事の種類・アプリ・変化の種類・スクロール量と、キー入力をログに残す（文字や中身は読まない）。
  * - 紫の重ね表示（TYPE_ACCESSIBILITY_OVERLAY）を出し入れする。
- * - 画面の撮影（takeScreenshot）と、前面のアプリの窓だけの撮影（takeScreenshotOfWindow）を試し、紫・水色が写るかを見る。
+ * - 画面の撮影（takeScreenshot）と、前面のアプリのウィンドウだけの撮影（takeScreenshotOfWindow）を試し、紫・水色が写るかを見る。
  * PC から `adb shell am broadcast -a app.plamotranslate.featurelab.CMD --es cmd <命令>` で操作できる（[COMMANDS]）。
  */
 class LabA11yService : AccessibilityService() {
@@ -52,10 +52,10 @@ class LabA11yService : AccessibilityService() {
                 "dx=${e.scrollDeltaX} dy=${e.scrollDeltaY} 位置=${e.scrollX},${e.scrollY} 最大=${e.maxScrollX},${e.maxScrollY} 項目=${e.fromIndex}-${e.toIndex}/${e.itemCount}"
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> "変化=${e.contentChangeTypes}"
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> "変化=${e.contentChangeTypes} クラス=${e.className}"
-            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> "窓の変化=${e.windowChanges}"
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> "ウィンドウの変化=${e.windowChanges}"
             else -> ""
         }
-        Lab.log("出来事 $type ${e.packageName} 窓=${e.windowId} $extra")
+        Lab.log("出来事 $type ${e.packageName} ウィンドウ=${e.windowId} $extra")
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
@@ -131,22 +131,22 @@ class LabA11yService : AccessibilityService() {
         one(1)
     }
 
-    /** 窓の一覧（種類・層・題名・前面か）を残す。中身は読まない。 */
+    /** ウィンドウの一覧（種類・層・題名・前面か）を残す。中身は読まない。 */
     private fun listWindows() {
         windows.forEach { w ->
-            Lab.log("窓 id=${w.id} 種類=${w.type} 層=${w.layer} 題名=${w.title} 前面=${w.isActive} 焦点=${w.isFocused} 範囲=${android.graphics.Rect().also(w::getBoundsInScreen)}")
+            Lab.log("ウィンドウ id=${w.id} 種類=${w.type} 層=${w.layer} 題名=${w.title} 前面=${w.isActive} 焦点=${w.isFocused} 範囲=${android.graphics.Rect().also(w::getBoundsInScreen)}")
         }
     }
 
     /**
-     * 前面のアプリの窓だけを [times] 回、[gapMs] あけて撮る（問い2・3）。自分の重ね表示が写らなければ、訳の枠の下の原文を
+     * 前面のアプリのウィンドウだけを [times] 回、[gapMs] あけて撮る（問い2・3）。自分の重ね表示が写らなければ、訳の枠の下の原文を
      * いつでも見られる。1回目だけ画像を保存する。
      */
     private fun shotWindow(times: Int, gapMs: Long) {
         val target = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isActive }
             ?: windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
         if (target == null) {
-            Lab.log("窓の撮影: 前面のアプリの窓が見つからない")
+            Lab.log("ウィンドウの撮影: 前面のアプリのウィンドウが見つからない")
             return
         }
         val start = SystemClock.uptimeMillis()
@@ -157,14 +157,14 @@ class LabA11yService : AccessibilityService() {
                 override fun onSuccess(result: ScreenshotResult) {
                     val bitmap = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
                     result.hardwareBuffer.close()
-                    Lab.log("窓の撮影 $i 回目（${target.title}、間隔${gapMs}ms）: 成功 ${SystemClock.uptimeMillis() - t0}ms（開始から${SystemClock.uptimeMillis() - start}ms） ${bitmap?.let(Lab::describe)}")
+                    Lab.log("ウィンドウの撮影 $i 回目（${target.title}、間隔${gapMs}ms）: 成功 ${SystemClock.uptimeMillis() - t0}ms（開始から${SystemClock.uptimeMillis() - start}ms） ${bitmap?.let(Lab::describe)}")
                     if (i == 1) bitmap?.let { save(it, "window") }
                     bitmap?.recycle()
                     if (i < times) handler.postDelayed({ one(i + 1) }, gapMs)
                 }
 
                 override fun onFailure(errorCode: Int) {
-                    Lab.log("窓の撮影 $i 回目（${target.title}、間隔${gapMs}ms）: 失敗 コード=$errorCode（開始から${SystemClock.uptimeMillis() - start}ms）")
+                    Lab.log("ウィンドウの撮影 $i 回目（${target.title}、間隔${gapMs}ms）: 失敗 コード=$errorCode（開始から${SystemClock.uptimeMillis() - start}ms）")
                     if (i < times) handler.postDelayed({ one(i + 1) }, gapMs)
                 }
             })
@@ -181,25 +181,25 @@ class LabA11yService : AccessibilityService() {
     }
 
     /**
-     * 1秒ごとに前面のアプリの窓を撮り、撮れたか・真っ黒でないか・自分の重ね表示が写ったかだけを残す（問い2をほかのアプリで確かめる）。
+     * 1秒ごとに前面のアプリのウィンドウを撮り、撮れたか・真っ黒でないか・自分の重ね表示が写ったかだけを残す（問い2をほかのアプリで確かめる）。
      * 作者の画面の中身なので、画像は保存しない。
      */
     private fun autoShot(on: Boolean) {
         autoHandler.removeCallbacks(autoTick)
         if (on) autoHandler.post(autoTick)
-        Lab.log("1秒ごとの窓の撮影: ${if (on) "始めた" else "止めた"}")
+        Lab.log("1秒ごとのウィンドウの撮影: ${if (on) "始めた" else "止めた"}")
     }
 
     private fun shotActiveForStats() {
         val target = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isActive }
             ?: windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
-            ?: return Lab.log("窓の撮影（自動）: 前面のアプリの窓が無い")
+            ?: return Lab.log("ウィンドウの撮影（自動）: 前面のアプリのウィンドウが無い")
         val t0 = SystemClock.uptimeMillis()
         takeScreenshotOfWindow(target.id, mainExecutor, object : TakeScreenshotCallback {
             override fun onSuccess(result: ScreenshotResult) {
                 val bitmap = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
                 result.hardwareBuffer.close()
-                if (bitmap == null) return Lab.log("窓の撮影（自動、${target.title}）: 画像にできない")
+                if (bitmap == null) return Lab.log("ウィンドウの撮影（自動、${target.title}）: 画像にできない")
                 var dark = 0
                 var total = 0
                 var sum = 0L
@@ -217,7 +217,7 @@ class LabA11yService : AccessibilityService() {
                     y += 16
                 }
                 Lab.log(
-                    "窓の撮影（自動、${target.title}、層${target.layer}）: ${SystemClock.uptimeMillis() - t0}ms ${bitmap.width}x${bitmap.height} " +
+                    "ウィンドウの撮影（自動、${target.title}、層${target.layer}）: ${SystemClock.uptimeMillis() - t0}ms ${bitmap.width}x${bitmap.height} " +
                         "平均の明るさ=${sum / total} 真っ黒の割合=${dark * 100 / total}% 紫=${Lab.count(bitmap, Lab.A11Y_COLOR)} 水色=${Lab.count(bitmap, Lab.APP_COLOR)} " +
                         "緑（描画面の試験）=${countGreen(bitmap)}",
                 )
@@ -225,7 +225,7 @@ class LabA11yService : AccessibilityService() {
             }
 
             override fun onFailure(errorCode: Int) {
-                Lab.log("窓の撮影（自動、${target.title}）: 失敗 コード=$errorCode")
+                Lab.log("ウィンドウの撮影（自動、${target.title}）: 失敗 コード=$errorCode")
             }
         })
     }

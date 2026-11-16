@@ -20,8 +20,8 @@ import java.util.Locale
  * （`ggml-opencl.cpp` の `build_program_from_source_ex` など）。戻り値で失敗が返らないので、
  * [app.plamotranslate.llm.TranslationEngine.load] のCPUでのやり直しが働かず、Androidがアプリを開き直すたびに同じ所で終わる。
  *
- * そこで、GPUで読み込む前に「読み込み中」の印（プロセスID）を端末に書き、読み込みと初回の推論が済んだら消す。
- * 次の起動で印が残っていれば、前回はGPUの読み込み中に終わっている。Androidが記録した前回の終わり方
+ * そこで、GPUで読み込む前に「読み込み中」のマーカー（プロセスID）を端末に書き、読み込みと初回の推論が済んだら消す。
+ * 次の起動でマーカーが残っていれば、前回はGPUの読み込み中に終わっている。Androidが記録した前回の終わり方
  * （[ProcessExits]）が異常終了（中核の [ExitJudge.abnormal]）ならすぐ、そうでなくても2回続けばCPUに切り替える。
  * 1回目の強制停止やメモリ不足で止められただけでGPUを外さないよう、異常終了でないものは2回まで待つ。
  * CPUへの退避は更新後も維持し、設定の画面から明示的にGPUを試し直す。
@@ -29,7 +29,7 @@ import java.util.Locale
 internal object GpuGuard {
     /**
      * 読み込みの前に呼ぶ。GPUを使ってよいか。前回GPUの読み込み中に終わっていれば、ここで決めて記録する。
-     * GPUを使わない設定・端末でも呼ぶ（前回の印をこの起動で片付けるため）。
+     * GPUを使わない設定・端末でも呼ぶ（前回のマーカーをこの起動で片付けるため）。
      */
     fun allowGpu(context: Context): Boolean {
         val preferences = TranslationPreferences(context)
@@ -42,7 +42,7 @@ internal object GpuGuard {
         return when (val decision = GpuStartupPolicy.decide(preferences.gpuDisabled != null, pendingPid != 0, preferences.gpuInterruptions, abnormal, intended, exitLabel)) {
             Decision.KeepCpu -> false
             Decision.Normal -> {
-                // 意図して起動し直したときは、読み込み中の印を片付ける
+                // 意図して起動し直したときは、読み込み中のマーカーを片付ける
                 if (pendingPid != 0) preferences.gpuLoadingPid = 0
                 true
             }

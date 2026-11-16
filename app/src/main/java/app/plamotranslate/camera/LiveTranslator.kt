@@ -75,8 +75,8 @@ class LiveFrame(
 
 /**
  * カメラ翻訳の外とつなぐ部分（docs/設計/カメラ翻訳.md）。コマを読み、端末の出来事を中核の制御（[CameraSession]）へ渡し、
- * 返ってきた作業（翻訳の流れを開く・文を渡す・止めた画像を読み直す）を行い、描く中身（[frame]）を作り直す。
- * いつ何を訳すか・何を捨てるか・流れを開き直すかは [CameraSession] が決める。
+ * 返ってきた作業（翻訳のストリームを開く・文を渡す・止めた画像を読み直す）を行い、描く中身（[frame]）を作り直す。
+ * いつ何を訳すか・何を捨てるか・ストリームを開き直すかは [CameraSession] が決める。
  *
  * 状態はすべてメインスレッドで触る。
  */
@@ -88,11 +88,11 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
 
     private val session = CameraSession<BoxColors>(lineOf = { text, box -> textLine(text, box.toRect()) })
 
-    /** 今の翻訳エンジンと、流れに一度に渡しておく数（同時に訳す数の設定から `intakeFor` で決まる）。 */
+    /** 今の翻訳エンジンと、ストリームに一度に渡しておく数（同時に訳す数の設定から `intakeFor` で決まる）。 */
     private var engine: TranslationEngine? = null
     private var intake = 0
 
-    /** 訳す流れと、その結果の購読。 */
+    /** 訳すストリームと、その結果の購読。 */
     private var stream: TranslationStream? = null
     private var streamCollector: Job? = null
 
@@ -150,7 +150,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
 
     init {
         settingsChanged()
-        // 翻訳モデルが読み込まれたら・切り替わったら、知らせる（流れを開き直すかは CameraSession が決める）
+        // 翻訳モデルが読み込まれたら・切り替わったら、知らせる（ストリームを開き直すかは CameraSession が決める）
         scope.launch {
             EngineHolder.awaitEngine(context)
             EngineHolder.state.collect { st ->
@@ -258,7 +258,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
         refresh()
     }
 
-    /** 前の流れを閉じ、[options] で翻訳の流れを開き直す。渡していた文は流れと一緒に消える。 */
+    /** 前のストリームを閉じ、[options] で翻訳のストリームを開き直す。渡していた文はストリームと一緒に消える。 */
     private fun openStream(options: TranslationStream.Options) {
         stream?.close()
         streamCollector?.cancel()
@@ -272,7 +272,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
         val event = when (u) {
             is SegmentUpdate.Partial -> Event.Partial(u.id, u.text)
             is SegmentUpdate.Final -> {
-                Logs.i("カメラ翻訳: 1件を${u.millis}ms${if (u.cached) "（控え）" else ""}")
+                Logs.i("カメラ翻訳: 1件を${u.millis}ms${if (u.cached) "（キャッシュ）" else ""}")
                 Event.Final(u.id, u.text)
             }
             is SegmentUpdate.Failed -> {

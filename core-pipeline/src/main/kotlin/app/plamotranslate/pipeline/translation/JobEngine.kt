@@ -3,7 +3,7 @@ package app.plamotranslate.pipeline.translation
 import app.plamotranslate.llm.TranslationRequest
 
 /**
- * 翻訳のエンジンの差し込み口（docs/設計/翻訳コア.md「翻訳の契約」）。llama.cpp のエンジン（core-llm の
+ * 翻訳のエンジンのインターフェース（docs/設計/翻訳コア.md「翻訳の契約」）。llama.cpp のエンジン（core-llm の
  * `TranslationEngine`）が実装する。中核はこの口に対して書くので、単体テストでは偽のエンジンに差し替えられる。
  */
 interface JobEngine {
@@ -11,8 +11,8 @@ interface JobEngine {
     val parallel: Int
 
     /**
-     * [source] から依頼を受け取り、最大 [slots] 本を同時に訳す。訳し終わった流れには、ほかの流れを待たずに次の依頼を入れる。
-     * [source] に依頼が無くなり、全部の流れが訳し終えたら戻る。戻り値は生成したトークン数の合計。
+     * [source] から依頼を受け取り、最大 [slots] 本を同時に訳す。訳し終わったシーケンスには、ほかのシーケンスを待たずに次の依頼を入れる。
+     * [source] に依頼が無くなり、全部のシーケンスが訳し終えたら戻る。戻り値は生成したトークン数の合計。
      * 呼んだコルーチンが取り消されたら、次のトークンで全部止める。
      */
     suspend fun run(slots: Int, source: JobSource, maxTokens: Int): Int
@@ -29,10 +29,10 @@ interface JobSource {
     /** [id] の訳文の続き。true を返すと、その依頼の生成を止める（打ち切り・取り消し）。 */
     fun onText(id: Int, text: String): Boolean
 
-    /** [id] の生成が終わった（止めた場合も含む）。ここで足した依頼は、空いた流れですぐ訳される。 */
+    /** [id] の生成が終わった（止めた場合も含む）。ここで足した依頼は、空いたシーケンスですぐ訳される。 */
     fun onFinished(id: Int)
 
-    /** [id] は流れ1本分のコンテキストに入らないので訳さなかった。流れを1本にすれば訳せることがある。 */
+    /** [id] はシーケンス1本分のコンテキストに入らないので訳さなかった。シーケンスを1本にすれば訳せることがある。 */
     fun onTooLong(id: Int)
 }
 

@@ -32,9 +32,9 @@ object OutlinedText {
     }
 
     /**
-     * 元の画像の読み取り [primary] と、[whiteness] の画像の読み取り [alternate] を行（まとまり）ごとに比べてまとめる。
-     * - 重なるまとまりがあれば、[score] がはっきり高い方を採る（元の読み取りを優先し、同じくらいなら元を残す）。
-     * - 片方にしかないまとまりは、崩れていなければ足す（白縁の字は元の画像では見つからないことがある）。
+     * 元の画像の読み取り [primary] と、[whiteness] の画像の読み取り [alternate] を行（ブロック）ごとに比べてまとめる。
+     * - 重なるブロックがあれば、[score] がはっきり高い方を採る（元の読み取りを優先し、同じくらいなら元を残す）。
+     * - 片方にしかないブロックは、崩れていなければ足す（白縁の字は元の画像では見つからないことがある）。
      */
     fun pick(primary: List<OcrLine>, alternate: List<OcrLine>): List<OcrLine> {
         val result = primary.toMutableList()
@@ -59,7 +59,7 @@ object OutlinedText {
     }
 
     /**
-     * 読み取りのもっともらしさ。まとまりの文字種の字を1点とし、ほかの文字種の字（ラテン文字の行に混じった漢字など）、
+     * 読み取りのもっともらしさ。ブロックの文字種の字を1点とし、ほかの文字種の字（ラテン文字の行に混じった漢字など）、
      * 崩れた文字列、空白の抜けた長すぎるラテン文字の語（「OuRateckipoeRincreased」）を減点する。
      */
     fun score(block: OcrLine): Int {

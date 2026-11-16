@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- 画面翻訳：浮遊ボタンと訳の表示（作者が設定画面で許可する） -->
+    <!-- 画面翻訳：フローティングボタンと訳の表示（作者が設定画面で許可する） -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- 画面翻訳：画面共有を続けるフォアグラウンドサービス -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

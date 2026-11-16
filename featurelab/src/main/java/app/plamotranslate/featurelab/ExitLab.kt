@@ -12,9 +12,9 @@ import kotlin.system.exitProcess
  * プロセスの終わり方の記録を確かめる（docs/資料/端末の能力.md「プロセスの終わり方」）。不具合の記録の設計の前に、
  * 次を1つずつ確かめる。
  *
- * - `setProcessStateSummary` で預けた印が、次の起動で `ApplicationExitInfo.getProcessStateSummary` から戻るか。
+ * - `setProcessStateSummary` で預けたマークが、次の起動で `ApplicationExitInfo.getProcessStateSummary` から戻るか。
  * - 例外・`killProcess`・`exit(1)`・`exit(0)` で、OS が何（理由・状態・重要度・時刻）を残すか。
- * - 例外の受け口が動いた時刻と、OS の記録の時刻の差。
+ * - 例外のハンドラーが動いた時刻と、OS の記録の時刻の差。
  * - 前のプロセス（同じ UID）が出したログの行を、`logcat -d` で読めるか。
  *
  * PC から `adb shell am start -n app.plamotranslate.featurelab/.MainActivity --es exit <exception|kill|exit1|exit0|none>` で動かし、
@@ -28,11 +28,11 @@ object ExitLab {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val handlerTime = prefs.getLong("handler_time", 0L)
         val handlerPid = prefs.getInt("handler_pid", 0)
-        if (handlerTime != 0L) Lab.log("終わり方: 前回の受け口 pid=$handlerPid 時刻=$handlerTime")
+        if (handlerTime != 0L) Lab.log("終わり方: 前回のハンドラー pid=$handlerPid 時刻=$handlerTime")
         for (e in am.getHistoricalProcessExitReasons(context.packageName, 0, 6)) {
             Lab.log(
-                "終わり方: pid=${e.pid} 時刻=${e.timestamp} 受け口との差=${if (e.pid == handlerPid) e.timestamp - handlerTime else "-"}ms " +
-                    "理由=${e.reason} 状態=${e.status} 重要度=${e.importance} 印=${e.processStateSummary?.decodeToString()} 説明=${e.description}",
+                "終わり方: pid=${e.pid} 時刻=${e.timestamp} ハンドラーとの差=${if (e.pid == handlerPid) e.timestamp - handlerTime else "-"}ms " +
+                    "理由=${e.reason} 状態=${e.status} 重要度=${e.importance} マーク=${e.processStateSummary?.decodeToString()} 説明=${e.description}",
             )
         }
         val previous = previousLogLines()
@@ -40,7 +40,7 @@ object ExitLab {
 
         val id = UUID.randomUUID().toString().take(8)
         am.setProcessStateSummary("lab:$id".toByteArray())
-        Lab.log("終わり方: 印=lab:$id pid=${Process.myPid()} 終え方=$mode")
+        Lab.log("終わり方: マーク=lab:$id pid=${Process.myPid()} 終え方=$mode")
         val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             prefs.edit().putLong("handler_time", System.currentTimeMillis()).putInt("handler_pid", Process.myPid()).commit()

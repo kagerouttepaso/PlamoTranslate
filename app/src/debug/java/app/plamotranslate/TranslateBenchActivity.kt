@@ -67,7 +67,7 @@ class TranslateBenchActivity : Activity() {
             val tgt = Language.entries.first { it.code.startsWith(row[1]) }
             // 段落のある長文は、TSVの1行に「\n」と書いて改行を表す（アプリのテキスト翻訳へ貼ったときと同じ入力にする）
             val text = row[2].replace("\\n", "\n")
-            // 計測の道具なので、機能の翻訳の流れを通さず、エンジンの差し込み口で1文ずつ訳す
+            // 計測の道具なので、機能の翻訳のストリームを通さず、エンジンのインターフェースで1文ずつ訳す
             val one = SingleRequest(TranslationRequest(text, src, tgt, JapaneseForm.POLITE, context = context))
             val start = System.nanoTime()
             val tokens = engine.run(1, one, TranslationStream.DEFAULT_MAX_TOKENS)

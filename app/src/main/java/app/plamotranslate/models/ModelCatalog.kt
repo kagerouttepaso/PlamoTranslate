@@ -64,10 +64,10 @@ enum class TranslationModel(val label: String, val note: String, val quality: In
     fun isPresent(context: Context): Boolean = file.file(context).length() == file.size
 
     /**
-     * 訳の控えで使う、訳したモデル（docs/設計/翻訳コア.md「控え」）。識別子は重みの SHA-256 の先頭、
-     * 訳の確かさ（[quality]、大きいほど確か）は端末のデータベースに残るので、並び順でなく値で持つ。控えは確かなモデルの訳を優先する。
+     * 翻訳のキャッシュで使う、訳したモデル（docs/設計/翻訳コア.md「キャッシュ」）。識別子は重みの SHA-256 の先頭、
+     * 訳の確かさ（[quality]、大きいほど確か）は端末のデータベースに残るので、並び順でなく値で持つ。キャッシュは確かなモデルの訳を優先する。
      * モデルを足すときは既存の値を変えずに値を割り当てる。既存の値を変えるなら、残った訳の確かさが食い違うので
-     * SqlitePersistentCache の DB_VERSION を上げて控えを作り直す。
+     * SqlitePersistentCache の DB_VERSION を上げてキャッシュを作り直す。
      */
     val origin: ModelOrigin get() = ModelOrigin(file.sha256.take(16), quality)
 }

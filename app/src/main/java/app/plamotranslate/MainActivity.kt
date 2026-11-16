@@ -221,8 +221,8 @@ private fun HomeScreen(onToggleScreenTranslate: () -> Unit) {
 }
 
 /**
- * 上の帯：アプリのアイコンを印にし、名前を「Mocking」と主の色の「word」に分けて組む。説明の副題は付けない。
- * 右は今の翻訳モデルの状態と設定の入口。アイコンは ic_launcher の絵をそのまま使い、アイコンを変えれば印も変わる。
+ * 上の帯：アプリのアイコンをロゴにし、名前を「Mocking」とプライマリカラーの「word」に分けて組む。説明の副題は付けない。
+ * 右は今の翻訳モデルの状態と設定の入口。アイコンは ic_launcher の絵をそのまま使い、アイコンを変えればロゴも変わる。
  */
 @Composable
 private fun BrandHeader(modelLabel: String, onOpenSettings: () -> Unit) {

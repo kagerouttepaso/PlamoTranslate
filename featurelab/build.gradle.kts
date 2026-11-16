@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "app.plamotranslate.featurelab"
-        minSdk = 34  // ユーザー補助の窓単位の撮影（takeScreenshotOfWindow）がAPI 34から
+        minSdk = 34  // ユーザー補助のウィンドウ単位の撮影（takeScreenshotOfWindow）がAPI 34から
         targetSdk = 36
         versionCode = 1
         versionName = "0.1"

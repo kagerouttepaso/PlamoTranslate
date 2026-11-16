@@ -25,13 +25,13 @@ object ScreenSession {
         data class Recognizing(val session: Int) : Phase
         data class Translating(val session: Int, val total: Int, val done: Int) : Phase
 
-        /** 訳を出している（訳す文字が無かったときは、上部の知らせだけを出している）。 */
+        /** 訳を出している（訳す文字が無かったときは、上部の表示だけを出している）。 */
         data class Showing(val session: Int) : Phase
     }
 
     data class State(
         val trigger: Trigger,
-        /** 自動で訳すのを動かしているか（浮遊ボタンで止められる）。 */
+        /** 自動で訳すのを動かしているか（フローティングボタンで止められる）。 */
         val autoOn: Boolean,
         val phase: Phase,
         val menuOpen: Boolean = false,
@@ -56,7 +56,7 @@ object ScreenSession {
 
     /** 起きたこと。 */
     sealed interface SessionEvent {
-        /** 浮遊ボタンのタップ。 */
+        /** フローティングボタンのタップ。 */
         data object ButtonTapped : SessionEvent
         data class TriggerChanged(val trigger: Trigger) : SessionEvent
 
@@ -69,10 +69,10 @@ object ScreenSession {
         data class SegmentDone(val session: Int) : SessionEvent
         data class TranslationFailed(val session: Int, val message: String) : SessionEvent
 
-        /** 判定B・合図：訳している・出している訳が無効になった。 */
+        /** 判定B・イベント：訳している・出している訳が無効になった。 */
         data class Invalidated(val reason: String) : SessionEvent
 
-        /** ほかのアプリの画面に触れた（自分の窓への操作は除いてある）。 */
+        /** ほかのアプリの画面に触れた（自分のウィンドウへの操作は除いてある）。 */
         data object OutsideTouched : SessionEvent
         data object MenuOpened : SessionEvent
         data object MenuClosed : SessionEvent
@@ -81,7 +81,7 @@ object ScreenSession {
         /** 翻訳モデルを切り替えた。 */
         data object ModelChanged : SessionEvent
 
-        /** 上部の知らせをタップした。 */
+        /** 上部の表示をタップした。 */
         data object StatusTapped : SessionEvent
     }
 
@@ -115,10 +115,10 @@ object ScreenSession {
         /** 判定Aを最初から（待ちに入る）。 */
         data object ResetStart : Effect
 
-        /** 浮遊ボタンの見た目（自動で訳すのを止めているときは薄く）。 */
+        /** フローティングボタンの見た目（自動で訳すのを止めているときは薄く）。 */
         data class ButtonActive(val active: Boolean) : Effect
 
-        /** 短い知らせ（トースト）。 */
+        /** 短いメッセージ（トースト）。 */
         data class Notice(val text: String) : Effect
     }
 

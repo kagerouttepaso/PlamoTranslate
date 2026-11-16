@@ -2,7 +2,7 @@ package app.plamotranslate.pipeline.screen
 
 /**
  * 開始の判定A（docs/設計/画面翻訳.md「判定器」）：「画面が落ち着いたので訳し始めてよいか」。自動で訳すときの待ちの間だけ使う。
- * 雑音の除き方（中央値・動いたます目の除外）はここだけで使い、有効性の判定Bには渡さない。
+ * 雑音の除き方（中央値・動いたセルの除外）はここだけで使い、有効性の判定Bには渡さない。
  */
 class StartJudge(private val p: StartParams) {
     private val recent = ArrayDeque<Thumb>()
@@ -19,8 +19,8 @@ class StartJudge(private val p: StartParams) {
     }
 
     /**
-     * 新しく届いた格子 [thumb]（届いていなければ null：画面が止まっている印）を入れ、訳し始めてよいかを返す。
-     * [own] は比べないます目（自分の浮遊ボタンなど）。
+     * 新しく届いたグリッド [thumb]（届いていなければ null：画面が止まっていることを示す）を入れ、訳し始めてよいかを返す。
+     * [own] は比べないセル（自分のフローティングボタンなど）。
      */
     fun feed(thumb: Thumb?, now: Long, own: BooleanArray?): Boolean {
         if (thumb != null) {
@@ -42,21 +42,21 @@ class StartJudge(private val p: StartParams) {
 sealed interface Validity {
     data object Valid : Validity
 
-    /** 無効になった。[reason] は理由（ログ用）、[amount] は変わったます目の割合。 */
+    /** 無効になった。[reason] は理由（ログ用）、[amount] は変わったセルの割合。 */
     data class Invalid(val reason: String, val amount: Float) : Validity
 }
 
 /**
  * 有効性の判定B（docs/設計/画面翻訳.md「判定器」）：「訳した原文が、まだ同じ場所にあるか」。訳している間と表示している間に使う。
- * 基準は、訳すときに撮った画面（自分の表示を隠して撮ったもの）の格子。新しく届いた格子（自分の表示が写っている）と、
+ * 基準は、訳すときに撮った画面（自分の表示を隠して撮ったもの）のグリッド。新しく届いたグリッド（自分の表示が写っている）と、
  * 自分の表示の外だけを比べる。
  *
  * 1. 画面が丸ごと切り替わった：中央値を通さない1枚の、自分の表示の外の変化が [ValidityParams.switch] 以上。
  * 2. 原文が動いた・消えた：訳の枠の外周（原文のすぐ周り）の変化が [ValidityParams.ring] 以上（null なら見ない）。
  * 3. 画面が変わった（自動で訳すときだけ）：自分の表示の外の変化が [ValidityParams.outside] 以上（null なら見ない）。
  *
- * 2026-11-12までは、開始の判定Aの雑音の除き方（動いたます目の除外）がここにも効き、画面の8割を見ないまま判定して、
- * Discordで戻ってもチャンネル一覧の上に前の訳が残った。ここでは動いたます目を外さない。
+ * 2026-11-12までは、開始の判定Aの雑音の除き方（動いたセルの除外）がここにも効き、画面の8割を見ないまま判定して、
+ * Discordで戻ってもチャンネル一覧の上に前の訳が残った。ここでは動いたセルを外さない。
  */
 class ValidityJudge(private val p: ValidityParams) {
     private var reference: Thumb? = null
@@ -77,7 +77,7 @@ class ValidityJudge(private val p: ValidityParams) {
     val active: Boolean get() = reference != null
 
     /**
-     * 新しく届いた格子 [raw] で判定する。[boxes] は訳の枠（まだ出していなければ空）、[own] は自分の表示全部（訳の枠・上部の表示・浮遊ボタン）。
+     * 新しく届いたグリッド [raw] で判定する。[boxes] は訳の枠（まだ出していなければ空）、[own] は自分の表示全部（訳の枠・上部の表示・フローティングボタン）。
      * [watchOutside] は規則3を使うか（自動で訳すとき）。
      */
     fun feed(raw: Thumb, boxes: List<Box>, own: List<Box>, watchOutside: Boolean): Validity {
@@ -93,7 +93,7 @@ class ValidityJudge(private val p: ValidityParams) {
         val ringLimit = p.ring
         if (ringLimit != null && boxes.isNotEmpty()) {
             val ring = ScreenChange.ring(t, boxes, p.ringMargin)
-            // 外周のうち、自分の表示（上部の表示・浮遊ボタン・ほかの訳の枠）にかかるます目は比べない
+            // 外周のうち、自分の表示（上部の表示・フローティングボタン・ほかの訳の枠）にかかるセルは比べない
             val compare = BooleanArray(ring.size) { !ring[it] || ownMask[it] }
             if (ScreenChange.counted(compare) > 0) {
                 val moved = ScreenChange.changedFraction(ref, t, compare)
@@ -108,7 +108,7 @@ class ValidityJudge(private val p: ValidityParams) {
         return Validity.Valid
     }
 
-    /** 訳の枠を隠して撮った格子 [clean] で、枠の下（原文）が変わったかを見る（触れたときにのぞく）。 */
+    /** 訳の枠を隠して撮ったグリッド [clean] で、枠の下（原文）が変わったかを見る（触れたときにのぞく）。 */
     fun peek(clean: Thumb, boxes: List<Box>): Validity {
         val ref = reference ?: return Validity.Valid
         if (boxes.isEmpty()) return Validity.Valid

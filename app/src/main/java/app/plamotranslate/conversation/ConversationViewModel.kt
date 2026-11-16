@@ -90,7 +90,7 @@ data class ConversationUiState(
 
 /**
  * 会話翻訳の外とつなぐ部分（docs/設計/会話翻訳.md「全体の流れ」）。マイクの音声を音声認識のスレッドで [SpeechEngine] に流し、
- * 届いた出来事を中核の [ConversationSession] に渡して、返ってきた作業（確定訳・途中訳・途中訳の取り消し）を翻訳の流れで行う。
+ * 届いた出来事を中核の [ConversationSession] に渡して、返ってきた作業（確定訳・途中訳・途中訳の取り消し）を翻訳のストリームで行う。
  * 何をいつ訳すか、方向、カードと聞き取り中の表示は [ConversationSession] が決める。翻訳モデルは [EngineHolder] のものを使う。
  * [ConversationSession] は画面のスレッドだけから呼ぶ。
  */
@@ -368,8 +368,8 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         try {
             if (model.value !is ModelState.Ready) return
             val start = System.nanoTime()
-            // 翻訳の流れを1回ごとに開き、終わったら閉じる（docs/設計/翻訳コア.md「翻訳の契約」）。
-            // 確定訳が来たら制御がこのコルーチンを取り消すので、流れも閉じて途中訳の生成を止める
+            // 翻訳のストリームを1回ごとに開き、終わったら閉じる（docs/設計/翻訳コア.md「翻訳の契約」）。
+            // 確定訳が来たら制御がこのコルーチンを取り消すので、ストリームも閉じて途中訳の生成を止める
             val update = coroutineScope {
                 val stream = Translations.open(
                     this, app, TranslationStream.Options(direction.source, direction.target ?: return@coroutineScope null, maxTokens = PARTIAL_MAX_TOKENS),

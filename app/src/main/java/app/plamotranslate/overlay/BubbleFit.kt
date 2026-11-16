@@ -5,12 +5,12 @@ import android.graphics.Rect
 import kotlin.math.sqrt
 
 /**
- * 訳の枠を、文字を囲む吹き出しの内側いっぱいに広げる（2026-11-12、作者の採用。浮遊ボタンの長押しで切り替える）。
+ * 訳の枠を、文字を囲む吹き出しの内側いっぱいに広げる（2026-11-12、作者の採用。フローティングボタンの長押しで切り替える）。
  * 漫画の小さな文字は、元の文字の範囲に訳を収めると7sp前後まで縮んで読みにくかった。吹き出しまで広げると大きな字で描け、
  * 元の文字もしっかり覆える。
  *
- * 文字の周りの背景色の範囲を、格子の上で塗りつぶして求める。Discordやゲームの画面のように背景色が一面に続くと、
- * 範囲が探す窓の端まで届くので「開いている」とみなし、広げない（枠が投稿欄全体に広がって名前やほかの投稿を覆わないように）。
+ * 文字の周りの背景色の範囲を、グリッドの上で塗りつぶして求める。Discordやゲームの画面のように背景色が一面に続くと、
+ * 範囲が探索範囲の端まで届くので「開いている」とみなし、広げない（枠が投稿欄全体に広がって名前やほかの投稿を覆わないように）。
  * 吹き出しの線などで閉じていて、元の枠の [MAX_GROWTH] 倍以内に収まるときだけ広げる。
  */
 internal object BubbleFit {
@@ -25,12 +25,12 @@ internal object BubbleFit {
 
     /**
      * [rect]（文字の範囲）の周りの [background] 色の範囲が閉じていれば、その内側の範囲を返す。開いていれば null。
-     * [search] は探す窓の広さ（元の枠の長い辺に対する割合）。
+     * [search] は探索範囲の広さ（元の枠の長い辺に対する割合）。
      */
     fun expand(bitmap: Bitmap, rect: Rect, background: Int, search: Float = 0.8f): Rect? {
         val reach = (maxOf(rect.width(), rect.height()) * search).toInt().coerceAtLeast(8)
         val window = Rect(rect).apply { inset(-reach, -reach) }
-        // 窓が画面の外へはみ出す向きは、画面の端を壁とせず「開いている」とみなすため、はみ出したまま扱う
+        // 探索範囲が画面の外へはみ出す向きは、画面の端を壁とせず「開いている」とみなすため、はみ出したまま扱う
         val step = (minOf(rect.width(), rect.height()) / 10).coerceIn(2, 6)
         val cols = window.width() / step
         val rows = window.height() / step
@@ -54,8 +54,8 @@ internal object BubbleFit {
     }
 
     /**
-     * 文字の範囲のます目から始め、背景色のます目へ広げる。窓の端（画面の外を含む）に届いたら開いているとして null。
-     * 届いたます目を true にして返す。
+     * 文字の範囲のセルから始め、背景色のセルへ広げる。探索範囲の端（画面の外を含む）に届いたら開いているとして null。
+     * 届いたセルを true にして返す。
      */
     fun fill(cols: Int, rows: Int, px: IntArray, background: Int, rect: Rect, window: Rect, step: Int): BooleanArray? {
         val seen = BooleanArray(cols * rows)
@@ -90,7 +90,7 @@ internal object BubbleFit {
 
     /**
      * 届いた範囲（[inside]）に収まる長方形の（左の列, 上の行, 右の列, 下の行）。届いた範囲を囲む長方形から始め、
-     * 辺のます目に範囲の外があれば、その辺を内側へ1ますずつ縮める。楕円の吹き出しで、外接する長方形まで広げると
+     * 辺のセルに範囲の外があれば、その辺を内側へ1セルずつ縮める。楕円の吹き出しで、外接する長方形まで広げると
      * 四隅が線の外へはみ出し、訳の字が線にかかった（2026-11-12）。文字の範囲（[rect]）より内側には縮めない。
      */
     private fun inscribed(inside: BooleanArray, cols: Int, rows: Int, rect: Rect, window: Rect, step: Int): IntArray {
@@ -98,7 +98,7 @@ internal object BubbleFit {
         for (i in inside.indices) if (inside[i]) {
             c0 = minOf(c0, i % cols); r0 = minOf(r0, i / cols); c1 = maxOf(c1, i % cols); r1 = maxOf(r1, i / cols)
         }
-        // 文字の範囲が入るます目（これより内側には縮めない）
+        // 文字の範囲が入るセル（これより内側には縮めない）
         val tc0 = ((rect.left - window.left) / step).coerceIn(0, cols - 1)
         val tr0 = ((rect.top - window.top) / step).coerceIn(0, rows - 1)
         val tc1 = ((rect.right - 1 - window.left) / step).coerceIn(0, cols - 1)

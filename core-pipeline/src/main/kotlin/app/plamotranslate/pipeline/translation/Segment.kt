@@ -1,6 +1,6 @@
 package app.plamotranslate.pipeline.translation
 
-/** 呼ぶ側が訳を頼む1つの文（画面翻訳の1ブロック、カメラ翻訳の1段落、会話の1発話）。[id] は流れの中で一意に呼ぶ側が決める。 */
+/** 呼ぶ側が訳を頼む1つの文（画面翻訳の1ブロック、カメラ翻訳の1段落、会話の1発話）。[id] はストリームの中で一意に呼ぶ側が決める。 */
 data class Segment(val id: Long, val text: String)
 
 /** [TranslationStream] が流す、文ごとの結果。 */
@@ -11,8 +11,8 @@ sealed interface SegmentUpdate {
     data class Partial(override val id: Long, val text: String) : SegmentUpdate
 
     /**
-     * 確定した訳。[cached] は控えから返したか。[millis] は頼んでから確定までの時間、[tokens] はおおよその生成トークン数
-     * （控えから返したときは0）。
+     * 確定した訳。[cached] はキャッシュから返したか。[millis] は頼んでから確定までの時間、[tokens] はおおよその生成トークン数
+     * （キャッシュから返したときは0）。
      */
     data class Final(
         override val id: Long,

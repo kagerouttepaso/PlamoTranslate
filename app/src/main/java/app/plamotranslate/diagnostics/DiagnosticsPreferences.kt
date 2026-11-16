@@ -2,7 +2,7 @@ package app.plamotranslate.diagnostics
 
 import android.content.Context
 
-/** 不具合の記録の設定と控え（SharedPreferences の `diagnostics`）。 */
+/** 不具合の記録の設定と、記録の取り込みの状態（SharedPreferences の `diagnostics`）。 */
 class DiagnosticsPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("diagnostics", Context.MODE_PRIVATE)
 

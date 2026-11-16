@@ -33,10 +33,10 @@ data class CameraBox<L>(val box: Box, val source: String, val look: L?, val tran
 
 /**
  * カメラ翻訳の制御（docs/設計/カメラ翻訳.md「制御」）。出来事（[Event]）を受け取り、状態を進めて、外でする作業（[Effect]）を返す
- * [handle] の1か所で、いつ何を訳すか・何を捨てるか・流れを開き直すかを決める。描く中身は [boxes] で読む。
+ * [handle] の1か所で、いつ何を訳すか・何を捨てるか・ストリームを開き直すかを決める。描く中身は [boxes] で読む。
  * 追った行の読み取りの履歴を持つので、状態はこの中に持つ（画面翻訳の `ScreenSession.reduce` と同じ考え方で、形だけ違う）。
  *
- * 訳す計画は「空いた分だけ、その時点で選んで渡す」（[dispatch]）。翻訳の流れに渡しておく文を、流れが無駄なく訳せる数
+ * 訳す計画は「空いた分だけ、その時点で選んで渡す」（[dispatch]）。翻訳のストリームに渡しておく文を、ストリームが無駄なく訳せる数
  * （[Event.EngineChanged] の intake。`intakeFor`）までにとどめ、訳が1件確定するたびに、その時点で見えている段落から
  * いちばん先に訳すべきものを選んで渡す。深い待ち行列を作らないので、カメラを動かしても一時停止しても、次に渡す文が変わるだけで、
  * 並べ替えも取り消しも要らない（docs/判断/2026-11-13_カメラ翻訳は空いた分だけその時点で選んで訳す.md）。
@@ -49,7 +49,7 @@ class CameraSession<L>(
 ) {
     /** 訳し方を変える設定。どれかが変わると前の訳は使わない。 */
     data class Settings(val source: Language?, val target: Language, val table: Boolean) {
-        /** 翻訳の流れの設定。表・メニューのモードでは、短い語の意味を決める手がかりに背景を渡す。 */
+        /** 翻訳のストリームの設定。表・メニューのモードでは、短い語の意味を決める手がかりに背景を渡す。 */
         val options: TranslationStream.Options
             get() = TranslationStream.Options(source, target, context = if (table) TABLE_CONTEXT else null)
     }
@@ -66,13 +66,13 @@ class CameraSession<L>(
         /** 訳し方の設定（原文の言語・訳す先・モード）。最初の1回も送る。 */
         data class SettingsChanged(val settings: Settings) : Event<Nothing>
 
-        /** 翻訳モデルのエンジンが使えるようになった・切り替わった。[intake] は流れに一度に渡しておく数（`intakeFor`）。 */
+        /** 翻訳モデルのエンジンが使えるようになった・切り替わった。[intake] はストリームに一度に渡しておく数（`intakeFor`）。 */
         data class EngineChanged(val intake: Int) : Event<Nothing>
 
-        /** 同じエンジンのまま、流れに一度に渡しておく数が変わった（同時に訳す数の設定）。 */
+        /** 同じエンジンのまま、ストリームに一度に渡しておく数が変わった（同時に訳す数の設定）。 */
         data class IntakeChanged(val intake: Int) : Event<Nothing>
 
-        /** [Effect.OpenStream] で頼んだ流れを開いた。 */
+        /** [Effect.OpenStream] で頼んだストリームを開いた。 */
         data object StreamOpened : Event<Nothing>
         data class Partial(val id: Long, val text: String) : Event<Nothing>
         data class Final(val id: Long, val text: String) : Event<Nothing>
@@ -80,10 +80,10 @@ class CameraSession<L>(
     }
 
     sealed interface Effect {
-        /** 前の流れを閉じ、[options] で翻訳の流れを開き直す。開いたら [Event.StreamOpened] を返す。 */
+        /** 前のストリームを閉じ、[options] で翻訳のストリームを開き直す。開いたら [Event.StreamOpened] を返す。 */
         data class OpenStream(val options: TranslationStream.Options) : Effect
 
-        /** 翻訳の流れに文を渡す。 */
+        /** 翻訳のストリームに文を渡す。 */
         data class Submit(val segments: List<Segment>) : Effect
 
         /** 止めた画像を1回読み直す（一時停止中に原文の言語を変えたとき）。読んだら [Event.Read] の still で返す。 */
@@ -118,7 +118,7 @@ class CameraSession<L>(
     /** 段落の番号 → 最後に確定した訳。原文が変わって訳し直している間も、これを出し続ける。 */
     private val lastTranslation = HashMap<Long, String>()
 
-    /** 流れに渡して、まだ確定していない文：文の番号 → 依頼。数は [intake] までにとどめる。 */
+    /** ストリームに渡して、まだ確定していない文：文の番号 → 依頼。数は [intake] までにとどめる。 */
     private class Request(val objectId: Long, val key: String)
     private val inFlight = LinkedHashMap<Long, Request>()
 
@@ -227,7 +227,7 @@ class CameraSession<L>(
     /** 見えている段落のうち、まだ訳の無いものの数。 */
     fun waitingOnScreen(): Int = paragraphs.count { onScreen(it.box) && shownTranslation(it) == null }
 
-    /** 流れに渡して、まだ確定していない文の数。 */
+    /** ストリームに渡して、まだ確定していない文の数。 */
     val inFlightCount: Int get() = inFlight.size
 
     /** 渡した文の数と、そのうち訳のある段落の訳し直しの数（原文が変わったため）。区切りと原文の安定を実機で比べるため。 */
@@ -244,7 +244,7 @@ class CameraSession<L>(
 
     /**
      * 空いた分だけ、その時点でいちばん先に訳すべき段落を選んで渡す（[TranslationPlan.choose]）。
-     * 見えている段落を、読み取りがそろったものを先に選び、空きが残れば、そろっていない段落も渡す。流れが空いているのに
+     * 見えている段落を、読み取りがそろったものを先に選び、空きが残れば、そろっていない段落も渡す。ストリームが空いているのに
      * 枠が埋まらないままにしないため（2026-11-13、作者の指摘「読み揺れが収まらない段落の訳が、いつまでも出ない」）。
      * 同じ段落は一度に1件しか渡さないので、読み揺れのたびに頼み直しはしない。見えていない段落は渡さない。
      */
@@ -339,7 +339,7 @@ class CameraSession<L>(
         inFlight.clear()
     }
 
-    /** 流れを開き直す（渡していた文は流れと一緒に消える）。開くまでは渡さない。 */
+    /** ストリームを開き直す（渡していた文はストリームと一緒に消える）。開くまでは渡さない。 */
     private fun reopen(effects: MutableList<Effect>) {
         streamReady = false
         inFlight.clear()

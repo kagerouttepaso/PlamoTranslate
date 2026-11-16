@@ -35,7 +35,7 @@ class TranslationPreferences(context: Context) {
         }
 
     /**
-     * 翻訳の流れが同時に訳す片の数（4機能すべてに効く。docs/設計/翻訳コア.md「複数の文を同時に訳す」）。
+     * 翻訳のストリームが同時に訳すチャンクの数（4機能すべてに効く。docs/設計/翻訳コア.md「複数の文を同時に訳す」）。
      * 読み直さずに効く（[EngineHolder.setParallel]）。
      */
     var parallel: Int

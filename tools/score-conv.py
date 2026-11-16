@@ -3,18 +3,18 @@
 使い方:
     python tools/score-conv.py <正解.truth.txt> <ログ.txt> [<ログ.txt> ...]
 
-- 正解：1行が1つのまとまり（カードにしてよい単位）。「話した人<TAB>文」。# で始まる行と「（?）」は無視する。
-  まとまりの中の句点・疑問符は文の終わりとして扱う（まとまりの中で文の終わりで切るのは許す）。
+- 正解：1行が1つの単位（カードにしてよい単位）。「話した人<TAB>文」。# で始まる行と「（?）」は無視する。
+  単位の中の句点・疑問符は文の終わりとして扱う（単位の中で文の終わりで切るのは許す）。
 - ログ：デバッグ版の logcat（タグ PlamoTranslate）。「会話の認識: 区切り（理由）始め〜終わり秒: 確定 [言語] 文」の行を読む。
   録音を `--es wav` で流し直したときのもの。
 
 カードの文と正解をつないだ文字列どうしを、文字（文字と数字だけ）で並べ、カードの切れ目が正解のどこに当たるかを求める。
 正解に区切りを合わせ込むのが目標ではない。目標は細切れにしないこと：自動の判断（言語の交代・長い発話）で文の途中を
-切らないことと、断片のカードを作らないこと。話した人が間を置いて（話し終わり）切れたのは許し、まとまりが1枚になるのも
+切らないことと、断片のカードを作らないこと。話した人が間を置いて（話し終わり）切れたのは許し、単位が1枚になるのも
 読める長さに収まれば許す。
 数えるもの：
-- 切れ目：まとまりの切れ目で切った／まとまりの中の文の終わりで切った／文の途中で切った
-- まとまりの切れ目のうち、切らなかったもの（2つのまとまりが1枚になった）
+- 切れ目：単位の切れ目で切った／単位の中の文の終わりで切った／文の途中で切った
+- 単位の切れ目のうち、切らなかったもの（2つの単位が1枚になった）
 - 長すぎるカード（[MAX_CHARS] 文字より多い）、断片のカード（[MIN_CHARS] 文字より少ない）
 - 文字の誤りの割合（正解に対する編集距離）、切れ目の近くで消えた文字
 
@@ -150,13 +150,13 @@ def score(truth_path, log_path):
         return min((abs(p - e) for e in ends), default=10 ** 9) <= TOLERANCE
 
     boundaries = [pos[e] for e in card_ends[:-1]]
-    kinds = {"まとまりの切れ目": 0, "まとまりの中の文の終わり": 0, "読点（息継ぎ）": 0, "文の途中": 0}
+    kinds = {"単位の切れ目": 0, "単位の中の文の終わり": 0, "読点（息継ぎ）": 0, "文の途中": 0}
     mid = []
     for k, p in enumerate(boundaries):
         if near(p, unit_ends[:-1]):
-            kinds["まとまりの切れ目"] += 1
+            kinds["単位の切れ目"] += 1
         elif near(p, sentence_ends):
-            kinds["まとまりの中の文の終わり"] += 1
+            kinds["単位の中の文の終わり"] += 1
         elif near(p, clause_ends):
             kinds["読点（息継ぎ）"] += 1
         else:
@@ -166,7 +166,7 @@ def score(truth_path, log_path):
     missed = [e for e in unit_ends[:-1] if not near(e, boundaries)]
     lost_near = sum(1 for p in boundaries for j in range(max(0, p - TOLERANCE), min(len(kept), p + TOLERANCE)) if not kept[j])
     too_long = [c for c in cards if c["len"] > MAX_CHARS]
-    # カードが正解のいくつのまとまりにまたがるか（3つ以上は、1〜2文の目標を超える）
+    # カードが正解のいくつの単位にまたがるか（3つ以上は、1〜2文の目標を超える）
     spans = [0] + boundaries + [len(t_chars)]
     wide = 0
     for k in range(len(spans) - 1):
@@ -180,14 +180,14 @@ def score(truth_path, log_path):
         reasons[r] = reasons.get(r, 0) + 1
 
     print(f"== {log_path}")
-    print(f"カード {len(cards)} 枚（正解のまとまり {len(units)}）、区切りの理由 {reasons}")
+    print(f"カード {len(cards)} 枚（正解の単位 {len(units)}）、区切りの理由 {reasons}")
     print(f"切れ目 {len(boundaries)}：" + "、".join(f"{k} {v}" for k, v in kinds.items()))
     # 話した人が無音で間を置いた（話し終わり）・ボタンで区切ったのは、話した人の区切りとして許す。目標は、
     # 自動の判断（言語の交代・長い発話）で文の途中を切らないことと、断片を作らないこと（正解に合わせ込むことではない）
     own = sum(1 for line in mid if not line.startswith(("話し終わり", "手で区切り")))
     print(f"自動の判断で文の途中を切った {own}（話した人の間・ボタンによる {len(mid) - own} は許す）")
-    print(f"まとまりの切れ目で切らなかった {len(missed)}（2つのまとまりが1枚になった）")
-    print(f"長すぎるカード（{MAX_CHARS}文字超） {len(too_long)}、3つ以上のまとまりにまたがるカード {wide}、断片のカード（{MIN_CHARS}文字未満） {len(fragments)}")
+    print(f"単位の切れ目で切らなかった {len(missed)}（2つの単位が1枚になった）")
+    print(f"長すぎるカード（{MAX_CHARS}文字超） {len(too_long)}、3つ以上の単位にまたがるカード {wide}、断片のカード（{MIN_CHARS}文字未満） {len(fragments)}")
     lens = sorted(c["len"] for c in cards)
     print(f"カードの長さ（文字） 中央 {lens[len(lens) // 2] if lens else 0}、最大 {lens[-1] if lens else 0}")
     print(f"文字の誤りの割合 {distance / max(1, len(t_chars)):.1%}、切れ目の近くで消えた文字 {lost_near}")

@@ -14,8 +14,8 @@ import java.io.OutputStream
  * ログと不具合の記録の組み立て（docs/設計/アーキテクチャ.md「ログ」「不具合の記録」）。ログと記録は端末の中にだけ置き、
  * 本人が設定から書き出す。どこにも送らない。
  *
- * 部品は、プロセスの印（[ProcessMarks]）、ログの書き先（[LogcatSink]・[ProcessLogFile]。出口は core-log の [Logs]）、
- * 記録の保存（[FileCrashJournal]。差し込み口は中核の [CrashJournal]）、例外の受け口（[CrashRecorder]）、
+ * 部品は、プロセスのマーク（[ProcessMarks]）、ログの出力先（[LogcatSink]・[ProcessLogFile]。ロガーは core-log の [Logs]）、
+ * 記録の保存（[FileCrashJournal]。インターフェースは中核の [CrashJournal]）、例外のハンドラー（[CrashRecorder]）、
  * OS の終わり方の取り込み（[ExitIntake]）に分かれ、ここでつなぐ。
  */
 object Diagnostics {
@@ -34,7 +34,7 @@ object Diagnostics {
     }
 
     /**
-     * プロセスが始まるときに1度呼ぶ（`App.onCreate`）。プロセスの印を預け、ログの書き先を差し、例外の受け口を置き、
+     * プロセスが始まるときに1度呼ぶ（`App.onCreate`）。プロセスのマークを預け、ログの出力先を差し込み、例外のハンドラーを置き、
      * 前回までの終わり方を取り込む。調べるための仕組みがアプリを止めないよう、ここでの失敗はアプリを止めない。
      */
     fun install(context: Context) {
@@ -50,7 +50,7 @@ object Diagnostics {
             val file = ProcessLogFile(logDir, key).also { processLog = it }
             Logs.install(listOf(LogcatSink, file), userText = userText)
         }.onFailure { Logs.w("ログのファイルを用意できませんでした", it) }
-        // 記録の部品の失敗では、ログの書き先を外さない
+        // 記録の部品の失敗では、ログの出力先を外さない
         runCatching {
             val journal = journal(app)
             CrashRecorder(journal, DeviceInfo.describe(app)).install()

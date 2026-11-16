@@ -3,22 +3,22 @@
   設計の点検（docs/設計/アーキテクチャ.md「設計の原則」）。コミットの前とリリースの前に回す。
 
 .DESCRIPTION
-  設計の幹のうち、機械で確かめられる約束と、構造が崩れ始めた合図を見る。
+  設計の幹のうち、機械で確かめられる約束と、構造が崩れ始めた兆候を見る。
   大きな作り替えを要らなくするために、崩れを小さいうちに見つけるのが目的。
   誤り（終了コード1）：設計の約束に反する
     - 中核（core-pipeline）が Android や端末の部品に依存する
     - SingleRequest（翻訳の契約を通らずにエンジンを使う）を、許した場所の外で使う
     - llama.cpp の JNI（LlamaNative）を core-llm の外で使う
-    - ログの出口（core-log の Logs）を通さずに logcat へ書く
-  注意（終了コードは変えない）：構造を見直す合図
-    - Kotlin のファイルが大きい（責務が集まり始めた合図）
-    - 直近のコミットで何度も変わったファイル（局所修正が重なっている合図）
+    - ロガー（core-log の Logs）を通さずに logcat へ書く
+  注意（終了コードは変えない）：構造を見直す兆候
+    - Kotlin のファイルが大きい（責務が集まり始めた兆候）
+    - 直近のコミットで何度も変わったファイル（局所修正が重なっている兆候）
   約束や許す場所を変えるときは、先に docs/設計/ を直し、ここを合わせる。
 #>
 param(
     # 大きいとみなす行数
     [int]$MaxLines = 500,
-    # 直近 $Window 回のコミットのうち $HotCount 回以上変わったファイルを合図にする
+    # 直近 $Window 回のコミットのうち $HotCount 回以上変わったファイルを兆候にする
     [int]$Window = 20,
     [int]$HotCount = 5
 )
@@ -61,28 +61,28 @@ foreach ($hit in Grep @('-E', '\bLlamaNative\b', '--', '*.kt', ':(exclude)core-l
     $errors.Add("core-llm の外で JNI を使っている：$hit")
 }
 
-# 約束4：ログはすべて出口（core-log の Logs）を通す。logcat へ直接書いてよいのは、書き先の実装とネイティブの逃げ道だけ
+# 約束4：ログはすべてロガー（core-log の Logs）を通す。logcat へ直接書いてよいのは、出力先の実装とネイティブの逃げ道だけ
 foreach ($hit in Grep @('-E', 'android\.util\.Log|Log\.[diwev]\(', '--', 'app/src', ':(glob)core-*/src/**', ':(exclude)app/src/main/java/app/plamotranslate/diagnostics/LogcatSink.kt')) {
-    $errors.Add("ログの出口（Logs）を通さずに logcat へ書いている：$hit")
+    $errors.Add("ロガー（Logs）を通さずに logcat へ書いている：$hit")
 }
 foreach ($hit in Grep @('-E', '__android_log_(print|write|vprint)', '--', '*.cpp', '*.c', '*.h', ':(exclude)third_party')) {
     $file = ($hit -split ':', 2)[0]
     $line = ($hit -split ':', 3)[2]
-    # 許すのは plamo_llm.cpp の emit_log の逃げ道（印のコメントを付けた行）だけ
+    # 許すのは plamo_llm.cpp の emit_log の逃げ道（「// logcat への逃げ道」のコメントを付けた行）だけ
     if ($file -ne 'core-llm/src/main/cpp/plamo_llm.cpp' -or $line -notmatch '// logcat への逃げ道') {
-        $errors.Add("ネイティブのログが出口を通っていない：$hit")
+        $errors.Add("ネイティブのログがロガーを通っていない：$hit")
     }
 }
 
-# 合図1：大きいファイル
+# 兆候1：大きいファイル
 foreach ($f in git -C $root -c core.quotepath=false ls-files '*.kt') {
     # 作業ツリーで消して、まだ index に残っているファイルは飛ばす
     if (-not (Test-Path -LiteralPath (Join-Path $root $f))) { continue }
     $n = (Get-Content -LiteralPath (Join-Path $root $f) -Encoding utf8).Count
-    if ($n -gt $MaxLines) { $warnings.Add("$f が $n 行。責務が集まっていないかを見る（分けるなら docs/設計/ の差し込み口に沿って）") }
+    if ($n -gt $MaxLines) { $warnings.Add("$f が $n 行。責務が集まっていないかを見る（分けるなら docs/設計/ の拡張ポイントに沿って）") }
 }
 
-# 合図2：直近のコミットで何度も変わったファイル（テストと文書は除く）
+# 兆候2：直近のコミットで何度も変わったファイル（テストと文書は除く）
 $counts = @{}
 $log = git -C $root -c core.quotepath=false log -n $Window --name-only --format='@@' -- '*.kt' '*.cpp' 2>$null
 foreach ($line in $log) {

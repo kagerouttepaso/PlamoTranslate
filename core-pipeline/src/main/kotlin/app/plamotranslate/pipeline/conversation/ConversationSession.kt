@@ -7,7 +7,7 @@ import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.pipeline.speech.Utterance
 
 /**
- * 会話の1発話。原文は話した言語、訳文は訳した先の言語。表示の文（かかった時間、失敗の知らせ）は画面の側が組み立てる。
+ * 会話の1発話。原文は話した言語、訳文は訳した先の言語。表示の文（かかった時間、失敗のメッセージ）は画面の側が組み立てる。
  * [translated] は訳が終わったか（失敗しても true）、[failure] は失敗の理由。
  */
 data class Turn(

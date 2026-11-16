@@ -107,8 +107,8 @@ class ScreenCapturer(context: Context, projection: MediaProjection) {
     }
 
     /**
-     * [after]（uptimeMillis）より後に新しい画面が届いていれば、それを格子に縮めて（[ScreenChange]）届いた時刻と返す。
-     * 届いていなければ null（画面は変わっていない）。画像には変えずに受け取った画面から直接読むので軽い（自動で訳すときの見張り）。
+     * [after]（uptimeMillis）より後に新しい画面が届いていれば、それをグリッドに縮めて（[ScreenChange]）届いた時刻と返す。
+     * 届いていなければ null（画面は変わっていない）。画像には変えずに受け取った画面から直接読むので軽い（自動で訳すときの監視）。
      */
     internal suspend fun latestThumb(after: Long): Pair<Thumb, Long>? = onHandler {
         val image = latest ?: return@onHandler null
@@ -179,5 +179,5 @@ class ScreenCapturer(context: Context, projection: MediaProjection) {
     }
 }
 
-/** 撮った画像を、画面の変化の計算に使う格子（中核の [Thumb]）に縮める。 */
+/** 撮った画像を、画面の変化の計算に使うグリッド（中核の [Thumb]）に縮める。 */
 internal fun Bitmap.toThumb(): Thumb = ScreenChange.thumb(width, height) { x, y -> ScreenChange.luminanceOf(getPixel(x, y)) }

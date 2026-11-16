@@ -23,8 +23,8 @@ object SenseVoiceAsr {
 }
 
 /**
- * 差し込み口 [VoiceActivity] の実装：Silero VAD。話しているかと、文の区切りの無音（phraseSilenceSeconds）で文が終わったかを返す。
- * VADが切り出した音声は使わない（区切りの合図として読むだけ。認識する音声は中核がためる）。
+ * インターフェース [VoiceActivity] の実装：Silero VAD。話しているかと、文の区切りの無音（phraseSilenceSeconds）で文が終わったかを返す。
+ * VADが切り出した音声は使わない（区切りのシグナルとして読むだけ。認識する音声は中核がためる）。
  */
 class SileroVoiceActivity private constructor(private val vad: Vad) : VoiceActivity {
     override fun accept(samples: FloatArray): VoiceSignal {
@@ -80,7 +80,7 @@ class SileroVoiceActivity private constructor(private val vad: Vad) : VoiceActiv
     }
 }
 
-/** 差し込み口 [SpeechRecognizer] の実装：SenseVoice Small。発話単位の一括認識で、言語タグ（日・韓・英・中・広東語）も返す。 */
+/** インターフェース [SpeechRecognizer] の実装：SenseVoice Small。発話単位の一括認識で、言語タグ（日・韓・英・中・広東語）も返す。 */
 class SenseVoiceRecognizer private constructor(private val recognizer: OfflineRecognizer) : SpeechRecognizer {
     override fun recognize(samples: FloatArray): Recognition {
         val stream = recognizer.createStream()

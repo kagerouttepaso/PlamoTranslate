@@ -12,8 +12,8 @@ import app.plamotranslate.pipeline.screen.ScreenPreset
 import app.plamotranslate.pipeline.screen.ScreenSettings
 
 /**
- * 浮遊ボタンの長押しのメニューの行（docs/設計/画面翻訳.md「操作」）。今の設定を読んで行を作り、選ばれた設定を保存して [actions] へ知らせる。
- * 状態遷移・判定器・浮遊ボタンには触れない（知らせを受けたサービスが行う）。選択肢を押すたびに作り直す（[build]）。
+ * フローティングボタンの長押しのメニューの行（docs/設計/画面翻訳.md「操作」）。今の設定を読んで行を作り、選ばれた設定を保存して [actions] へ知らせる。
+ * 状態遷移・判定器・フローティングボタンには触れない（コールバックを受けたサービスが行う）。選択肢を押すたびに作り直す（[build]）。
  */
 internal class ScreenMenuEntries(
     private val context: Context,
@@ -22,7 +22,7 @@ internal class ScreenMenuEntries(
 ) {
     /** 設定を変えたときにサービスが行うこと。 */
     interface Actions {
-        /** 浮遊ボタンの字が変わる設定（原文の言語・始め方）を変えた。 */
+        /** フローティングボタンの字が変わる設定（原文の言語・始め方）を変えた。 */
         fun labelChanged()
         fun triggerChanged(trigger: ScreenTrigger)
 

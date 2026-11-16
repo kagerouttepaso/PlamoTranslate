@@ -61,7 +61,7 @@ class TranslationChecksTest {
             "That is a bug in how Auto falls back, not a problem with your phone, and I've queued it with your log. " +
             "I'll post here when there is a test build."
         val parts = TranslationChecks.splitLong(text, TranslationChecks.PARALLEL_SPLIT)
-        // 4文が3片になる。2文目は150字を超えるが文の途中では分けず、3・4文目は合わせて150字以内なので1片にまとめる
+        // 4文が3チャンクになる。2文目は150字を超えるが文の途中では分けず、3・4文目は合わせて150字以内なので1チャンクにまとめる
         assertEquals(3, parts.size)
         assertTrue(parts[1].startsWith("Auto wanted") && parts[1].length > TranslationChecks.PARALLEL_SPLIT)
         assertEquals(text, parts.joinToString(""))
@@ -70,7 +70,7 @@ class TranslationChecksTest {
     }
 
     @Test
-    fun 片の訳をつなぐ() {
+    fun チャンクの訳をつなぐ() {
         assertEquals("今日は晴れ。明日は雨。", TranslationChecks.joinPieces(listOf("今日は晴れ。", "明日は雨。")))
         assertEquals("It is sunny. It rains.", TranslationChecks.joinPieces(listOf("It is sunny.", "It rains.")))
     }

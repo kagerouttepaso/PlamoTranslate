@@ -38,7 +38,7 @@ internal data class LayoutChoice(
 
 /** 1回の翻訳の前提（変わらない値）。 */
 internal class ScreenFrame(
-    /** 判定Bの基準（撮った画面の格子）。 */
+    /** 判定Bの基準（撮った画面のグリッド）。 */
     val reference: Thumb,
     /** 重ねた枚数（1なら重ねていない）と、撮るのにかかった時間。 */
     val frames: Int,
@@ -75,7 +75,7 @@ internal class PageLayout(
     }
 }
 
-/** 訳す工程の結果。[stats] は流れを閉じるまで増える。 */
+/** 訳す工程の結果。[stats] はストリームを閉じるまで増える。 */
 internal class TranslationRun(val model: String, val startedAt: Long) {
     var stats: TranslationStream.Stats? = null
 }

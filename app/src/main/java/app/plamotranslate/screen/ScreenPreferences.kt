@@ -60,12 +60,12 @@ internal val Grouping.menuName: String
 internal class ScreenPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("screen_translate", Context.MODE_PRIVATE)
 
-    /** 浮遊ボタンの長押しで選んだ原文の言語。読めなければ自動。 */
+    /** フローティングボタンの長押しで選んだ原文の言語。読めなければ自動。 */
     var language: OcrLanguage
         get() = OcrLanguage.parse(prefs.getString(KEY_LANGUAGE, null))
         set(language) = prefs.edit().putString(KEY_LANGUAGE, language.name).apply()
 
-    /** 浮遊ボタンの長押しで選んだ始め方。読めなければタップで訳す。 */
+    /** フローティングボタンの長押しで選んだ始め方。読めなければタップで訳す。 */
     var trigger: ScreenTrigger
         get() = ScreenTrigger.parse(prefs.getString(KEY_TRIGGER, null))
         set(value) = prefs.edit().putString(KEY_TRIGGER, value.name).apply()

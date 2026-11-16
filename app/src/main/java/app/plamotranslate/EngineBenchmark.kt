@@ -9,7 +9,7 @@ import app.plamotranslate.pipeline.translation.SingleRequest
 
 /**
  * 翻訳の速さを測る（設定の「速さを測る」「自動で調整」）。決まった文を訳し、最初の文字までの時間と生成の速さを出す。
- * 機能の翻訳の流れではなく、エンジンの差し込み口（[TranslationEngine.run]）を直接使う計測の道具。
+ * 機能の翻訳のストリームではなく、エンジンのインターフェース（[TranslationEngine.run]）を直接使う計測の道具。
  */
 object EngineBenchmark {
     /** 測った結果。[firstMillis] は依頼から最初の文字まで（プロンプトの処理を含む）。 */
@@ -80,7 +80,7 @@ object EngineBenchmark {
  * 3. 4本が1本より [GAIN] 以上速ければ上の8本を、そうでなければ下の2本を測る。
  *
  * 決め方：一番速い本数を選ぶ。ただし、少ない本数でも一番速い値の [NEAR] 以上出ていれば、少ない方を選ぶ
- * （同時に訳す数が多いほど、1つのまとまりが短くなって前後の文が訳の手がかりにならず、メモリも使う）。
+ * （同時に訳す数が多いほど、1つのチャンクが短くなって前後の文が訳の手がかりにならず、メモリも使う）。
  */
 object ParallelTuner {
     private const val GAIN = 1.1

@@ -4,7 +4,7 @@ BenchActivity が書いた results.jsonl と、人が付けた正解（吹き出
 次の3点を数える。作者が見たい観点（2026-11-05）に合わせた。
 
 1. 認識率：正解の吹き出しのうち、訳が1つ以上入ったものの割合
-2. 一まとまり率：正解の吹き出しのうち、訳がちょうど1つ（分割されずに1まとまり）で入ったものの割合
+2. 1単位率：正解の吹き出しのうち、訳がちょうど1つ（分割されずに1つ）で入ったものの割合
 3. 欠け：訳が最小の文字（7sp）でも枠に収まらなかった数と、読みにくい小ささ（9sp未満）の数
 4. 文字の正解率：正解の文字（text）を付けた画像だけ。空白・改行を除いて編集距離で比べる
 
@@ -97,7 +97,7 @@ def main():
     results = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
     truth = json.load(open(sys.argv[2], encoding="utf-8"))
     verbose = "-v" in sys.argv
-    print("| 画像 | 吹き出し | 認識 | 一まとまり | 訳の数 | 吹き出し内で訳さず | 枠に収まらず | 9sp未満 | 吹き出し外 | 文字の正解率 | 時間 |")
+    print("| 画像 | 吹き出し | 認識 | 1単位 | 訳の数 | 吹き出し内で訳さず | 枠に収まらず | 9sp未満 | 吹き出し外 | 文字の正解率 | 時間 |")
     print("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     total = {"bubbles": 0, "recognized": 0, "one_unit": 0}
     for r in results:
@@ -116,7 +116,7 @@ def main():
                     print(f"        読み取り（誤り{row['errors']}/{row['chars']}字）: {row['source']}")
     if total["bubbles"]:
         print(f"\n合計：認識率 {total['recognized'] / total['bubbles']:.0%}（{total['recognized']}/{total['bubbles']}）、"
-              f"一まとまり率 {total['one_unit'] / total['bubbles']:.0%}（{total['one_unit']}/{total['bubbles']}）")
+              f"1単位率 {total['one_unit'] / total['bubbles']:.0%}（{total['one_unit']}/{total['bubbles']}）")
 
 
 if __name__ == "__main__":

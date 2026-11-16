@@ -17,7 +17,7 @@ rootProject.name = "PlamoTranslate"
 include(":app")
 // 中核：端末に依存しない判断と計画（docs/設計/アーキテクチャ.md「層とモジュール」）
 include(":core-pipeline")
-// ログの出口：どのモジュールのログもここを通す（docs/設計/アーキテクチャ.md「ログ」）
+// ロガー：どのモジュールのログもここを通す（docs/設計/アーキテクチャ.md「ログ」）
 include(":core-log")
 include(":core-llm")
 include(":core-ocr")

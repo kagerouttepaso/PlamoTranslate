@@ -43,7 +43,7 @@ class MultiScriptOcr(paddleDir: File? = null) : OcrEngine {
      */
     suspend fun recognizeOutlined(bitmap: Bitmap, language: OcrLanguage): List<OcrLine> = coroutineScope {
         val use = Recognizers.of(language)
-        // 束ねた後のまとまりで比べると、言語の違う行が一緒に束ねられて比べられなかった（2026-11-12）ので、行ごとに比べる
+        // 束ねた後のブロックで比べると、言語の違う行が一緒に束ねられて比べられなかった（2026-11-12）ので、行ごとに比べる
         val primary = async { read(bitmap, use) }
         val variant = async(Dispatchers.Default) {
             val white = OutlinedText.whiteness(bitmap)

@@ -4,7 +4,7 @@ import app.plamotranslate.llm.Language
 import app.plamotranslate.ocr.OcrLanguage
 
 /*
- * 画面翻訳の原文の言語（浮遊ボタンの長押しで選ぶ。2026-11-05、作者の要望）。
+ * 画面翻訳の原文の言語（フローティングボタンの長押しで選ぶ。2026-11-05、作者の要望）。
  * 言語を足すときは、OcrLanguage（core-ocr）と Recognizers（使う認識器）と、ここの3つの表をそろえる。
  */
 
@@ -21,7 +21,7 @@ internal val OcrLanguage.menuName: String
         OcrLanguage.JAPANESE -> "日本語"
     }
 
-/** 浮遊ボタンの右下の札。原文の言語を決めたときだけ、その言語を1文字で出す（自動なら null）。 */
+/** フローティングボタンの右下のバッジ。原文の言語を決めたときだけ、その言語を1文字で出す（自動なら null）。 */
 internal fun OcrLanguage.buttonBadge(): String? = when (this) {
     OcrLanguage.AUTO -> null
     OcrLanguage.CHINESE -> "中"

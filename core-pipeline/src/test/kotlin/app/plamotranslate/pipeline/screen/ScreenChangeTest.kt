@@ -7,7 +7,7 @@ class ScreenChangeTest {
     private fun thumb(values: IntArray, cols: Int = values.size) = Thumb(100, 100, cols, values.size / cols, values)
 
     @Test
-    fun 変わったます目の割合を数える() {
+    fun 変わったセルの割合を数える() {
         val a = thumb(intArrayOf(10, 10, 10, 10))
         val b = thumb(intArrayOf(10, 200, 15, 10))
         // 5の違いは揺れとして数えない
@@ -15,7 +15,7 @@ class ScreenChangeTest {
     }
 
     @Test
-    fun 覆ったます目は数えない() {
+    fun 覆ったセルは数えない() {
         val a = thumb(intArrayOf(10, 10, 10, 10))
         val b = thumb(intArrayOf(10, 200, 10, 10))
         val mask = booleanArrayOf(false, true, false, false)
@@ -31,7 +31,7 @@ class ScreenChangeTest {
 
     @Test
     fun 中央値で動く背景を消す() {
-        // ます目0は止まった文字（200）、ます目1は2回だけ図形が通る背景（20）
+        // セル0は止まった文字（200）、セル1は2回だけ図形が通る背景（20）
         val thumbs = listOf(
             thumb(intArrayOf(200, 20)), thumb(intArrayOf(200, 180)), thumb(intArrayOf(200, 20)),
             thumb(intArrayOf(200, 90)), thumb(intArrayOf(200, 20)),
@@ -40,7 +40,7 @@ class ScreenChangeTest {
     }
 
     @Test
-    fun 格子に縮める() {
+    fun グリッドに縮める() {
         val t = ScreenChange.thumb(480, 960) { x, _ -> if (x < 240) 0 else 240 }
         assertEquals(ScreenChange.COLS, t.cols)
         assertEquals(96, t.rows)

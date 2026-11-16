@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   アプリの設定画面・課金の案内・警告文・チャット・小さな注記・通知・漫画風の大文字のセリフを並べる。
-  各まとまりの位置と文字（正解）を truth.json に書く。本物のスクリーンショットではないので、
+  各ブロックの位置と文字（正解）を truth.json に書く。本物のスクリーンショットではないので、
   実機の英語画面での確認と合わせて使う（docs/設計/画面翻訳.md「評価」）。
 
 .EXAMPLE
@@ -67,9 +67,9 @@ $bmp.Save((Join-Path $Out $name), [Drawing.Imaging.ImageFormat]::Png)
 $bmp.Dispose()
 
 $truth[$name] = [ordered]@{
-    note    = "合成した英語の画面（tools/make-en-screen.ps1）。各まとまりの位置と正しい文字"
+    note    = "合成した英語の画面（tools/make-en-screen.ps1）。各ブロックの位置と正しい文字"
     area    = @(0, 100, $W, $H)
     bubbles = $items
 }
 $truth | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Out "truth.json") -Encoding utf8
-"作成: $(Join-Path $Out $name)（$($items.Count)まとまり）"
+"作成: $(Join-Path $Out $name)（$($items.Count)ブロック）"

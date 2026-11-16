@@ -5,7 +5,7 @@ package app.plamotranslate.pipeline.camera
  * 行の多数決（[LineTracker]）と訳の対応表（[CameraSession]）で共通に使う。
  */
 object TextSimilarity {
-    /** 控えや比較のキー。文字と数字だけを残して小文字にする（コマごとの空白・記号の読み揺れを吸収する）。 */
+    /** キャッシュや比較のキー。文字と数字だけを残して小文字にする（コマごとの空白・記号の読み揺れを吸収する）。 */
     fun key(text: String): String = text.filter { it.isLetterOrDigit() }.lowercase()
 
     /** 2文字ずつの組の重なり（Dice係数、0〜1）。 */

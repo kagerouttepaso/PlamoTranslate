@@ -14,10 +14,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
 /**
- * 永続の控え（2次の層）を端末のデータベース（SQLite）に置く実装。今は画面翻訳だけが使う（docs/設計/画面翻訳.md「訳の控え」）。
+ * 永続キャッシュ（2次の層）を端末のデータベース（SQLite）に置く実装。今は画面翻訳だけが使う（docs/設計/画面翻訳.md「翻訳のキャッシュ」）。
  * 同じゲーム・アプリの画面は同じ文が何度も出るので、一度訳した文は画面翻訳を終えても、アプリを入れ直すまで使い回す。
  *
- * 鍵・確かさ・世代の約束は差し込み口（[PersistentCache]）と docs/設計/翻訳コア.md「控え」に従う。鍵の範囲は契約が作り
+ * 鍵・確かさ・世代の約束はインターフェース（[PersistentCache]）と docs/設計/翻訳コア.md「キャッシュ」に従う。鍵の範囲は契約が作り
  * （[CacheScope.id] を列に入れる）、同じ原文に残る訳は、いちばん確かなモデルの1つだけ。
  *
  * 件数は [MAX_ENTRIES] までにし、超えたら最後に使った時刻が古いものから消す。
@@ -28,7 +28,7 @@ class SqlitePersistentCache private constructor(context: Context) : PersistentCa
 
     private val _entries = MutableStateFlow(-1)
 
-    /** 控えている件数（設定の画面に出す）。まだ数えていなければ -1。 */
+    /** キャッシュしている件数（設定の画面に出す）。まだ数えていなければ -1。 */
     val entries: StateFlow<Int> = _entries.asStateFlow()
 
     /** 消した回数（[PersistentCache.generation]）。 */
@@ -36,7 +36,7 @@ class SqlitePersistentCache private constructor(context: Context) : PersistentCa
     override var generation = 0
         private set
 
-    /** [texts] のうち、確かさが [minQuality] 以上の訳が控えにあるもの。使った時刻も新しくする。 */
+    /** [texts] のうち、確かさが [minQuality] 以上の訳がキャッシュにあるもの。使った時刻も新しくする。 */
     override suspend fun lookup(scope: CacheScope, minQuality: Int, texts: Collection<String>): Map<String, CachedTranslation> = withContext(Dispatchers.IO) {
         if (texts.isEmpty()) return@withContext emptyMap()
         val key = scope.id
@@ -95,7 +95,7 @@ class SqlitePersistentCache private constructor(context: Context) : PersistentCa
     /** 件数を数え直す（設定の画面を開いたとき）。 */
     suspend fun refreshCount() = withContext(Dispatchers.IO) { countNow(helper.readableDatabase) }
 
-    /** 控えをすべて消す（設定の画面の「消す」）。 */
+    /** キャッシュをすべて消す（設定の画面の「消す」）。 */
     suspend fun clear() = withContext(Dispatchers.IO) {
         val db = helper.writableDatabase
         // 先に回数を増やす（書いている途中の翻訳が、消した後に書き戻さないように。[store]）
@@ -130,7 +130,7 @@ class SqlitePersistentCache private constructor(context: Context) : PersistentCa
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            // 控えなので、形を変えたら捨てて作り直す
+            // キャッシュなので、形を変えたら捨てて作り直す
             db.execSQL("DROP TABLE IF EXISTS $TABLE")
             onCreate(db)
         }
@@ -144,7 +144,7 @@ class SqlitePersistentCache private constructor(context: Context) : PersistentCa
         private const val TABLE = "translations"
 
         /**
-         * 控える上限。Chrome拡張（IndexedDB）と同じ値。1件は原文・訳・鍵と索引で数百バイトなので、2万件で約5〜10MB。
+         * キャッシュする件数の上限。Chrome拡張（IndexedDB）と同じ値。1件は原文・訳・鍵と索引で数百バイトなので、2万件で約5〜10MB。
          * 引くのは主キーの索引なので、件数が増えても1回の画面翻訳（数十件）の読み書きは数ミリ秒で済む。
          * 画面翻訳は1回に約20件なので、新しい文ばかりでも約1000回分を覚えていられる。
          */

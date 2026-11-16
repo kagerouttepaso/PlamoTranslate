@@ -16,7 +16,7 @@
 param(
     [string]$Set = "2026-11-05",
     [string]$Label = (Get-Date -Format "HHmmss"),
-    # 原文の言語（AUTO・CHINESE・KOREAN・LATIN。改名前の ENGLISH も LATIN として読む）。浮遊ボタンの長押しで選ぶのと同じ
+    # 原文の言語（AUTO・CHINESE・KOREAN・LATIN。改名前の ENGLISH も LATIN として読む）。フローティングボタンの長押しで選ぶのと同じ
     [string]$Lang = "AUTO"
 )
 

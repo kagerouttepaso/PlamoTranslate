@@ -47,12 +47,12 @@ class MainActivity : Activity() {
         button("画面共有で1枚撮る") { LabA11yService.instance?.run("snap") ?: startService(Intent(this, CaptureService::class.java).setAction(CaptureService.ACTION_SNAP)) }
         button("画面共有を止める") { startService(Intent(this, CaptureService::class.java).setAction(CaptureService.ACTION_STOP)) }
         button("ユーザー補助で画面を撮る") { LabA11yService.instance?.run("shot") }
-        button("ユーザー補助で前面の窓を撮る") { LabA11yService.instance?.run("window_shot") }
+        button("ユーザー補助で前面のウィンドウを撮る") { LabA11yService.instance?.run("window_shot") }
         log = TextView(this).apply { textSize = 11f }
         column.addView(log)
         setContentView(ScrollView(this).apply { addView(column) })
         intent.getStringExtra("exit")?.let { ExitLab.run(this, it) }
-        // 全画面の触れない重ね表示を出すと、下のアプリへの操作が届くか（訳の枠を1つの窓にまとめる前に確かめる）
+        // 全画面の触れない重ね表示を出すと、下のアプリへの操作が届くか（訳の枠を1つのウィンドウにまとめる前に確かめる）
         when (intent.getStringExtra("overlay")) {
             "full_on" -> { showFullOverlay(this, true); finish() }
             "full_off" -> { showFullOverlay(this, false); finish() }

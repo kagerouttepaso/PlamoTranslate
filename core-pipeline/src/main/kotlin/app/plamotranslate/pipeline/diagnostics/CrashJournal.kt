@@ -7,11 +7,11 @@ import kotlinx.coroutines.flow.StateFlow
 data class CrashEntry(val id: String, val time: Long, val process: String, val title: String, val files: List<String>)
 
 /**
- * 不具合の記録の保存先（差し込み口。実装は `app` の `diagnostics/FileCrashJournal`）。命令と購読の部品にする。
+ * 不具合の記録の保存先（インターフェース。実装は `app` の `diagnostics/FileCrashJournal`）。命令と購読の部品にする。
  *
  * - 命令：[record]（1件を書く）、[clear]（全部消す）。どちらもすぐ戻り、結果は [entries] で届く。
  * - 購読：[entries]（新しい順の一覧）。
- * - 例外：[recordNow] は、例外の受け口がプロセスの終わる直前に呼ぶので、書き終えてから戻る。
+ * - 例外：[recordNow] は、例外のハンドラーがプロセスの終わる直前に呼ぶので、書き終えてから戻る。
  * - [export] は、書き出しの画面が裏のスレッドで呼び、zip を書き終えるまで待つ。
  */
 interface CrashJournal {

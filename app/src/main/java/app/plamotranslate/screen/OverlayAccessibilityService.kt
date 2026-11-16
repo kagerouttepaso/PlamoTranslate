@@ -14,10 +14,10 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * ほかのアプリの重ね表示（TYPE_APPLICATION_OVERLAY）は、触れた操作を下のアプリへ通すと不透明度0.8までに制限され、元の文字が透けた。
  * ユーザー補助の重ね表示（TYPE_ACCESSIBILITY_OVERLAY）はこの制限を受けないので、不透明のまま操作を通せる。
- * 窓はこのサービスの WindowManager からしか置けないので、訳の枠（[TranslationOverlay]）はこのサービスを通して置く。
+ * ウィンドウはこのサービスの WindowManager からしか置けないので、訳の枠（[TranslationOverlay]）はこのサービスを通して置く。
  *
  * もう1つ、ほかのアプリの画面の切り替わり（TYPE_WINDOW_STATE_CHANGED：アプリの切り替え・ホーム・最近使ったアプリ・別の画面）と
- * スクロール（TYPE_VIEW_SCROLLED）を受け、訳している途中の処理や古くなった訳を取り消す合図にする（[onWindowChanged]・[onScrolled]）。
+ * スクロール（TYPE_VIEW_SCROLLED）を受け、訳している途中の処理や古くなった訳を取り消すシグナルにする（[onWindowChanged]・[onScrolled]）。
  * 戻る操作そのものは受け取れない（ジェスチャーの戻るはキーとして届かない。docs/資料/端末の能力.md「問い1」）。
  * 画面の文字は読み取らない（canRetrieveWindowContent="false"）。出来事の種類とスクロールの量だけを使う。
  */
@@ -34,8 +34,8 @@ class OverlayAccessibilityService : AccessibilityService() {
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> onWindowChanged?.invoke()
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
-                // 窓の中身を読まない権限でも、移動量は届く（2026-11-12、設定アプリで dy=404 などを確かめた）。
-                // 一覧の組み直しなどで、動いていないスクロールの知らせも来る（Discordで dx=dy=0）。通知の引き出しも除く
+                // ウィンドウの中身を読まない権限でも、移動量は届く（2026-11-12、設定アプリで dy=404 などを確かめた）。
+                // 一覧の組み直しなどで、動いていないスクロールのイベントも来る（Discordで dx=dy=0）。通知の引き出しも除く
                 val moved = event.scrollDeltaX != 0 || event.scrollDeltaY != 0
                 if (moved && event.packageName != SYSTEM_UI) onScrolled?.invoke()
             }

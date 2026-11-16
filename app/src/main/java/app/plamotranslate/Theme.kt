@@ -91,7 +91,7 @@ private val PaperChirp: ColorScheme = lightColorScheme(
 /** 画面の色の選び方（設定の「画面の色」）。 */
 enum class ThemeMode(val label: String) { SYSTEM("端末に合わせる"), LIGHT("ライト（さえずりの紙）"), DARK("ダーク（夜の鳥）") }
 
-/** 画面の色の設定。変えたら開いている画面にもすぐ効くよう、流れで持つ。 */
+/** 画面の色の設定。変えたら開いている画面にもすぐ効くよう、`StateFlow` で持つ。 */
 object ThemePreferences {
     private const val FILE = "appearance"
     private const val KEY_MODE = "theme"

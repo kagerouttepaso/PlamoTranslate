@@ -5,7 +5,7 @@ import android.view.View
 import android.view.ViewGroup
 
 /**
- * 子を左から横に並べ、幅が足りなければ次の行へ折り返す（浮遊ボタンのメニューの選択肢。[ScreenMenu]）。
+ * 子を左から横に並べ、幅が足りなければ次の行へ折り返す（フローティングボタンのメニューの選択肢。[ScreenMenu]）。
  * 1行に横へ詰めるだけだと、幅が足りない選択肢の文字が縦に潰れた（2026-11-13、作者の指摘「カスタムが縦に並ぶのがダサい」）。
  */
 internal class WrapLayout(context: Context, private val gap: Int) : ViewGroup(context) {

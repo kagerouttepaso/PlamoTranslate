@@ -47,7 +47,7 @@ import app.plamotranslate.screen.ScreenTranslateSettings
 import app.plamotranslate.screen.screenTranslateSummary
 
 /**
- * 設定（docs/設計/アーキテクチャ.md「設定の画面」）。トップに項目のまとまりを並べ、押すとそのページへ進む階層にする
+ * 設定（docs/設計/アーキテクチャ.md「設定の画面」）。トップに項目のグループを並べ、押すとそのページへ進む階層にする
  * （2026-11-13、作者の指摘「設定のページが長大すぎる」。それまでは全部を1ページに並べていた）。
  */
 class SettingsActivity : ComponentActivity() {
@@ -64,7 +64,7 @@ class SettingsActivity : ComponentActivity() {
     }
 }
 
-/** 設定のまとまり。何についての設定かで分ける（docs/設計/アーキテクチャ.md「設定の画面」）。 */
+/** 設定のグループ。何についての設定かで分ける（docs/設計/アーキテクチャ.md「設定の画面」）。 */
 private enum class SettingsGroup(val label: String) {
     /** 全機能で共通。 */
     TRANSLATION("翻訳"),
@@ -80,7 +80,7 @@ private enum class SettingsGroup(val label: String) {
 }
 
 /**
- * 設定のページ。題・まとまり・トップに添える今の状態の一言（[summary]）・中身（[content]）を、ページごとに1つの定義にする。
+ * 設定のページ。題・グループ・トップに添える今の状態の一言（[summary]）・中身（[content]）を、ページごとに1つの定義にする。
  * ページを足すときは、ここに1つ足すだけでよい。トップでの並びは、この定義の順。
  */
 private enum class SettingsPage(
@@ -128,7 +128,7 @@ private fun SettingsScreen(onBack: () -> Unit) {
     } }
 }
 
-/** 設定のトップ。まとまりごとに見出しを付け、各ページを1行で、今の状態の一言と並べる。 */
+/** 設定のトップ。グループごとに見出しを付け、各ページを1行で、今の状態の一言と並べる。 */
 @Composable
 private fun SettingsHome(open: (SettingsPage) -> Unit) {
     val context = LocalContext.current
@@ -190,7 +190,7 @@ private fun AppearancePage() {
         }
         Text(
             "ライトは生成りの紙と墨の「さえずりの紙」、ダークは紺の地にコーラルとミントの「夜の鳥」。" +
-                "画面翻訳の浮遊ボタンとメニューも同じ色になる。",
+                "画面翻訳のフローティングボタンとメニューも同じ色になる。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

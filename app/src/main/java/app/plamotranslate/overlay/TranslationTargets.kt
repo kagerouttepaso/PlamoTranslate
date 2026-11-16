@@ -20,7 +20,7 @@ data class OverlaySlot(
     val room: Rect? = null,
 )
 
-/** 訳す1件：認識したまとまり、訳の枠（位置・縦書き・色）、翻訳に渡す原文。 */
+/** 訳す1件：認識したブロック、訳の枠（位置・縦書き・色）、翻訳に渡す原文。 */
 internal class TranslationTarget(val block: TextBlock, val slot: OverlaySlot) {
     val sourceText: String = block.joinedText()
 }

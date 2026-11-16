@@ -29,8 +29,8 @@
 
 namespace {
 
-// ログの出口（docs/設計/アーキテクチャ.md「ログ」）。ネイティブのログも Kotlin の Logs を通し、アプリのファイルにも残す。
-// JNI_OnLoad で Java の受け口（LlamaNative.onNativeLog）を覚えておき、JVM につながっているスレッドからはそこへ渡す。
+// ロガー（docs/設計/アーキテクチャ.md「ログ」）。ネイティブのログも Kotlin の Logs を通し、アプリのファイルにも残す。
+// JNI_OnLoad で Java のコールバック（LlamaNative.onNativeLog）を覚えておき、JVM につながっているスレッドからはそこへ渡す。
 // llama.cpp の計算スレッドのように JVM につながっていないスレッドからは、つなぎに行かず logcat にだけ出す
 // （つないだスレッドは外さないまま終わると異常終了になるため）。
 JavaVM *g_vm = nullptr;
@@ -49,7 +49,7 @@ void emit_log(int priority, const char *text) {
             env->CallStaticVoidMethod(g_native_class, g_on_native_log, static_cast<jint>(priority), bytes);
             env->DeleteLocalRef(bytes);
         }
-        // ここで起きた例外（配列を作れない、受け口の失敗）は自分のものなので消して、logcat へ逃がす
+        // ここで起きた例外（配列を作れない、コールバックの失敗）は自分のものなので消して、logcat へ逃がす
         if (!env->ExceptionCheck()) return;
         env->ExceptionClear();
     }
@@ -249,7 +249,7 @@ size_t complete_utf8_length(const std::string &s) {
 
 }  // namespace
 
-// ライブラリを読み込んだときに、ログの受け口を覚える（emit_log）
+// ライブラリを読み込んだときに、ログのコールバックを覚える（emit_log）
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
     JNIEnv *env = nullptr;
     if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) != JNI_OK) return JNI_VERSION_1_6;
@@ -347,7 +347,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx = n_ctx;
     cparams.n_batch = n_ctx;  // プロンプトを1回のdecodeで処理する
-    // 複数の文を同時に訳すための流れの数（nativeTranslateJobs）。KVキャッシュは全部の流れで1つを分け合うので、
+    // 複数の文を同時に訳すためのシーケンスの数（nativeTranslateJobs）。KVキャッシュは全部のシーケンスで1つを分け合うので、
     // 1文だけを訳すときは n_ctx をそのまま使える（分けると1本あたり n_ctx / n_seq になり、長い文が入らない）
     cparams.n_seq_max = n_seq_max;
     cparams.kv_unified = true;
@@ -416,16 +416,16 @@ Java_app_plamotranslate_llm_LlamaNative_nativeFree(JNIEnv *, jobject, jlong hand
     delete engine;
 }
 
-// 訳す依頼を呼ぶ側から1件ずつ受け取り、最大 n_slots 本の流れ（シーケンス）で同時に訳す（2026-11-12。docs/設計/翻訳コア.md
-// 「複数の文を同時に訳す」）。1回のdecodeで全部の流れを1トークンずつ進めるので、1件ずつ訳すより合計が速い。
-// 訳し終わった流れには、ほかの流れの終わりを待たずに、すぐ次の依頼を入れる（作者の指摘「Discordでボットの長文の訳が
+// 訳す依頼を呼ぶ側から1件ずつ受け取り、最大 n_slots 本のシーケンスで同時に訳す（2026-11-12。docs/設計/翻訳コア.md
+// 「複数の文を同時に訳す」）。1回のdecodeで全部のシーケンスを1トークンずつ進めるので、1件ずつ訳すより合計が速い。
+// 訳し終わったシーケンスには、ほかのシーケンスの終わりを待たずに、すぐ次の依頼を入れる（作者の指摘「Discordでボットの長文の訳が
 // 終わるまで、次の短文の訳が始まらない」。初めは同時に入れた全部が終わるまで次を入れない作りだった）。
 //
 // callback（Kotlin の LlamaNative.JobCallback）：
 //   nextJob() → 次の依頼の番号。無ければ -1。prompt(id) → その依頼のプロンプト。
 //   onToken(id, bytes) → 0＝続ける、1＝その依頼だけ止める、2＝全部止める。
 //   onFinished(id) → その依頼の生成が終わった（止めた場合も含む）。onFinished の中で次の依頼を足してよい。
-//   onTooLong(id) → 流れ1本分のコンテキストに入らないので訳さなかった（呼ぶ側が流れを減らして訳し直す）。
+//   onTooLong(id) → シーケンス1本分のコンテキストに入らないので訳さなかった（呼ぶ側がシーケンスを減らして訳し直す）。
 // 戻り値は全部の依頼を合わせた生成トークン数、または負のエラーコード。
 extern "C" JNIEXPORT jint JNICALL
 Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject, jlong handle, jint jslots,
@@ -445,7 +445,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject
     if (!m_next || !m_prompt || !m_token || !m_finished || !m_too_long) return ERR_CALLBACK;
 
     const int n_slots = std::clamp<int>(jslots, 1, (int) llama_n_seq_max(engine->ctx));
-    // KVキャッシュは全部の流れで1つを分け合う（kv_unified）。流れ1本が使える分を均等に決め、合計があふれないようにする
+    // KVキャッシュは全部のシーケンスで1つを分け合う（kv_unified）。シーケンス1本が使える分を均等に決め、合計があふれないようにする
     const int budget = engine->n_ctx / n_slots;
 
     ensure_hint(engine);
@@ -458,14 +458,14 @@ Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject
     struct Slot {
         int job = -1;        // 訳している依頼の番号。-1なら空き
         int n_past = 0;
-        int i_logits = -1;   // 直前のdecodeで、この流れの最後のトークンが入っていた位置
+        int i_logits = -1;   // 直前のdecodeで、このシーケンスの最後のトークンが入っていた位置
         int n_generated = 0;
         int n_predict = 0;
         std::string pending; // 文字の途中で切れたUTF-8
     };
     std::vector<Slot> slots(n_slots);
 
-    // 1回のdecodeに入るのは、各流れの新しいプロンプト（流れ1本分まで）か生成の1トークンなので、n_ctx に収まる
+    // 1回のdecodeに入るのは、各シーケンスの新しいプロンプト（シーケンス1本分まで）か生成の1トークンなので、n_ctx に収まる
     llama_batch batch = llama_batch_init(engine->n_ctx, 0, 1);
     auto add = [&batch](llama_token token, int pos, int seq, bool logits) {
         batch.token[batch.n_tokens] = token;
@@ -493,11 +493,11 @@ Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject
     while (!stop_all) {
         batch.n_tokens = 0;
 
-        // 1. 前のdecodeの結果から、各流れの次のトークンを選ぶ
+        // 1. 前のdecodeの結果から、各シーケンスの次のトークンを選ぶ
         for (int s = 0; s < n_slots && !stop_all; ++s) {
             Slot &q = slots[s];
             if (q.job < 0 || q.i_logits < 0) continue;
-            // 貪欲法（温度0）は状態を持たないので、サンプラーは全部の流れで1つを使う
+            // 貪欲法（温度0）は状態を持たないので、サンプラーは全部のシーケンスで1つを使う
             const llama_token token = llama_sampler_sample(engine->sampler, engine->ctx, q.i_logits);
             if (trace_startup && total == 0) startup_stage("最初のトークン選択 完了");
             q.i_logits = -1;
@@ -536,7 +536,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject
         }
         if (stop_all) break;
 
-        // 2. 空いた流れに次の依頼を入れる。プロンプトは、ほかの流れの生成の1トークンと同じdecodeで処理する。
+        // 2. 空いたシーケンスに次の依頼を入れる。プロンプトは、ほかのシーケンスの生成の1トークンと同じdecodeで処理する。
         // 依頼は onFinished の中で足されることがある（訳し直し）ので、一度「無い」と返されても、毎回聞き直す
         // （2026-11-12、一度無いと返された後は聞かず、後から足された訳し直しを取りこぼして訳が空のまま残った）
         bool exhausted = false;
@@ -561,7 +561,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject
                 const std::vector<llama_token> tokens = tokenize(vocab, to_std_string(env, jprompt), true);
                 env->DeleteLocalRef(jprompt);
                 const int n = (int) tokens.size();
-                // 原文と同じくらいの長さの訳が流れ1本分に入らなければ、途中で切れるので訳さない
+                // 原文と同じくらいの長さの訳がシーケンス1本分に入らなければ、途中で切れるので訳さない
                 if (n == 0 || budget - n < n) {
                     env->CallVoidMethod(callback, m_too_long, id);
                     if (env->ExceptionCheck()) {

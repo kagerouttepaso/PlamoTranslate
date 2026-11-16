@@ -5,7 +5,7 @@ import app.plamotranslate.log.LogLevel
 import app.plamotranslate.log.LogSink
 
 /**
- * logcat への書き先（docs/設計/アーキテクチャ.md「ログ」）。アプリの中で `android.util.Log` を呼ぶのはここだけにする
+ * logcat への出力先（docs/設計/アーキテクチャ.md「ログ」）。アプリの中で `android.util.Log` を呼ぶのはここだけにする
  * （`tools/check-design.ps1` が見る）。開発中に `adb logcat -s PlamoTranslate` で読む。
  */
 object LogcatSink : LogSink {

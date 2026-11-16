@@ -16,7 +16,7 @@ import android.widget.TextView
 import app.plamotranslate.overlay.OverlayPalette
 import app.plamotranslate.overlay.dp
 
-/** 浮遊ボタンのメニューの1行。[Choice] は設定1つ（横に並べた選択肢から1つ選ぶ）、[Action] は押すと閉じて行う操作。 */
+/** フローティングボタンのメニューの1行。[Choice] は設定1つ（横に並べた選択肢から1つ選ぶ）、[Action] は押すと閉じて行う操作。 */
 internal sealed interface MenuEntry {
     class Choice(val label: String, val options: List<Option>) : MenuEntry
     class Action(val label: String, val action: () -> Unit) : MenuEntry
@@ -34,9 +34,9 @@ internal class Option(
 )
 
 /**
- * 浮遊ボタンの長押しで出すメニュー（2026-11-05、作者の要望）。
+ * フローティングボタンの長押しで出すメニュー（2026-11-05、作者の要望）。
  * 設定1つを1行にし、選択肢を横に並べる（2026-11-13、作者の指摘「縦長で使いにくい」。それまでは見出しと選択肢を1行ずつ縦に並べ、約20行あった）。
- * 選択肢を押すと設定を変え、メニューを開いたまま選んだ印を描き直す（いくつかの設定を続けて変えられる）。
+ * 選択肢を押すと設定を変え、メニューを開いたままチェックマークを描き直す（いくつかの設定を続けて変えられる）。
  * メニューの外に触れたら閉じる。画面に収まらないときはスクロールする。
  */
 internal class ScreenMenu(private val context: Context, private val windowManager: WindowManager) {
@@ -51,7 +51,7 @@ internal class ScreenMenu(private val context: Context, private val windowManage
     /** メニューを閉じたとき（外に触れた・操作の行を選んだ）。操作の行を選んだときは、行の処理より先に呼ぶ。 */
     var onDismiss: (() -> Unit)? = null
 
-    /** [anchorX]・[anchorY]（浮遊ボタンの位置）の左にメニューを出す。行は [entries] で作り、選択肢を押すたびに作り直す。 */
+    /** [anchorX]・[anchorY]（フローティングボタンの位置）の左にメニューを出す。行は [entries] で作り、選択肢を押すたびに作り直す。 */
     @SuppressLint("ClickableViewAccessibility")
     fun show(anchorX: Int, anchorY: Int, entries: () -> List<MenuEntry>) {
         // 前のメニューが残っていれば外す（開き直しなので、閉じたことは知らせない）
@@ -78,7 +78,7 @@ internal class ScreenMenu(private val context: Context, private val windowManage
         params = p
     }
 
-    /** 選んだ印と選べるかを、今の設定に合わせて描き直す（選択肢を押した後と、翻訳モデルの状態が変わったとき）。 */
+    /** チェックマークと選べるかを、今の設定に合わせて描き直す（選択肢を押した後と、翻訳モデルの状態が変わったとき）。 */
     fun refresh() {
         val view = root ?: return
         val p = params ?: return

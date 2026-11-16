@@ -44,12 +44,12 @@ fun ScreenTranslateSettings() {
 fun screenTranslateSummary(): String {
     val context = LocalContext.current
     val opaque = remember { ScreenPreferences(context).opaqueOverlay }
-    return "訳の枠を透かさない：${if (opaque) "オン" else "オフ"}、訳の控え"
+    return "訳の枠を透かさない：${if (opaque) "オン" else "オフ"}、翻訳のキャッシュ"
 }
 
 /**
- * 画面翻訳の訳の控え（2026-11-12、作者の要望「設定から削除もできるように」）。件数を出し、確かめてから全部消す。
- * 控えは端末のデータベースにあり（SqlitePersistentCache）、画面翻訳を終えても次に使う。誤訳が残ったときや場所を空けたいときに消す。
+ * 画面翻訳で使う翻訳のキャッシュ（2026-11-12、作者の要望「設定から削除もできるように」）。件数を出し、確かめてから全部消す。
+ * キャッシュは端末のデータベースにあり（SqlitePersistentCache）、画面翻訳を終えても次に使う。誤訳が残ったときや場所を空けたいときに消す。
  */
 @Composable
 private fun TranslationCacheCard() {
@@ -61,20 +61,20 @@ private fun TranslationCacheCard() {
     LaunchedEffect(Unit) { cache.refreshCount() }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("訳の控え", style = MaterialTheme.typography.titleMedium)
+            Text("翻訳のキャッシュ", style = MaterialTheme.typography.titleMedium)
             Text(
                 "一度訳した文を端末に残し、同じ文はすぐ出します。2Bの訳があれば0.8Bでもそれを使い、" +
                     "2Bで訳すと0.8Bの訳を上書きします。${SqlitePersistentCache.MAX_ENTRIES}件を超えると古いものから消します。",
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(if (entries < 0) "数えています…" else "${entries}件", style = MaterialTheme.typography.bodyMedium)
-            OutlinedButton(enabled = entries > 0, onClick = { confirm = true }) { Text("訳の控えを消す") }
+            OutlinedButton(enabled = entries > 0, onClick = { confirm = true }) { Text("翻訳のキャッシュを消す") }
         }
     }
     if (confirm) {
         AlertDialog(
             onDismissRequest = { confirm = false },
-            title = { Text("訳の控えを消しますか") },
+            title = { Text("翻訳のキャッシュを消しますか") },
             text = { Text("${entries}件の訳をすべて消します。次からは訳し直すので、そのぶん時間がかかります。") },
             confirmButton = {
                 TextButton(onClick = {

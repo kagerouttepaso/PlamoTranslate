@@ -65,10 +65,10 @@ import kotlinx.coroutines.launch
  *
  * このサービスは部品をつなぐだけで、何をするかは決めない。
  * - 制御：画面翻訳の状態遷移（中核の [ScreenSession]）が、出来事を受け取って次の状態と作業を決める（[dispatch]）。
- * - 作業の実行：状態遷移が返した作業（[Effect]）を、端末の部品（撮影・文字認識・翻訳の流れ・訳の枠）で行い、結果をセッション番号つきの
+ * - 作業の実行：状態遷移が返した作業（[Effect]）を、端末の部品（撮影・文字認識・翻訳のストリーム・訳の枠）で行い、結果をセッション番号つきの
  *   出来事として状態遷移へ返す（[perform]）。
- * - 見張り：届いた画面を、待ちの間は開始の判定A（[StartJudge]）へ、訳している間と表示している間は有効性の判定B（[ValidityJudge]）へ渡す（[watch]）。
- * - 合図：浮遊ボタン・メニュー・ほかのアプリに触れた・ユーザー補助の画面の切り替わり・画面の回転を、出来事にして状態遷移へ渡す。
+ * - 監視：届いた画面を、待ちの間は開始の判定A（[StartJudge]）へ、訳している間と表示している間は有効性の判定B（[ValidityJudge]）へ渡す（[watch]）。
+ * - イベント：フローティングボタン・メニュー・ほかのアプリに触れた・ユーザー補助の画面の切り替わり・画面の回転を、出来事にして状態遷移へ渡す。
  *
  * 状態・判定器・作業の材料は、すべてメインスレッドで触る。
  */
@@ -83,7 +83,7 @@ class ScreenTranslateService : Service() {
     private val preferences by lazy { ScreenPreferences(this) }
     private val ocr by lazy { MultiScriptOcr(ModelCatalog.ocrDir(this)) }
 
-    /** 翻訳のメモリの控え。1回の翻訳ごとに開く翻訳の流れで共有する（モデルを切り替えても捨てず、確かさで選ぶ。永続の控えを消したら捨てる）。 */
+    /** 翻訳のメモリのキャッシュ。1回の翻訳ごとに開く翻訳のストリームで共有する（モデルを切り替えても捨てず、確かさで選ぶ。永続キャッシュを消したら捨てる）。 */
     private val memoryCache = MemoryCache()
     private var debugReceiver: BroadcastReceiver? = null
     private var orientation = Configuration.ORIENTATION_UNDEFINED
@@ -99,7 +99,7 @@ class ScreenTranslateService : Service() {
     /** 今の1回の翻訳の作業とデータ（[Work]）。状態遷移は番号だけを持つ。 */
     private var work: Work? = null
 
-    /** 撮る・のぞくために自分の表示を隠している間。見張りはこの間の画面を判定器へ渡さない。 */
+    /** 撮る・のぞくために自分の表示を隠している間。監視はこの間の画面を判定器へ渡さない。 */
     private var hiding = false
     private var modelJob: Job? = null
 
@@ -108,10 +108,10 @@ class ScreenTranslateService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /** 画面を回したら、前の向きで置いた訳の枠は位置が合わないので消す。浮遊ボタンは今の画面の同じ割合の位置へ移す。 */
+    /** 画面を回したら、前の向きで置いた訳の枠は位置が合わないので消す。フローティングボタンは今の画面の同じ割合の位置へ移す。 */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        // 端末の明暗が変わったら、浮遊ボタンを今のテーマの色で塗り直す（メニューは開くたびに読み直す）
+        // 端末の明暗が変わったら、フローティングボタンを今のテーマの色で塗り直す（メニューは開くたびに読み直す）
         button?.applyPalette()
         if (newConfig.orientation == orientation) return
         orientation = newConfig.orientation
@@ -152,7 +152,7 @@ class ScreenTranslateService : Service() {
             it.onStatusTap = { dispatch(SessionEvent.StatusTapped) }
             it.opaqueWithAccessibility = { preferences.opaqueOverlay }
         }
-        // ユーザー補助がつながっていれば、ほかのアプリ・画面への切り替わりを合図にする（docs/資料/端末の能力.md「問い1」）
+        // ユーザー補助がつながっていれば、ほかのアプリ・画面への切り替わりをイベントにする（docs/資料/端末の能力.md「問い1」）
         OverlayAccessibilityService.onWindowChanged = ::onWindowChanged
         OverlayAccessibilityService.onScrolled = ::onScrolled
         touchWatcher = TouchWatcher(this, wm, ::onScreenTouch).also { it.show() }
@@ -173,7 +173,7 @@ class ScreenTranslateService : Service() {
         if (state.phase == Phase.Watching) startJudge.reset(SystemClock.uptimeMillis())
         scope.launch { watch() }
         scope.launch { watchAccessibility() }
-        // 設定の「画面の色」を変えたら、浮遊ボタンを塗り直す
+        // 設定の「画面の色」を変えたら、フローティングボタンを塗り直す
         scope.launch { ThemePreferences.mode.collect { button?.applyPalette() } }
         registerDebugReceiver()
         _running.value = true
@@ -303,7 +303,7 @@ class ScreenTranslateService : Service() {
         }
     }
 
-    /** 訳す・流し込む工程：空の訳の枠を出し、翻訳の流れを開いて訳を流し込む。 */
+    /** 訳す・流し込む工程：空の訳の枠を出し、翻訳のストリームを開いて訳を流し込む。 */
     private fun translate(session: Int) {
         val w = workOf(session) ?: return
         val frame = w.frame
@@ -322,8 +322,8 @@ class ScreenTranslateService : Service() {
                 return@launch
             }
             val run = TranslationRun(ready.model.label, SystemClock.uptimeMillis()).also(w::translating)
-            // 1回の翻訳ごとに翻訳の流れを開き、終わったら閉じる（docs/設計/翻訳コア.md「翻訳の契約」）。
-            // メモリの控えはサービスが持って翻訳どうしで共有し、永続の控え（端末のデータベース）で次に始めたときも使う
+            // 1回の翻訳ごとに翻訳のストリームを開き、終わったら閉じる（docs/設計/翻訳コア.md「翻訳の契約」）。
+            // メモリのキャッシュはサービスが持って翻訳どうしで共有し、永続キャッシュ（端末のデータベース）で次に始めたときも使う
             val persistent = SqlitePersistentCache.get(this@ScreenTranslateService)
             val stream = Translations.open(this, this@ScreenTranslateService, TranslationStream.Options(source, SCREEN_TARGET), memoryCache, persistent)
             try {
@@ -333,7 +333,7 @@ class ScreenTranslateService : Service() {
                         is SegmentUpdate.Partial -> overlay?.setTranslation(u.id.toInt(), u.text)
                         is SegmentUpdate.Final -> {
                             overlay?.setTranslation(u.id.toInt(), u.text)
-                            // 最後の確定で状態遷移が Finished を返し、その場で記録する（finished）。それより前に控えの数を渡す
+                            // 最後の確定で状態遷移が Finished を返し、その場で記録する（finished）。それより前にキャッシュのヒット数を渡す
                             run.stats = stream.stats
                             dispatch(SessionEvent.SegmentDone(session))
                         }
@@ -363,7 +363,7 @@ class ScreenTranslateService : Service() {
         val st = run.stats
         Logs.i("画面翻訳: ${page.lines}行・${page.units}単位中${page.targets.size}件（${frame.choice.grouping}）、撮影 ${frame.captureMillis}ms（${frame.frames}枚）、" +
                 "文字認識 ${page.ocrMillis}ms、翻訳 ${translateMillis}ms、モデル ${run.model}、重要度 ${importance()}、画面 ${frame.size}、状態バー ${frame.statusBar}px" +
-                (st?.let { "、控え メモリ${it.memoryHits}・データベース${it.storedHits}、訳した${it.pieces}片（訳し直し${it.retried}、打ち切り${it.stopped}）" } ?: ""),
+                (st?.let { "、キャッシュ メモリ${it.memoryHits}・データベース${it.storedHits}、訳した${it.pieces}チャンク（訳し直し${it.retried}、打ち切り${it.stopped}）" } ?: ""),
         )
     }
 
@@ -409,10 +409,10 @@ class ScreenTranslateService : Service() {
         }
     }
 
-    // ---- 見張り：届いた画面を判定器へ ----
+    // ---- 監視：届いた画面を判定器へ ----
 
     /**
-     * [AUTO_POLL_MS] ごとに新しく届いた画面を格子に縮め（[ScreenCapturer.latestThumb]）、待ちの間は開始の判定Aへ、
+     * [AUTO_POLL_MS] ごとに新しく届いた画面をグリッドに縮め（[ScreenCapturer.latestThumb]）、待ちの間は開始の判定Aへ、
      * 訳している間と表示している間は有効性の判定Bへ渡す。判定の結果は出来事にして状態遷移へ渡す。
      */
     private suspend fun watch() {
@@ -444,9 +444,9 @@ class ScreenTranslateService : Service() {
         }
     }
 
-    // ---- 合図 ----
+    // ---- イベント ----
 
-    /** 浮遊ボタンのタップ。タップで訳すときは訳す・消す、自動で訳すときは見張りを止める・再開する（状態遷移が決める）。 */
+    /** フローティングボタンのタップ。タップで訳すときは訳す・消す、自動で訳すときは監視を止める・再開する（状態遷移が決める）。 */
     private fun onButtonTap() {
         menu?.dismiss()
         dispatch(SessionEvent.ButtonTapped)
@@ -458,7 +458,7 @@ class ScreenTranslateService : Service() {
         dispatch(SessionEvent.OutsideTouched)
     }
 
-    /** ほかのアプリ・画面への切り替わり（ユーザー補助の知らせ。アプリの切り替え・ホーム・最近使ったアプリ・別の画面）。 */
+    /** ほかのアプリ・画面への切り替わり（ユーザー補助のイベント。アプリの切り替え・ホーム・最近使ったアプリ・別の画面）。 */
     private fun onWindowChanged() {
         if (state.session == null) return
         Logs.i("画面翻訳: ほかのアプリの画面が切り替わったので取り消した")
@@ -466,9 +466,9 @@ class ScreenTranslateService : Service() {
     }
 
     /**
-     * ほかのアプリの中身がスクロールした（ユーザー補助の知らせ）。原文が動いたので、訳している途中の処理と出している訳を取り消す。
-     * ユーザー補助の知らせは約0.1秒間引いて届くので、通常のモードでは判定Bの「画面が変わった」が先に取り消すことが多い。
-     * 判定Bが遅いとき（動く画面のモードは画面全体の変化を見ず、外周を3回の中央値で比べる）に先に効く予備の合図（2026-11-12に実機で確かめた）。
+     * ほかのアプリの中身がスクロールした（ユーザー補助のイベント）。原文が動いたので、訳している途中の処理と出している訳を取り消す。
+     * ユーザー補助のイベントは約0.1秒間引いて届くので、通常のモードでは判定Bの「画面が変わった」が先に取り消すことが多い。
+     * 判定Bが遅いとき（動く画面のモードは画面全体の変化を見ず、外周を3回の中央値で比べる）に先に効く予備のシグナル（2026-11-12に実機で確かめた）。
      */
     private fun onScrolled() {
         if (state.session == null) return
@@ -478,7 +478,7 @@ class ScreenTranslateService : Service() {
 
     /**
      * ユーザー補助が「有効なのにつながっていない」（端末に止められて切り離された）ことを見つけて知らせる（docs/設計/画面翻訳.md
-     * 「使える能力と組み立て」）。切り離されると、訳の枠は透ける重ね表示に、合図は画面の見張りだけになる。
+     * 「使える能力と組み立て」）。切り離されると、訳の枠は透ける重ね表示に、イベントは画面の監視だけになる。
      * 始めた直後はつながるまで少しかかるので、待ってから見る。その後は、つながりが切れたときに見る。
      */
     private suspend fun watchAccessibility() {
@@ -512,7 +512,7 @@ class ScreenTranslateService : Service() {
         val (x, y) = button?.position ?: return
         dispatch(SessionEvent.MenuOpened)
         menu?.show(x, y, menuEntries::build)
-        // 翻訳モデルの読み込みが進んだら、選べるモデルの印を描き直す（メニューは選んでも閉じないため）
+        // 翻訳モデルの読み込みが進んだら、モデルの選択肢の表示を描き直す（メニューは選んでも閉じないため）
         menuJob?.cancel()
         menuJob = scope.launch { EngineHolder.state.drop(1).collect { menu?.refresh() } }
     }
@@ -604,7 +604,7 @@ class ScreenTranslateService : Service() {
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setContentTitle("画面翻訳中")
-            .setContentText("浮遊ボタンで翻訳。長押しで言語の選択と終了")
+            .setContentText("フローティングボタンで翻訳。長押しで言語の選択と終了")
             .addAction(Notification.Action.Builder(null, "終了", stop).build())
             .setOngoing(true)
             .build()
@@ -617,7 +617,7 @@ class ScreenTranslateService : Service() {
         /** 自分の表示を隠してから、隠れた画面が描かれるのを待つ時間。 */
         private const val HIDE_SETTLE_MS = 50L
 
-        /** 画面を見る間隔。縮めた格子を比べるだけなので軽い。 */
+        /** 画面を見る間隔。縮めたグリッドを比べるだけなので軽い。 */
         private const val AUTO_POLL_MS = 200L
 
         /** 触れてから訳の枠の下をのぞくまでの待ち（台詞送りなど、触れた操作に画面が応えて描き終わるのを待つ）。 */

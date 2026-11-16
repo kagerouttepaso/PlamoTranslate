@@ -10,7 +10,7 @@ internal object LlamaNative {
     }
 
     /**
-     * ネイティブのログの受け口（`plamo_llm.cpp` の emit_log が、JVM につながっているスレッドから呼ぶ）。ログの出口 [Logs] へ渡す。
+     * ネイティブのログのコールバック（`plamo_llm.cpp` の emit_log が、JVM につながっているスレッドから呼ぶ）。ロガー [Logs] へ渡す。
      * [priority] は Android のログの重さ（3 デバッグ、4 情報、5 警告、6 誤り）、[utf8] は1行の文。
      */
     @JvmStatic
@@ -54,12 +54,12 @@ internal object LlamaNative {
         /** 依頼の生成が終わった。ここで次の依頼を足してよい。 */
         fun onFinished(id: Int)
 
-        /** 流れ1本分のコンテキストに入らないので訳さなかった。 */
+        /** シーケンス1本分のコンテキストに入らないので訳さなかった。 */
         fun onTooLong(id: Int)
     }
 
     /**
-     * [callback] から依頼を受け取り、最大 [slots] 本（[nativeLoad] の nSeqMax まで）を同時に訳す。訳し終わった流れには
+     * [callback] から依頼を受け取り、最大 [slots] 本（[nativeLoad] の nSeqMax まで）を同時に訳す。訳し終わったシーケンスには
      * すぐ次の依頼を入れる。全部を合わせた生成トークン数、または負のエラーコード（-1 トークン化失敗、-3 推論失敗、-4 受け渡しの失敗）。
      * 1文だけ訳すときも、slots を1にしてこれを使う（生成の処理はこの1本だけ）。
      */

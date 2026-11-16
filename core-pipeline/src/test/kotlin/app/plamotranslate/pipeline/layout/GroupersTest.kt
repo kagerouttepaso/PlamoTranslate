@@ -110,7 +110,7 @@ class GroupersTest {
     }
 
     @Test
-    fun 吹き出し_横長の行を含むまとまりは縦書きにしない() {
+    fun 吹き出し_横長の行を含むブロックは縦書きにしない() {
         val lines = listOf(line("縦", 0, 0, 20, 100), line("横の行", 0, 0, 200, 20))
         assertFalse(TextLayout.units(lines, Grouping.BUBBLE).single().vertical)
     }

@@ -20,7 +20,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 翻訳の契約（[TranslationStream]）の振る舞い。偽のエンジン（[FakeEngine]）で、片への分け方・同時に訳す・訳し直し・控え・取り消しを確かめる。
+ * 翻訳の契約（[TranslationStream]）の振る舞い。偽のエンジン（[FakeEngine]）で、チャンクへの分け方・同時に訳す・訳し直し・キャッシュ・取り消しを確かめる。
  */
 class TranslationStreamTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -30,7 +30,7 @@ class TranslationStreamTest {
 
     /**
      * 偽のエンジン。依頼の原文を行ごとに [translate] で訳し、1文字ずつ流す。最大 [slots] 本を1文字ずつ交互に進め、
-     * 空いた流れにはすぐ次の依頼を入れる（本物の nativeTranslateJobs と同じ順番）。
+     * 空いたシーケンスにはすぐ次の依頼を入れる（本物の nativeTranslateJobs と同じ順番）。
      */
     private class FakeEngine(
         override val parallel: Int,
@@ -75,7 +75,7 @@ class TranslationStreamTest {
     }
 
     /**
-     * 偽の永続の控え。[saved] は「範囲の id|原文」→ 訳と確かさ。書いた呼び出しは [stores] に残す。
+     * 偽の永続キャッシュ。[saved] は「範囲の id|原文」→ 訳と確かさ。書いた呼び出しは [stores] に残す。
      * [io] なら本物と同じく IO のスレッドへ移って書く（取り消されていれば止まる）。
      */
     private class FakePersistent(val io: Boolean = false) : PersistentCache {
@@ -126,13 +126,13 @@ class TranslationStreamTest {
 
     @Test
     fun 複数行の文は全部の行を訳し改行を残す() {
-        // テキスト翻訳は入力の全体を1つの文として頼む。片は1行に限るので、行ごとに分けてから訳し、元の改行へ戻す
+        // テキスト翻訳は入力の全体を1つの文として頼む。チャンクは1行に限るので、行ごとに分けてから訳し、元の改行へ戻す
         for (parallel in listOf(1, 4)) {
             val engine = FakeEngine(parallel = parallel)
             val s = stream(engine)
             s.submit(listOf(Segment(1, "one\ntwo\n\nfour\r\nfive")))
             assertEquals("parallel=$parallel", "訳「one」\n訳「two」\n\n訳「four」\n訳「five」", finals(s.collectUntilDone(setOf(1)))[1])
-            assertTrue("parallel=$parallel：片に改行を入れない", engine.requests.all { r -> r.split('\n').none { it.isBlank() } })
+            assertTrue("parallel=$parallel：チャンクに改行を入れない", engine.requests.all { r -> r.split('\n').none { it.isBlank() } })
         }
     }
 
@@ -192,13 +192,13 @@ class TranslationStreamTest {
         s.submit(listOf(Segment(1, "Hello"), Segment(2, "Bye")))
         val updates = s.collectUntilDone(setOf(1, 2))
         assertEquals(mapOf(1L to "訳「Hello」", 2L to "訳「Bye」"), finals(updates))
-        // つないだ2片とも、1片ずつ訳し直した
+        // つないだ2チャンクとも、1チャンクずつ訳し直した
         assertEquals(2, s.stats.retried)
         assertEquals(listOf("Hello Bye", "Hello", "Bye"), fake.requests)
     }
 
     @Test
-    fun 同じ片は一回だけ訳す() {
+    fun 同じチャンクは一回だけ訳す() {
         val engine = FakeEngine(parallel = 4)
         val s = stream(engine)
         s.submit(listOf(Segment(1, "OK"), Segment(2, "OK"), Segment(3, "Cancel")))
@@ -212,7 +212,7 @@ class TranslationStreamTest {
         val long = "This is the first sentence of a long message. ".repeat(4) + "And this is the end of it."
         val parallel = FakeEngine(parallel = 4)
         val updates = stream(parallel).also { it.submit(listOf(Segment(1, long))) }.collectUntilDone(setOf(1))
-        // 文の切れ目で分けた片ごとに依頼し、訳をつないで1つの文の訳にする
+        // 文の切れ目で分けたチャンクごとに依頼し、訳をつないで1つの文の訳にする
         val pieces = TranslationChecks.splitLong(long, TranslationChecks.PARALLEL_SPLIT)
         assertTrue(pieces.size > 1)
         assertEquals(pieces.size, parallel.requests.size)
@@ -223,7 +223,7 @@ class TranslationStreamTest {
     }
 
     @Test
-    fun メモリの控えは流れどうしで共有する() {
+    fun メモリのキャッシュはストリームどうしで共有する() {
         val engine = FakeEngine(parallel = 4)
         val cache = MemoryCache()
         stream(engine, cache).also { it.submit(listOf(Segment(1, "Hello"))) }.collectUntilDone(setOf(1))
@@ -237,7 +237,7 @@ class TranslationStreamTest {
     }
 
     @Test
-    fun 永続の控えを引き_写しは残さない() {
+    fun 永続キャッシュを引き_写しは残さない() {
         val persistent = FakePersistent()
         val scope = TranslationStream.Options(Language.EN, Language.JA).cacheScope
         persistent.saved["${scope.id}|Saved"] = "保存済み" to SMALL.quality
@@ -253,7 +253,7 @@ class TranslationStreamTest {
     }
 
     @Test
-    fun 永続の控えで当たった片はメモリの控えにも入れる() {
+    fun 永続キャッシュで当たったチャンクはメモリのキャッシュにも入れる() {
         val persistent = FakePersistent()
         persistent.saved["${TranslationStream.Options(Language.EN, Language.JA).cacheScope.id}|Saved"] = "保存済み" to SMALL.quality
         val cache = MemoryCache()
@@ -268,8 +268,8 @@ class TranslationStreamTest {
     }
 
     @Test
-    fun 永続の控えの訳は確かさを保ってメモリの控えに入れる() {
-        // 小さいモデルの流れが大きいモデルの訳を永続の控えから引いたら、大きいモデルに替えた後もメモリの控えで当たる
+    fun 永続キャッシュの訳は確かさを保ってメモリのキャッシュに入れる() {
+        // 小さいモデルのストリームが大きいモデルの訳を永続キャッシュから引いたら、大きいモデルに替えた後もメモリのキャッシュで当たる
         val persistent = FakePersistent()
         persistent.saved["${TranslationStream.Options(Language.EN, Language.JA).cacheScope.id}|Hello"] = "大「Hello」" to LARGE.quality
         val cache = MemoryCache()
@@ -283,7 +283,7 @@ class TranslationStreamTest {
     }
 
     @Test
-    fun 永続の控えを持つ流れと持たない流れでメモリの控えを共有しても捨て合わない() {
+    fun 永続キャッシュを持つストリームと持たないストリームでメモリのキャッシュを共有しても捨て合わない() {
         val persistent = FakePersistent()
         persistent.generation = 3
         val cache = MemoryCache()
@@ -301,7 +301,7 @@ class TranslationStreamTest {
     }
 
     @Test
-    fun 控えの範囲は契約が依頼の条件から作る() {
+    fun キャッシュの範囲は契約が依頼の条件から作る() {
         // 機能も層の実装も範囲を組まない。訳を変える条件（言語・訳す先・言い方・背景）が全部入る
         val persistent = FakePersistent()
         val options = TranslationStream.Options(null, Language.JA, JapaneseForm.PLAIN, context = "ボタン")
@@ -319,7 +319,7 @@ class TranslationStreamTest {
     }
 
     @Test
-    fun 範囲の違う流れどうしでメモリの控えを共有しても混ざらない() {
+    fun 範囲の違うストリームどうしでメモリのキャッシュを共有しても混ざらない() {
         val engine = FakeEngine(parallel = 1)
         val cache = MemoryCache()
         stream(engine, cache).also { it.submit(listOf(Segment(1, "Hello"))) }.collectUntilDone(setOf(1))
@@ -331,8 +331,8 @@ class TranslationStreamTest {
     }
 
     @Test
-    fun メモリの控えは今のモデル以上の確かさの訳だけを使う() {
-        // モデルを切り替えても控えは捨てない。小さいモデルの訳は大きいモデルでは使わず、大きいモデルの訳は小さいモデルでも使う
+    fun メモリのキャッシュは今のモデル以上の確かさの訳だけを使う() {
+        // モデルを切り替えてもキャッシュは捨てない。小さいモデルの訳は大きいモデルでは使わず、大きいモデルの訳は小さいモデルでも使う
         val small = FakeEngine(parallel = 1) { "小「$it」" }
         val large = FakeEngine(parallel = 1) { "大「$it」" }
         val cache = MemoryCache()
@@ -348,12 +348,12 @@ class TranslationStreamTest {
     }
 
     @Test
-    fun 永続の控えを消したらメモリの控えも捨て_消す前の世代で書く() {
+    fun 永続キャッシュを消したらメモリのキャッシュも捨て_消す前の世代で書く() {
         val persistent = FakePersistent()
         val cache = MemoryCache()
         val engine = FakeEngine(parallel = 1)
         stream(engine, cache, persistent).also { it.submit(listOf(Segment(1, "Hello"))) }.collectUntilDone(setOf(1))
-        // 設定の画面で消した。消す前に訳したメモリの控えは使わない
+        // 設定の画面で消した。消す前に訳したメモリのキャッシュは使わない
         persistent.generation = 1
         // 訳している途中にもう一度消す。この実行の訳は、訳し始める前の世代（1）で書く（実装はそれが今と違えば書かない）
         engine.onRequest = { persistent.generation = 2 }
@@ -367,9 +367,9 @@ class TranslationStreamTest {
     }
 
     @Test
-    fun 最後の確定の直後に閉じても訳を控えに残す() {
-        // 確定はエンジンが戻る前に流れるので、購読する側が最後の確定を受け取ってすぐ閉じると、閉じたあとに控えへ書く段が来る（画面翻訳）。
-        // 本物のエンジンは戻るときに取り消しを確かめ（ensureActive）、本物の控えは IO のスレッドへ移る（withContext）ので、どちらも取り消しで止まる
+    fun 最後の確定の直後に閉じても訳をキャッシュに残す() {
+        // 確定はエンジンが戻る前に流れるので、購読する側が最後の確定を受け取ってすぐ閉じると、閉じたあとにキャッシュへ書く段が来る（画面翻訳）。
+        // 本物のエンジンは戻るときに取り消しを確かめ（ensureActive）、本物のキャッシュは IO のスレッドへ移る（withContext）ので、どちらも取り消しで止まる
         val persistent = FakePersistent(io = true)
         val s = stream(UntilCancelled(), persistent = persistent)
         s.submit(listOf(Segment(1, "Hello")))
@@ -380,7 +380,7 @@ class TranslationStreamTest {
     }
 
     @Test
-    fun 流れを開いたスコープを取り消しても訳を控えに残す() {
+    fun ストリームを開いたスコープを取り消しても訳をキャッシュに残す() {
         val persistent = FakePersistent(io = true)
         val owner = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val s = stream(UntilCancelled(), persistent = persistent, scope = owner)
@@ -417,7 +417,7 @@ class TranslationStreamTest {
 
     @Test
     fun 一部をやめた文は訳さない() {
-        // 1片ずつ訳すコア（同時に2本）で、1件目を訳し始めたところで、まだ並んでいる2件目をやめる
+        // 1チャンクずつ訳すコア（同時に2本）で、1件目を訳し始めたところで、まだ並んでいる2件目をやめる
         val engine = FakeEngine(parallel = 2)
         val s = stream(engine)
         engine.onRequest = { n -> if (n == 1) s.cancel(listOf(2L)) }

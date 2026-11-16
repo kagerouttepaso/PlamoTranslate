@@ -77,10 +77,10 @@ interface SpeechEngine : AutoCloseable {
     }
 }
 
-/** VAD がその音声の後に出した合図。[phraseEnded] は、文の区切りの無音が続いて1つの文が終わったこと。 */
+/** VAD がその音声の後に出したシグナル。[phraseEnded] は、文の区切りの無音が続いて1つの文が終わったこと。 */
 data class VoiceSignal(val speaking: Boolean, val phraseEnded: Boolean)
 
-/** 差し込み口：話しているかと文の終わりを見分ける（VAD）。実装は `core-asr`（Silero VAD）。 */
+/** インターフェース：話しているかと文の終わりを見分ける（VAD）。実装は `core-asr`（Silero VAD）。 */
 interface VoiceActivity : AutoCloseable {
     fun accept(samples: FloatArray): VoiceSignal
 

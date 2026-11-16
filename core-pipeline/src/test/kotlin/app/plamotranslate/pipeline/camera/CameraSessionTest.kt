@@ -17,7 +17,7 @@ import org.junit.Test
 class CameraSessionTest {
     private val menu = Settings(source = null, target = Language.JA, table = true)
 
-    /** 表・メニューのモードで、流れを開き、渡しておく数を [intake] にした制御。 */
+    /** 表・メニューのモードで、ストリームを開き、渡しておく数を [intake] にした制御。 */
     private fun session(intake: Int = 2, settings: Settings = menu) = CameraSession<Unit>(
         lineOf = { text, box -> TextLine(text, box, kana = false, latin = true) },
     ).also {
@@ -60,7 +60,7 @@ class CameraSessionTest {
     }
 
     @Test
-    fun 渡しておく数は流れのコアが決める() {
+    fun 渡しておく数はストリームのコアが決める() {
         // 1件ずつのコアは行をつないで1回で訳すので、つなげる数まで渡す
         assertEquals(SequentialCore.MAX_LINES, intakeFor(1))
         assertEquals(4, intakeFor(4))
@@ -189,12 +189,12 @@ class CameraSessionTest {
     }
 
     @Test
-    fun 設定が変わったら訳を捨てて流れを開き直し前の流れの結果は無視する() {
+    fun 設定が変わったら訳を捨ててストリームを開き直し前のストリームの結果は無視する() {
         val s = session()
         val id = ids(s.readTwice("cold brew coffee")).single()
         val effects = s.handle(Event.SettingsChanged(menu.copy(target = Language.EN)))
         assertEquals(Effect.OpenStream(menu.copy(target = Language.EN).options), effects.single())
-        // 開くまでは渡さない。前の流れの番号の結果は無視する
+        // 開くまでは渡さない。前のストリームの番号の結果は無視する
         assertTrue(s.handle(Event.Final(id, "古い訳")).isEmpty())
         assertNull(s.boxes().single().translation)
         assertEquals(listOf("cold brew coffee"), submitted(s.handle(Event.StreamOpened)))

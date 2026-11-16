@@ -65,7 +65,7 @@ class ExitJudgeTest {
     }
 
     @Test
-    fun 印はOSに預けた形から戻る() {
+    fun 識別子はOSに預けた形から戻る() {
         val mark = ProcessMark.create()
         assertEquals(mark, ProcessMark.decode(mark.encode()))
         assertEquals(mark.copy(intended = true), ProcessMark.decode(mark.copy(intended = true).encode()))
@@ -76,7 +76,7 @@ class ExitJudgeTest {
 
     @Test
     fun 例外で落ちたときの2件のOSの記録は1件にする() {
-        // 受け口の直後の記録（印あり）と、停止の知らせを閉じた後の記録（印なし、裏）の2件が残る（featurelab で確かめた）
+        // 例外のハンドラーの直後の記録（識別子あり）と、「停止しました」を閉じた後の記録（識別子なし、裏）の2件が残る（featurelab で確かめた）
         val mark = ProcessMark("p1")
         val first = exit(ExitCause.EXCEPTION, time = 100, pid = 7, mark = mark)
         val second = exit(ExitCause.EXCEPTION, time = 5_800, pid = 7, importance = ProcessImportance.BACKGROUND)
@@ -87,7 +87,7 @@ class ExitJudgeTest {
     }
 
     @Test
-    fun 読んだ時刻より前と記録しないものは取り込まないが目印は進める() {
+    fun 読んだ時刻より前と記録しないものは取り込まないが読み取り位置は進める() {
         val old = exit(ExitCause.EXCEPTION, time = 10, pid = 1)
         val stopped = exit(ExitCause.USER_STOPPED, time = 50, pid = 2)
         val plan = ExitSelection.plan(listOf(old, stopped), { it }, readUntil = 20)
@@ -97,7 +97,7 @@ class ExitJudgeTest {
     }
 
     @Test
-    fun 印の違う記録は同じpidでも別のプロセス() {
+    fun 識別子の違う記録は同じpidでも別のプロセス() {
         assertFalse(ExitJudge.sameProcess(exit(ExitCause.EXCEPTION, mark = ProcessMark("a")), exit(ExitCause.EXCEPTION, mark = ProcessMark("b"))))
         assertTrue(ExitJudge.sameProcess(exit(ExitCause.EXCEPTION, mark = ProcessMark("a")), exit(ExitCause.EXCEPTION)))
     }

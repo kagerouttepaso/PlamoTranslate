@@ -33,7 +33,7 @@
         <service
             android:name=".LabA11yService"
             android:exported="true"
-            android:label="機能テスト（合図の計測）"
+            android:label="機能テスト（イベントの計測）"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />

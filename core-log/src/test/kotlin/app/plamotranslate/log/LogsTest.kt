@@ -14,7 +14,7 @@ class LogsTest {
     }
 
     @Test
-    fun 差した書き先へ書く() {
+    fun 渡した出力先へ書く() {
         Logs.install(listOf(sink), userText = false)
         Logs.i("始めた")
         Logs.w("失敗", IllegalStateException("理由"))
@@ -34,7 +34,7 @@ class LogsTest {
     }
 
     @Test
-    fun 書き先の失敗でほかの書き先と呼んだ側を止めない() {
+    fun 出力先の失敗でほかの出力先と呼んだ側を止めない() {
         Logs.install(listOf(LogSink { _, _, _, _ -> error("壊れた") }, sink), userText = false)
         Logs.e("落ちた")
         assertEquals(listOf("ERROR 落ちた"), lines)

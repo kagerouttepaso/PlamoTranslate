@@ -15,7 +15,7 @@ class CrashReport(
     val files: Map<String, ByteArray>,
 )
 
-/** 記録の中身の組み立て。どこから知ったか（例外の受け口・OS の終わり方の記録）ごとに、入れるファイルを決める。 */
+/** 記録の中身の組み立て。どこから知ったか（例外のハンドラー・OS の終わり方の記録）ごとに、入れるファイルを決める。 */
 object CrashReports {
     const val REPORT = "report.txt"
     const val EXIT = "exit.txt"
@@ -32,7 +32,7 @@ object CrashReports {
     fun timeText(time: Long): String = TIME.format(Instant.ofEpochMilli(time))
 
     /**
-     * 例外の受け口で、落ちる直前に書く記録。プロセスが終わる前に書き切るため、ログの写しは入れない
+     * 例外のハンドラーで、落ちる直前に書く記録。プロセスが終わる前に書き切るため、ログの写しは入れない
      * （次の起動で OS の終わり方の記録を取り込むときに、同じプロセスの記録へ足す）。
      */
     fun ofException(time: Long, pid: Int, mark: ProcessMark?, thread: String, error: Throwable, device: String): CrashReport {
