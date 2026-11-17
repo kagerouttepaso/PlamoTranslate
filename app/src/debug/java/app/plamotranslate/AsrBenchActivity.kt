@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 音声認識の比べ（デバッグ版だけ。docs/作業中/会話翻訳に守備範囲の広い音声認識を足す.md「検証」）。
+ * 音声認識の比べ（デバッグ版だけ。docs/判断/2026-11-17_音声認識モデルを設定で選び言語の識別を独立した段にする.md）。
  *
  * 外部ファイル置き場の `bench/asr/` の WAV（16kHz・モノラル）を、SenseVoice・Whisper tiny の言語の識別・Qwen3-ASR
  * （言語の指定なし／識別した言語を指定）で1つずつ処理し、時間と結果を logcat と `bench/asr-result.tsv` に書く。

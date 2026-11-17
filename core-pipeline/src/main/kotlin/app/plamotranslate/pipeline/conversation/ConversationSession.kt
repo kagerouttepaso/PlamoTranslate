@@ -86,7 +86,7 @@ class ConversationSession(
 
         /**
          * 音声認識の混み具合（[RecognitionLoad.urgent]：確定に要る書き起こしが残っている）。残っている間は途中訳を始めない。
-         * 翻訳と音声認識が CPU を取り合うと、確定の書き起こしが遅れるため（docs/作業中/会話翻訳に守備範囲の広い音声認識を足す.md「CPU の割り当て」）。
+         * 翻訳と音声認識が CPU を取り合うと、確定の書き起こしが遅れるため（docs/設計/会話翻訳.md「認識の段と CPU の割り当て」）。
          */
         data class RecognitionBusy(val busy: Boolean) : Event
 

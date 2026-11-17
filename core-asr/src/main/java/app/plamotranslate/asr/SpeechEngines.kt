@@ -12,7 +12,7 @@ import java.io.File
 /**
  * 音声認識の実装の値（スレッド数・VAD）。0 は各モデルの既定（[SpeechEngines.load]）。
  * CPU の割り当ては、音声認識・言語の識別・翻訳（llama.cpp）の合計が端末のコアに収まるように決める
- * （docs/作業中/会話翻訳に守備範囲の広い音声認識を足す.md「CPU の割り当て」）。設定の詳細設定で変えて測れる。
+ * （docs/設計/会話翻訳.md「認識の段と CPU の割り当て」）。設定の詳細設定で変えて測れる。
  */
 data class AsrTuning(
     /** 書き起こしのスレッド数。0 ならモデルの既定（SenseVoice 4、Qwen3-ASR 6）。 */
@@ -28,7 +28,7 @@ data class AsrTuning(
 }
 
 /**
- * 音声認識の組み立て（docs/作業中/会話翻訳に守備範囲の広い音声認識を足す.md「直した後の構造」）。
+ * 音声認識の組み立て（docs/設計/会話翻訳.md「エンジンと出来事」）。
  * 選んだモデル（[SpeechModel]）ごとに、区切り（Silero VAD）・言語の識別・文字起こしのブロックをつなぎ、中核の流れ（[SpeechPipeline]）に渡す。
  * 言語を自分で判定するモデル（SenseVoice）はそのまま、判定しないモデル（Qwen3-ASR）は Whisper tiny の識別を前に置く。
  *

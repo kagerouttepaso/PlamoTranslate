@@ -41,7 +41,7 @@ class RecognitionPreferences(context: Context) {
             ?: SpeechModel.DEFAULT
         set(value) = prefs.edit().putString("model", value.name).apply()
 
-    // ---- 調整（設定の詳細設定で変える。docs/作業中/会話翻訳に守備範囲の広い音声認識を足す.md「計測」） ----
+    // ---- 調整（設定の詳細設定で変える。docs/設計/会話翻訳.md「認識の段と CPU の割り当て」） ----
 
     /** 書き起こしのスレッド数（0はモデルの既定）。 */
     var transcribeThreads: Int

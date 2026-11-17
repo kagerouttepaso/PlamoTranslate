@@ -1,7 +1,7 @@
 package app.plamotranslate.pipeline.speech
 
 /**
- * 区切り（[SpeechSegmenter]）が認識のワーカーに頼むジョブ（docs/作業中/会話翻訳に守備範囲の広い音声認識を足す.md「認識を段に分ける」）。
+ * 区切り（[SpeechSegmenter]）が認識のワーカーに頼むジョブ（docs/設計/会話翻訳.md「認識の段と CPU の割り当て」）。
  * 区切りはジョブを出して待たずに次の音声へ進み、結果（[RecognitionOutput]）を受け取ってから次を決める。
  * 音声は頼んだ時点の写しを持つので、結果が届くまでにためた音声が区切られても影響しない。位置は聞き始めからのサンプル数。
  */

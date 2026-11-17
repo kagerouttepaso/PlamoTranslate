@@ -3,7 +3,7 @@ package app.plamotranslate.pipeline.speech
 import app.plamotranslate.llm.Language
 
 /**
- * 音声認識モデルの一覧（docs/作業中/会話翻訳に守備範囲の広い音声認識を足す.md）。設定の画面で前もって選び、
+ * 音声認識モデルの一覧（docs/設計/会話翻訳.md「エンジンと出来事」）。設定の画面で前もって選び、
  * 会話翻訳とテキスト翻訳の音声入力が使う。会話で選べる言語は「モデルが聞ける」かつ「PLaMo が訳せる」言語（[languages]）。
  *
  * 言語の識別は2層にする。[identifiesLanguage] が true のモデルは、モデル自身の言語の判定を使う（書き起こした言語をスコア1とする）。
