@@ -18,7 +18,10 @@ class TranslationException(message: String) : Exception(message)
  * 原因の候補を設定の画面で切り替えて試せるようにした。docs/設計/翻訳コア.md「性能の設定」）。既定は今までの動き。
  */
 data class CpuOptions(
-    /** 0なら自動（コア数−2、最大6）。 */
+    /**
+     * 0なら自動（[TranslationEngine.defaultThreads]）。コアの最高周波数で、小さいコアがコアの半分以下なら大きいコアの数、
+     * そうでなければ（周波数が読めない端末も）コア数−2。どちらも2〜6に収める。
+     */
     val threads: Int = 0,
     /** 性能ヒント（ADPF）で周波数・配置を上げてもらう。 */
     val boost: Boolean = true,
@@ -101,7 +104,10 @@ class TranslationEngine private constructor(
         }
     }
 
-    /** 計測用：性能ヒントの有無とスレッド数（0なら変えない）を切り替える。 */
+    /**
+     * 性能ヒントの有無とスレッド数（0なら変えない）を、読み直さずに切り替える。会話翻訳（`ConversationViewModel`）が聞いている間の
+     * 翻訳のスレッド数を変えるのに使い、デバッグ版では画面翻訳の adb からの計測（`ScreenTranslateService`）も使う。
+     */
     suspend fun configure(boost: Boolean, threads: Int = 0) =
         withContext(dispatcher) { LlamaNative.nativeConfigure(handle, boost, threads) }
 
@@ -124,13 +130,13 @@ class TranslationEngine private constructor(
 
         /**
          * 全層をGPU（OpenCL、Adreno 840）に載せる。2026-11-05の実測で、プロンプト処理はCPUの約5倍（約1170トークン/秒）、
-         * 生成はCPUと同程度（約80トークン/秒）だが、REDMAGICのCPUクロック上限の影響を受けない（docs/現在地.md）。
+         * 生成はCPUと同程度（約80トークン/秒）だが、REDMAGICのCPUクロック上限の影響を受けない（docs/判断/2026-11-05_翻訳は全層をGPUのOpenCLで動かす.md）。
          */
         const val DEFAULT_GPU_LAYERS = 99
 
         /**
          * 2026-11-05のREDMAGIC 11 Proでの実測。CLI単体では8スレッドが最速だったが、アプリでは画面描画と
-         * CPUを取り合い、8スレッドは生成35トークン/秒、6スレッドは64トークン/秒だった（docs/現在地.md）。
+         * CPUを取り合い、8スレッドは生成35トークン/秒、6スレッドは64トークン/秒だった（docs/判断/2026-11-05_アプリ内のCPUのスレッド数を6にする.md）。
          */
         const val DEFAULT_THREADS = 6
 
@@ -182,7 +188,7 @@ class TranslationEngine private constructor(
          * 小さいコアに処理が回ると、ほかのスレッドが待たされて全体が遅くなる（2026-11-08、15T Pro（2.4GHz×4、
          * 3.3GHz×3、3.73GHz×1）で6スレッドは0.3〜0.8トークン/秒、4スレッドは56〜62トークン/秒）。
          * 小さいコアが半分より多い、または周波数が読めない端末は、今までどおり「コア数−2」にする
-         * （REDMAGIC 11 Pro（4.6GHz×2、3.6GHz×6）では6が最速だった。docs/現在地.md）。
+         * （REDMAGIC 11 Pro（4.6GHz×2、3.6GHz×6）では6が最速だった。docs/判断/2026-11-05_アプリ内のCPUのスレッド数を6にする.md）。
          * どちらも2〜[DEFAULT_THREADS]に収める。
          */
         internal fun threadsFor(maxFrequencies: List<Long>): Int {

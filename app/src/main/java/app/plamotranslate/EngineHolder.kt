@@ -26,7 +26,7 @@ sealed interface ModelState {
 
 /**
  * 翻訳モデルをアプリ全体で1つだけ持つ（docs/設計/アーキテクチャ.md）。
- * テキスト翻訳画面・画面翻訳サービス・会話翻訳のすべてから同じエンジンを使う。
+ * テキスト翻訳画面・画面翻訳サービス・カメラ翻訳・会話翻訳のすべてから同じエンジンを使う。
  * 0.8Bと2Bのどちらを使うかは作者が選び、次に起動したときも同じものを使う（2026-11-06）。
  * 設定（使うモデル・CPUの詳細）の保存は [TranslationPreferences]、速さの計測は [EngineBenchmark] が持つ。
  */
@@ -118,7 +118,7 @@ object EngineHolder {
      * Qualcommのチップの端末だけGPUを使い、ほかはCPUで動かす（2026-11-06、APKを配布するため）。
      * GPUでの読み込みに失敗したときは [TranslationEngine.load] がCPUでやり直す。失敗が返らずにプロセスごと終わったときは、
      * 次の起動で [GpuGuard] がCPUに切り替える。
-     * 設定の「CPUの詳細」で「CPUだけ」を選ぶと、Snapdragonの端末でもCPUで動く（CPUの速さを確かめるため）。
+     * 設定の「性能」で「CPUだけで動かす」を選ぶと、Snapdragonの端末でもCPUで動く（CPUの速さを確かめるため）。
      */
     private fun preferGpu(cpuOnly: Boolean): Boolean {
         if (cpuOnly) return false

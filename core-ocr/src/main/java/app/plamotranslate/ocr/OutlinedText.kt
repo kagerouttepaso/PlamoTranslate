@@ -46,7 +46,7 @@ object OutlinedText {
             }
             val primaryScore = overlapping.sumOf { score(it) }
             if (score(alt) > primaryScore + MARGIN) {
-                // 読み取った文字を含むので、正式版では書かない
+                // 読み取った文字を含むので、詳しい記録を残すとき（デバッグ版の既定、正式版は詳細設定で選ぶ）だけ書く（Logs.text）
                 Logs.text {
                     "白縁の読み比べ: 元「${overlapping.joinToString("／") { it.text }}」${primaryScore}点を、" +
                         "最小値の画像の「${alt.text}」${score(alt)}点に置き換えた"

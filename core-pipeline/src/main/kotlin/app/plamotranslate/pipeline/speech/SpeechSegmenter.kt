@@ -3,7 +3,7 @@ package app.plamotranslate.pipeline.speech
 import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
 
 /**
- * 区切りの状態遷移：音声を「文」と「カード」の2段に区切り、文ごとに話し手を決めて書き起こす（docs/設計/会話翻訳.md「カードの区切り方」）。
+ * セグメンターの状態遷移：音声を「文」と「カード」の2段に区切り、文ごとに話し手を決めて書き起こす（docs/設計/会話翻訳.md「カードの区切り方」）。
  * VAD（[vad]）は「話しているか」と「文の終わり」の判定だけに使い、認識する音声は自分でためた [SpeechBuffer] から取る。
  * 途中結果と確定結果が同じ音声から作られ、区切っても音声が途切れない。
  *
@@ -39,7 +39,8 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  *
  * 判断は部品に分ける：話し手は [SpeakerJudge]、区切る位置は [CutPoint]、認識した文字の聞き違いの判定は [TranscriptCleanup]、
  * ジョブの順番は [RecognitionQueue]。状態を持つので、すべての呼び出しは1本のスレッドから行う（[SpeechPipeline]）。
- * [trace] は区切りの経過を書く口（話した言葉を含むので、デバッグ版だけが書く）。
+ * [trace] はセグメンターの経過を書く口（話した言葉を含むので、渡す側が詳しい記録を残すとき（デバッグ版の既定、正式版は
+ * 詳細設定で選ぶ）だけ書く）。
  */
 class SpeechSegmenter(
     private val vad: VoiceActivity,
@@ -105,8 +106,8 @@ class SpeechSegmenter(
     private var sinceLastWatch = 0
 
     /**
-     * 話し中の区間の間隔。監視にかかった時間（待ち時間を含む）の何倍かより短くはしない。スコアを識別のワーカーで出すモデルでは
-     * 最短の間隔のまま、書き起こしのワーカーで出すモデル（SenseVoice）では、ワーカーが混むと延びて途中結果の時間を残す。
+     * 話し中の区間の間隔。どのモデルも、最短0.5秒で、監視1回にかかった時間（待ち時間を含む）の3倍より短くはしない。
+     * スコアを書き起こしのワーカーで出すモデル（SenseVoice）では、ワーカーが混むと延びて途中結果の時間を残す。
      */
     private var watchInterval = WATCH_INTERVAL_SAMPLES
 

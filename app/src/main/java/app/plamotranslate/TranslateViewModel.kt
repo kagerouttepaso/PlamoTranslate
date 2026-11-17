@@ -85,7 +85,7 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
     /**
      * 音声で原文を入れる（2026-11-08、作者の要望）。1回押すと1つの発話を聞き取り、話し終わったら止まって訳す。
      * 聞き取り中は途中の文字を原文の欄に出し、すでに書いてある原文の後ろに足す。
-     * 音声認識（SenseVoice）が聞き取れるのは日本語・韓国語・英語・中国語・広東語だけ。
+     * 聞き取れる言語は、設定の画面で選んだ音声認識モデル（`SpeechModel.languages`）に従う。
      */
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun startVoice() {

@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-  イテレーション0のスパイク：llama.cppのCLIとPLaMoのモデルを端末へ送り、端末上で翻訳と速度計測を行う。
+  llama.cppのCLIとPLaMoのモデルを端末へ送り、端末上で翻訳と速度計測を行う。
+  アプリの作りに関係なく端末の素の速さを測り、アプリ内の速さと比べる切り分けに使う。
 
 .DESCRIPTION
   事前に build-android へ llama-completion と llama-bench をビルドし、
@@ -16,7 +17,7 @@ param(
     [string]$Source = "ko",
     [string]$Target = "ja",
     [string]$Model = "plamo-3-translate-0.8b-Q4_K_M.gguf",
-    [int]$Threads = 8,  # CLI単体では8が最速（2026-11-05）。アプリ内は6（docs/現在地.md）
+    [int]$Threads = 8,  # CLIのスレッド数。REDMAGIC 11 Pro のCLI単体では8が最速。アプリ内の既定は TranslationEngine.defaultThreads が決める
     [switch]$Bench,
     [switch]$SkipPush
 )

@@ -157,8 +157,8 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     /**
-     * 音声認識の出来事と混み具合を受け取る。出来事は区切りのスレッドから届くので、画面のスレッドの制御へ順に渡す。
-     * 認識が確定に要る書き起こしを抱えている間は、途中訳を待たせる（CPU を確定の書き起こしに回す）。
+     * 音声認識の出来事と混み具合を受け取る。出来事はセグメンターのスレッドから届くので、画面のスレッドの制御へ順に渡す。
+     * 認識が確定に要るジョブ（書き起こしと文の話し手の判定）を抱えている間は、途中訳を待たせる（CPU を確定の書き起こしに回す）。
      */
     private fun attach(engine: SpeechEngine) {
         engine.languages = session.speechLanguages
@@ -178,7 +178,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     @Volatile private var flushed: CompletableDeferred<Unit>? = null
 
     /**
-     * マイクで聞く。録音の側で音量を測って画面に出し、音声は音声認識に渡すだけにする（音声認識は区切りと認識のワーカーの
+     * マイクで聞く。録音の側で音量を測って画面に出し、音声は音声認識に渡すだけにする（音声認識はセグメンターと認識のワーカーの
      * スレッドで動き、録音を待たせない）。書き起こしが重いモデル（1回に1〜2秒）でも、音量のバーは止まらず、音声も落とさない。
      * 認識の遅れ（まだ書き起こしていない確定に要る音声が、どれだけ前のものか）は画面に出す。
      *
@@ -427,7 +427,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
 
     private fun log(message: String) = Logs.i("会話: $message")
 
-    /** 話した言葉や訳を含む行。正式版では書かない（[Logs.text]）。 */
+    /** 話した言葉や訳を含む行。詳しい記録を残すとき（デバッグ版の既定、正式版は詳細設定で選ぶ）だけ書く（[Logs.text]）。 */
     private fun logText(message: () -> String) = Logs.text { "会話: ${message()}" }
 
     /** 音量の目安。-55dBFS（静かな部屋）〜-15dBFS（近くで話す）を0〜1に割り当てる。 */

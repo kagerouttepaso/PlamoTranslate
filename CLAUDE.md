@@ -77,7 +77,7 @@
 | `core-ocr` | 文字認識のインターフェースと実装（ML Kit、漫画用OCR）、行の選択とブロックの組み立て |
 | `core-asr` | 音声認識の中核のインターフェース（VAD・認識）の実装（sherpa-onnxでSilero VAD・SenseVoice・Qwen3-ASR・Whisper tiny の言語の識別）と組み立て |
 | `core-tts` | 読み上げのインターフェースと実装（sherpa-onnxでSupertonic 3、Androidの読み上げエンジン） |
-| `core-log` | ロガー（`Logs`、Kotlin/JVM）。どのモジュールのログもここを通し、出力先（logcat とプロセスごとのファイル）は `app` が渡す。原文・訳などの利用者の文は正式版では書かない |
+| `core-log` | ロガー（`Logs`、Kotlin/JVM）。どのモジュールのログもここを通し、出力先（logcat とプロセスごとのファイル）は `app` が渡す。原文・訳などの利用者の文は、「詳しい記録を残す」がオンのとき（デバッグ版の既定はオン、正式版は詳細設定で選ぶ）だけ書く |
 | `third_party/` | git submodule：llama.cpp、OpenCL-Headers、OpenCL-ICD-Loader。`sherpa-onnx/` はAAR（Gitに入れず、`tools/get-sherpa-onnx.ps1` で取得） |
 | `featurelab` | 機能テスト用のアプリ（配布しない）。端末で届くイベント・撮れるものを単体で確かめる（`docs/資料/端末の能力.md`） |
 | `tools/` | 端末での計測・評価のスクリプト、文書の検査と設計の点検、評価の採点、翻訳の比べに使う文の組（`translate-*.tsv`）、評価用画像の置き場（画像・重みはGitに入れない） |

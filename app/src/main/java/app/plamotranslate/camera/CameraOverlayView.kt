@@ -83,7 +83,7 @@ class CameraOverlayView(context: Context) : View(context) {
     }
     /**
      * [i] 番目の訳に使ってよい範囲（正立した画像の座標）。右は同じ段落（上下の近い行）の右端まで、
-     * ただし右隣の別の文字の手前まで。下は次の行の上端の手前まで（下に行がなければ、行の高さの1倍まで）。
+     * ただし右隣の別の文字の手前まで。下は次の行の上端の手前まで（行の高さの1倍まで。下に行がなければ、行の高さの半分まで）。
      */
     private fun available(i: Int, rects: List<RectF>, bounds: RectF, pad: Float): RectF {
         val r = rects[i]

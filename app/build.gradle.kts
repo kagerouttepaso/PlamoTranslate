@@ -71,7 +71,8 @@ android {
         jniLibs {
             // リンク用に作ったOpenCLローダーは同梱しない。実行時は端末のドライバー（/vendor/lib64/libOpenCL.so）を使う
             excludes += "**/libOpenCL.so"
-            // sherpa-onnxのAARはx86用だけONNX Runtimeを別ファイルで持ち、漫画用OCRのものと名前がぶつかる。
+            // sherpa-onnxのAARはx86用だけONNX Runtimeを別ファイルで持ち、onnxruntime-android（漫画用OCRと、
+            // Whisper tiny の言語の識別（core-asr）が使う）の libonnxruntime.so と名前がぶつかる。
             // 同梱するのはarm64だけ（abiFilters）なので、x86の分は使わない
             excludes += "lib/x86/libonnxruntime.so"
             // llama.cppのバックエンド（libggml-opencl.so、libggml-cpu-*.so）は、実行時にフォルダーを探して読み込む。

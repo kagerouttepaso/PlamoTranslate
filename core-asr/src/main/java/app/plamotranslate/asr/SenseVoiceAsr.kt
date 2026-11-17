@@ -100,7 +100,7 @@ class SenseVoiceRecognizer private constructor(private val recognizer: OfflineRe
     companion object {
         /**
          * SenseVoiceは非自己回帰で軽い。翻訳はGPUで動くので、CPUは認識に4スレッド使う
-         * （REDMAGICのCPUクロック上限は docs/現在地.md）。
+         * （docs/判断/2026-11-06_会話翻訳では翻訳をGPUに音声認識をCPUに分ける.md）。
          */
         const val THREADS = 4
 

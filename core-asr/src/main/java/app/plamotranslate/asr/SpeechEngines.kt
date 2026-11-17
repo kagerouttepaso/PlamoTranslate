@@ -68,7 +68,7 @@ object SpeechEngines {
             recognizer,
             profile,
             heavy = model.heavy,
-            // 区切りの経過は話した言葉を含むので、デバッグ版だけに出る（Logs.text）
+            // セグメンターの経過は話した言葉を含むので、詳しい記録を残すとき（デバッグ版の既定、正式版は詳細設定で選ぶ）だけ出る（Logs.text）
             trace = { message -> Logs.text { "会話の認識: ${message()}" } },
             // ジョブごとの待ち時間と処理時間は、話した言葉を含まないので正式版でも書く（遅さの切り分けに使う）
             timing = { message -> Logs.i("会話の認識: $message") },

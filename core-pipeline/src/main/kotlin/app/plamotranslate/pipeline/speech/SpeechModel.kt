@@ -8,7 +8,7 @@ import app.plamotranslate.llm.Language
  *
  * 言語の識別は2層にする。[identifiesLanguage] が true のモデルは、モデル自身の言語の判定を使う（書き起こした言語をスコア1とする）。
  * false のモデルには、既定の言語の識別（[LanguageIdentifier]、Whisper tiny）を前に置き、決めた話し手の言語を指定して書き起こさせる。
- * どのモデルも、区切りは文ごとに話し手を決めて書き起こし、つなぐ（[SpeechSegmenter]）。
+ * どのモデルも、セグメンター（[SpeechSegmenter]）が文ごとに話し手を決めて書き起こし、つなぐ。
  *
  * [heavy] が true のモデルは書き起こしが重い（1回に1〜2秒）。書き起こしの時間は渡す音声の長さに比例するので、話し始めの前に
  * 足した音声のうち、声の始まりより前の無音は渡さない（[SpeechOnset]）。速いモデルは足した音声を全部渡す。

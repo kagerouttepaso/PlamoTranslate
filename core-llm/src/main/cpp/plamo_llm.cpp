@@ -109,7 +109,7 @@ std::string read_first_line(const std::string &path) {
     return line;
 }
 
-// 数値はOSが返す単位（kB）のまま残す。読めない項目は空欄とし、0と誤認させない。
+// 数値はOSが返す単位（kB）のまま残す。読めない項目は「取得不可」とし、0と誤認させない。
 std::string memory_field(const char *path, const char *key) {
     std::ifstream in(path);
     std::string line;
@@ -274,7 +274,7 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_app_plamotranslate_llm_LlamaNative_nativeInit(JNIEnv *env, jobject, jstring jlib_dir, jboolean load_gpu,
                                                    jstring jcpu_variant) {
     const std::string lib_dir = to_std_string(env, jlib_dir);
-    // 空なら自動。ファイル名（libggml-cpu-*.so）を指定すると、その版だけを候補にする（設定の「CPUの詳細」）
+    // 空なら自動。ファイル名（libggml-cpu-*.so）を指定すると、その版だけを候補にする（設定の「性能」の「CPU向けの処理の版」）
     const std::string cpu_variant = to_std_string(env, jcpu_variant);
     std::call_once(g_backend_once, [&] {
         llama_log_set(log_callback, nullptr);
@@ -425,8 +425,9 @@ Java_app_plamotranslate_llm_LlamaNative_nativeFree(JNIEnv *, jobject, jlong hand
 //   nextJob() → 次の依頼の番号。無ければ -1。prompt(id) → その依頼のプロンプト。
 //   onToken(id, bytes) → 0＝続ける、1＝その依頼だけ止める、2＝全部止める。
 //   onFinished(id) → その依頼の生成が終わった（止めた場合も含む）。onFinished の中で次の依頼を足してよい。
-//   onTooLong(id) → シーケンス1本分のコンテキストに入らないので訳さなかった（呼ぶ側がシーケンスを減らして訳し直す）。
-// 戻り値は全部の依頼を合わせた生成トークン数、または負のエラーコード。
+//   onTooLong(id) → トークンに分けられなかったか、シーケンス1本分のコンテキストに入らないので訳さなかった
+//   （呼ぶ側がシーケンスを減らして訳し直す）。
+// 戻り値は全部の依頼を合わせた生成トークン数、または負のエラーコード（ERR_DECODE・ERR_CALLBACK）。
 extern "C" JNIEXPORT jint JNICALL
 Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject, jlong handle, jint jslots,
                                                             jint max_tokens, jobject callback) {
@@ -610,7 +611,8 @@ Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject
     return total;
 }
 
-// 計測用の切り替え口：性能ヒントの有無とスレッド数を変える（デバッグビルドの切り替えから呼ぶ）
+// 性能ヒントの有無とスレッド数を、読み直さずに変える（TranslationEngine.configure。会話翻訳が聞いている間の
+// スレッド数の切り替えと、デバッグ版の画面翻訳の計測から呼ぶ）
 extern "C" JNIEXPORT void JNICALL
 Java_app_plamotranslate_llm_LlamaNative_nativeConfigure(JNIEnv *, jobject, jlong handle, jboolean boost, jint n_threads) {
     auto *engine = reinterpret_cast<Engine *>(handle);

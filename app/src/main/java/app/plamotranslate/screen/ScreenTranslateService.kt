@@ -61,7 +61,7 @@ import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
 
 /**
- * 画面翻訳のフォアグラウンドサービス（docs/設計/画面翻訳.md、構成は docs/設計/画面翻訳.md）。
+ * 画面翻訳のフォアグラウンドサービス（docs/設計/画面翻訳.md）。
  *
  * このサービスは部品をつなぐだけで、何をするかは決めない。
  * - 制御：画面翻訳の状態遷移（中核の [ScreenSession]）が、出来事を受け取って次の状態と作業を決める（[dispatch]）。

@@ -1,8 +1,8 @@
 package app.plamotranslate.pipeline.speech
 
 /**
- * 区切り（[SpeechSegmenter]）が認識のワーカーに頼むジョブ（docs/設計/会話翻訳.md「認識の段と CPU の割り当て」）。
- * 区切りはジョブを出して待たずに次の音声へ進み、結果（[RecognitionOutput]）を受け取ってから次を決める。
+ * セグメンター（[SpeechSegmenter]）が認識のワーカーに頼むジョブ（docs/設計/会話翻訳.md「認識の段と CPU の割り当て」）。
+ * セグメンターはジョブを出して待たずに次の音声へ進み、結果（[RecognitionOutput]）を受け取ってから次を決める。
  * 音声は頼んだ時点の写しを持つので、結果が届くまでにためた音声が区切られても影響しない。位置は聞き始めからのサンプル数。
  */
 sealed interface RecognitionJob {
@@ -42,7 +42,7 @@ sealed interface RecognitionJob {
     }
 
     /**
-     * 会話の言語ごとのスコアを出す（話し手は区切りが [SpeakerJudge] で決める）。スコアを出せる認識器は識別のワーカー
+     * 会話の言語ごとのスコアを出す（話し手はセグメンターが [SpeakerJudge] で決める）。スコアを出せる認識器は識別のワーカー
      * （[RecognitionLane.IDENTIFY]）が、出せない認識器は書き起こしのワーカーが書き起こして、その言語をスコア1とする。
      * [priority] は、文の全体（[RecognitionPriority.PHRASE_LANGUAGE]）か、話し中の区間（[RecognitionPriority.LANGUAGE]）か。
      */
@@ -105,9 +105,9 @@ enum class RecognitionPriority {
  * 判定：認識のジョブの待ち行列（ワーカーごと）。次に処理するジョブと、要らなくなったジョブを決める。スレッドに依らない。
  * - 優先順位の高いものから、同じ順位は頼んだ順に出す（文の書き起こしは、つなぐ順に届く）。
  * - 閉じたカードの途中結果と話し中の区間の判定は捨てる（[dropStale]）。確定に要るジョブは捨てない。
- *   捨てたジョブは返し、呼び手は空の結果（[RecognitionRunner.empty]）を区切りに渡す。頼んだジョブには、処理しても捨てても
- *   必ず1回だけ結果が返る（結果を待って次を決める区切りが、捨てられたジョブを待ち続けて止まらないようにする）。
- * 途中結果と言語の監視は、区切りがカードごとに1件ずつしか頼まないので、ここでは間引かない。
+ *   捨てたジョブは返し、呼び手は空の結果（[RecognitionRunner.empty]）をセグメンターに渡す。頼んだジョブには、処理しても捨てても
+ *   必ず1回だけ結果が返る（結果を待って次を決めるセグメンターが、捨てられたジョブを待ち続けて止まらないようにする）。
+ * 途中結果と言語の監視は、セグメンターがカードごとに1件ずつしか頼まないので、ここでは間引かない。
  */
 class RecognitionQueue {
     private val jobs = mutableListOf<RecognitionJob>()
