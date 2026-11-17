@@ -10,6 +10,7 @@
     - docs/判断/ のファイルの名前や書式が欠けている
     - 使わない言い換え（docs/設計/アーキテクチャ.md の表）が、文書・コード・画面・ファイル名にある
     - docs/現在地.md・docs/バックログ.md に予定・やることの節がある、または個人のフォルダーのパスがある
+    - 今の姿を書く文書が `…` で示す識別子（CamelCase・camelCase）が、コードのどこにも無い
   注意（終了コードは変えない）：
     - 今の姿を書く文書（docs/設計/・docs/手順/）に日付がある（経緯が混ざった兆候）
     - docs/作業中/ に文書が残っている（作業が終わったら畳んで消す）
@@ -200,6 +201,33 @@ foreach ($name in '現在地.md', 'バックログ.md') {
 $privatePath = '[A-Za-z]:[\\/]+Users[\\/]|/home/[a-z]|/Users/[A-Za-z]|Obsidian|Vault'
 foreach ($hit in @(git -C $root -c core.quotepath=false grep -n -I -E $privatePath -- . ':(exclude)third_party' ':(exclude)tools/check-docs.ps1' 2>$null | Where-Object { $_ })) {
     $errors.Add("個人のフォルダーのパスを書かない：$hit")
+}
+
+# 文書が示す識別子がコードにあるか。部品を説明する文書（設計・現在地・バックログ・要件・CLAUDE.md）の `…` の中の CamelCase・camelCase の語が、
+# コード・スクリプト・設定のどこにも無ければ、名前を変えたか消したのに文書を直していない（設計書がコードから離れた兆候）
+$codeFiles = @(git -C $root -c core.quotepath=false ls-files -- app 'core-*' featurelab tools gradle .githooks .claude '*.kts' 2>$null |
+        Where-Object { $_ -match '\.(kt|kts|java|cpp|h|c|xml|py|ps1|toml|pro|txt|json|sh)$|(^|/)pre-commit$' })
+$codeWords = [System.Collections.Generic.HashSet[string]]::new()
+foreach ($rel in $codeFiles) {
+    $full = Join-Path $root $rel
+    if (-not (Test-Path -LiteralPath $full)) { continue }
+    foreach ($w in [regex]::Matches([IO.File]::ReadAllText($full), '[A-Za-z_][A-Za-z0-9_]*')) { [void]$codeWords.Add($w.Value) }
+}
+# このリポジトリのコードには出てこない外の名前（Android・Java・Gradle）。文書が外の名前を新しく示すときだけ足す
+foreach ($w in 'installDebug', 'assembleDebug', 'assembleRelease', 'testDebugUnitTest', 'filterTouchesWhenObscured', 'SocketException') { [void]$codeWords.Add($w) }
+# ファイルの名前（拡張子を除く）も、文書が部品の名前として示すので含める
+foreach ($rel in @(git -C $root -c core.quotepath=false ls-files 2>$null)) { [void]$codeWords.Add([IO.Path]::GetFileNameWithoutExtension($rel)) }
+# 見るのは、このアプリの部品を説明する文書だけ。端末の能力（Android の内部の名前）と手順（Gradle のタスクやコマンドの引数）は外の名前が多いので見ない
+$nowDocs = @(Get-ChildItem -LiteralPath (Join-Path $docs '設計') -File -Filter *.md) + @('現在地.md', 'バックログ.md', '要件.md' | ForEach-Object { Get-Item -LiteralPath (Join-Path $docs $_) }) + @(Get-Item -LiteralPath (Join-Path $root 'CLAUDE.md'))
+foreach ($f in $nowDocs) {
+    $lines = @(Get-Content -LiteralPath $f.FullName -Encoding utf8)
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        foreach ($code in [regex]::Matches($lines[$i], '`([^`]+)`')) {
+            foreach ($tok in [regex]::Matches($code.Groups[1].Value, '\b(?:[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+|[a-z]+[A-Z][A-Za-z0-9]*)\b')) {
+                if (-not $codeWords.Contains($tok.Value)) { $errors.Add("$(Rel $f.FullName):$($i + 1) コードに無い識別子：$($tok.Value)（名前が変わったか消えた。文書を今のコードに合わせる）") }
+            }
+        }
+    }
 }
 
 # 作業中の残り
