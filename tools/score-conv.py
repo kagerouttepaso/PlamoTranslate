@@ -5,11 +5,12 @@
 
 - 正解：1行が1つの単位（カードにしてよい単位）。「話した人<TAB>文」。# で始まる行と「（?）」は無視する。
   単位の中の句点・疑問符は文の終わりとして扱う（単位の中で文の終わりで切るのは許す）。
-- ログ：デバッグ版の logcat（タグ PlamoTranslate）。「会話の認識: 区切り（理由）始め〜終わり秒: 確定 [言語] 文」の行を読む。
-  録音を `--es wav` でリプレイしたときのもの。
+- ログ：カードを確定した行「確定（理由）始め秒〜終わり秒: [言語] 文 ／ 直前の途中 …」を読む（`SpeechSegmenter` が書く）。
+  端末の logcat（タグ PlamoTranslate。「詳しい記録を残す」がオンのとき、頭に「会話の認識: 」が付く）と、
+  PC でのリプレイ（`ConversationReplayTest.replay` の結果の「# 区切りの経過」）のどちらでもよい。
 
 カードの文と正解をつないだ文字列どうしを、文字（文字と数字だけ）で並べ、カードの切れ目が正解のどこに当たるかを求める。
-正解に区切りを合わせ込むのが目標ではない。目標は細切れにしないこと：自動の判断（言語の交代・長い発話）で文の途中を
+正解に区切りを合わせ込むのが目標ではない。目標は細切れにしないこと：自動の判断（話し手の交代・長い発話）で文の途中を
 切らないことと、断片のカードを作らないこと。話した人が間を置いて（話し終わり）切れたのは許し、単位が1枚になるのも
 読める長さに収まれば許す。
 数えるもの：
@@ -23,6 +24,9 @@
 import re
 import sys
 
+# Windows のコンソールでも日本語が化けないよう、出力を UTF-8 にする
+sys.stdout.reconfigure(encoding="utf-8")
+
 #: 対面の面でスクロールせずに読める長さ（メインの文26spで6〜7行）。文字と数字だけで数える。
 MAX_CHARS = 90
 #: これより短いカードは断片（1〜2語）とみなす。
@@ -30,7 +34,14 @@ MIN_CHARS = 5
 #: 切れ目が正解の切れ目に一致したとみなすずれ（文字）。認識の揺れで数文字ずれるため。
 TOLERANCE = 3
 
-CUT = re.compile(r"会話の認識: 区切り（(?P<reason>[^）]*(?:）[^）]*)?)）(?P<start>[\d.]+)〜(?P<end>[\d.]+)秒: 確定 \[[^\]]*\] (?P<text>.*?) ／ 直前の途中")
+#: 話した人の操作や間による区切りの理由（`SpeechSegmenter` の close・cutAt に渡す理由）。これ以外は自動の判断。
+PERSON_REASONS = ("話し終わり", "手で区切り", "停止")
+#: カードを確定した行。書くのは `SpeechSegmenter.finishIfReady` の trace で、この正規表現が行の形の正本。
+#: Kotlin の単体試験（`SpeechSegmenterTest` の「確定の行は採点の道具が読める形で書く」）がこの行を読んで実際の行に当て、
+#: 形が食い違えば落ちる。Java の正規表現でもそのまま使えるよう、名前付きの組は使わない（組：理由・始め・終わり・文）。
+#: 理由は1段の括弧を含みうる（「話し手の交代（文：ja→en）」）。
+CARD_CLOSED = r"確定（((?:[^（）]|（[^（）]*）)*)）([\d.]+)秒〜([\d.]+)秒: \[[^\]]*\] (.*?) ／ 直前の途中"
+CUT = re.compile(CARD_CLOSED)
 SENTENCE_END = set("。？?！!")
 CLAUSE_END = set("、，,")
 
@@ -61,10 +72,10 @@ def read_cards(path):
         m = CUT.search(line)
         if not m:
             continue
-        text = m.group("text").strip()
+        reason, start, end, text = m.group(1), float(m.group(2)), float(m.group(3)), m.group(4).strip()
         if not text:
             continue
-        cards.append({"reason": m.group("reason"), "start": float(m.group("start")), "end": float(m.group("end")), "text": text})
+        cards.append({"reason": reason, "start": start, "end": end, "text": text})
     return cards
 
 
@@ -182,9 +193,9 @@ def score(truth_path, log_path):
     print(f"== {log_path}")
     print(f"カード {len(cards)} 枚（正解の単位 {len(units)}）、区切りの理由 {reasons}")
     print(f"切れ目 {len(boundaries)}：" + "、".join(f"{k} {v}" for k, v in kinds.items()))
-    # 話した人が無音で間を置いた（話し終わり）・ボタンで区切ったのは、話した人の区切りとして許す。目標は、
-    # 自動の判断（言語の交代・長い発話）で文の途中を切らないことと、断片を作らないこと（正解に合わせ込むことではない）
-    own = sum(1 for line in mid if not line.startswith(("話し終わり", "手で区切り")))
+    # 話した人が無音で間を置いた（話し終わり）・ボタンで区切った・止めたのは、話した人の区切りとして許す。目標は、
+    # 自動の判断（話し手の交代・長い発話）で文の途中を切らないことと、断片を作らないこと（正解に合わせ込むことではない）
+    own = sum(1 for line in mid if not line.startswith(PERSON_REASONS))
     print(f"自動の判断で文の途中を切った {own}（話した人の間・ボタンによる {len(mid) - own} は許す）")
     print(f"単位の切れ目で切らなかった {len(missed)}（2つの単位が1枚になった）")
     print(f"長すぎるカード（{MAX_CHARS}文字超） {len(too_long)}、3つ以上の単位にまたがるカード {wide}、断片のカード（{MIN_CHARS}文字未満） {len(fragments)}")

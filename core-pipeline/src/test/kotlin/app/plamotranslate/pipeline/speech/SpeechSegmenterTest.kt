@@ -4,6 +4,7 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /**
  * セグメンター（[SpeechSegmenter]）の状態遷移。音声の値で「何語を話しているか」を表し、偽の VAD と偽の認識で区切りを確かめる。
@@ -91,6 +92,9 @@ class SpeechSegmenterTest {
     ) {
         val events = mutableListOf<SpeechEvent>()
 
+        /** セグメンターが書いた経過の行（端末ではログ、PC のリプレイでは結果のファイルに出る）。 */
+        val traces = mutableListOf<String>()
+
         /** 頼まれた言語の判定の目的（`直近` など）。 */
         val languagePurposes = mutableListOf<String>()
         private val queue = RecognitionQueue()
@@ -109,7 +113,11 @@ class SpeechSegmenterTest {
                 if (it is RecognitionJob.Language) languagePurposes += it.purpose
                 queue.submit(it)
             },
-            trace = { if (System.getenv("SEGMENTER_TRACE") != null) println("[$chunks] ${it()}") },
+            trace = {
+                val message = it()
+                traces += message
+                if (System.getenv("SEGMENTER_TRACE") != null) println("[$chunks] $message")
+            },
             // 時計は渡した音声の長さで進める（書き起こしの遅れを、端末と同じく途中結果の間隔に効かせる）
             clock = { chunks * 100_000_000L },
         ).apply { this.languages = languages }
@@ -175,6 +183,33 @@ class SpeechSegmenterTest {
     }
 
     private fun finals(events: List<SpeechEvent>) = events.filterIsInstance<SpeechEvent.Final>().map { it.utterance }
+
+    /**
+     * 採点の道具（`tools/score-conv.py`）は、確定の行を正規表現 `CARD_CLOSED` で読み、理由が `PERSON_REASONS` で始まる区切りを
+     * 話した人によるものとして数える。行の形の正本は道具の側にあり、ここで実際に書く行に当てて、食い違いを止める。
+     */
+    @Test
+    fun 確定の行は採点の道具が読める形で書く() {
+        val tool = listOf(File("../tools/score-conv.py"), File("tools/score-conv.py")).first { it.exists() }.readText()
+        val closed = Regex(Regex("""(?m)^CARD_CLOSED = r"(.*)"$""").find(tool)!!.groupValues[1])
+        val personReasons = Regex("""(?m)^PERSON_REASONS = \((.*)\)$""").find(tool)!!.groupValues[1]
+            .split(',').map { it.trim().trim('"') }.filter { it.isNotEmpty() }
+
+        val s = segmenter()
+        val events = s.feed(Sound.JA to 1.5, Sound.SILENCE to 3.0) + // 話し終わり
+            s.feed(Sound.JA to 4.0, Sound.KO to 4.0, Sound.SILENCE to 3.0) + // 話し中の話し手の交代（理由に括弧を含む）
+            s.feed(Sound.JA to 1.5) + s.cut() + // 手で区切り
+            s.feed(Sound.KO to 1.5) + s.flush() // 停止
+        val cards = finals(events)
+        val lines = s.traces.filter { it.startsWith("確定（") }.map { line -> closed.find(line) ?: throw AssertionError("採点の道具が読めない確定の行：$line") }
+            .map { it.groupValues }.filter { it[4].isNotBlank() }
+
+        assertEquals(cards.map { it.text }, lines.map { it[4] })
+        cards.zip(lines).forEach { (card, g) -> assertEquals(card.startMs / 1000.0, g[2].toDouble(), 0.01) }
+        val reasons = lines.map { it[1] }
+        assertTrue(reasons.toString(), reasons.any { it.startsWith("話し手の交代（") && it.endsWith("）") })
+        personReasons.forEach { person -> assertTrue("$person の区切りが出ない：$reasons", reasons.any { it.startsWith(person) }) }
+    }
 
     @Test
     fun 話し終わりの無音で1枚のカードを確定する() {
