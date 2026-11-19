@@ -124,9 +124,28 @@ class LanguageRouter(
         val source = if (fixed == null || (fixed.isChinese && spoken.isChinese)) spoken else fixed
         return Direction(source, self, mine = false)
     }
+
+    /**
+     * 利用者が話した言語を [language] と指定した発話の方向（カードの言語の取り違えを直したとき）。自分の言語なら相手の言語へ、
+     * それ以外は相手の言語として自分の言語へ訳す。音声認識の判定より先にするので、文字の種類では決め直さない。
+     */
+    fun chosen(language: Language): Direction =
+        if (language.sameAs(self)) Direction(language, partner, mine = true) else Direction(language, self, mine = false)
+
     companion object {
         /** 音声認識の言語の組（`LanguageEvidence.group`）での言語。中国語は字体によらず1つの組。 */
         private fun speechGroup(language: Language): String = if (language.isChinese) "zh" else language.code
+
+        /**
+         * 音声認識に「この言語で書き起こす」と指定するときのコード（[SpeechEngine.retranscribe]）。比べるための組（[speechGroup]）とは
+         * 別にする。繁体字の中国語は広東語（`yue`）として聞く：会話では広東語を繁体字の中国語として訳すので（[spokenLanguage]）、
+         * 繁体字の相手は広東語の話し手として扱う。
+         */
+        fun recognitionCode(language: Language): String = when (language) {
+            Language.ZH -> "zh"
+            Language.ZH_HANT -> "yue"
+            else -> language.code
+        }
 
         /**
          * 認識器の言語判定を、会話で扱う言語に絞る。

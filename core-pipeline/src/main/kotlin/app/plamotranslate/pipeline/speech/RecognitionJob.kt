@@ -25,7 +25,8 @@ sealed interface RecognitionJob {
 
     /**
      * 書き起こす。[language] があれば、その言語として書き起こす（識別を省く）。無ければ、言語を識別できる認識器は
-     * 識別してから書き起こし、識別できなければ [fallback] として書き起こす。
+     * 識別してから書き起こし、識別できなければ [fallback] として書き起こす。言語を自分で判定する認識器（SenseVoice）は、
+     * [language] を使わず自分の判定で書き起こす（話し手の言語は、その認識器には要らない）。
      */
     class Transcribe(
         override val id: Long,
@@ -76,6 +77,30 @@ sealed interface RecognitionJob {
     ) : RecognitionJob {
         override val priority get() = RecognitionPriority.LANGUAGE
     }
+
+    /**
+     * 確定した発話 [utterance] の取り置いた音声を、利用者が指定した [language] として書き起こし直す（[UtteranceRetention]）。
+     * 言語を自分で判定する認識器にも言語を指定する（[SpeechRecognizer.recognizeAs]）。カードに属さず、捨てない。
+     */
+    class Retranscribe(
+        override val id: Long,
+        val utterance: Long,
+        override val samples: FloatArray,
+        override val purpose: String,
+        val language: String,
+    ) : RecognitionJob {
+        override val card get() = NO_CARD
+        override val lane get() = RecognitionLane.TRANSCRIBE
+        override val priority get() = RecognitionPriority.RETRANSCRIBE
+
+        /** 確定に要るジョブではないので、認識の遅れには数えない。 */
+        override val endAt get() = 0L
+    }
+
+    companion object {
+        /** カードに属さないジョブの [card]。 */
+        const val NO_CARD = -1L
+    }
 }
 
 /** 認識の結果。失敗したら空の結果を返す（確定を待たせ続けないため）。 */
@@ -92,13 +117,22 @@ enum class RecognitionLane { TRANSCRIBE, IDENTIFY }
 /**
  * ジョブの優先順位（小さいほど先）。確定に要るジョブ（区切った残り・文の書き起こし・文の話し手の判定）を先にし、
  * 話し中の区間の判定、途中結果の順に後回しにする。確定（区切った残り）は、前のカードの文の書き起こしより先に出ることがある
- * （出来事はカードの順に出すので、結果の順は崩れない）。
+ * （出来事はカードの順に出すので、結果の順は崩れない）。利用者が頼んだ書き起こし直し（[RETRANSCRIBE]）は、確定に要るジョブの
+ * 後で、話し中の判定より先にする（利用者が待っている）。
+ * 並びは処理の順だけを決める。確定に要るか（[urgent]）と、閉じたカードなら捨てるか（[droppable]）は、それぞれ名前で決める。
  */
-enum class RecognitionPriority {
-    FINAL, PHRASE, PHRASE_LANGUAGE, LANGUAGE, PARTIAL;
-
-    /** 確定に要るジョブか。 */
-    val urgent: Boolean get() = this <= PHRASE_LANGUAGE
+enum class RecognitionPriority(
+    /** 確定に要るジョブか。残っている間は途中訳を待たせ、認識の遅れに数える。 */
+    val urgent: Boolean,
+    /** カードが閉じたら要らなくなるジョブか（[RecognitionQueue.dropStale]）。 */
+    val droppable: Boolean,
+) {
+    FINAL(urgent = true, droppable = false),
+    PHRASE(urgent = true, droppable = false),
+    PHRASE_LANGUAGE(urgent = true, droppable = false),
+    RETRANSCRIBE(urgent = false, droppable = false),
+    LANGUAGE(urgent = false, droppable = true),
+    PARTIAL(urgent = false, droppable = true),
 }
 
 /**
@@ -125,9 +159,9 @@ class RecognitionQueue {
         return next
     }
 
-    /** [openCard] 以外のカードの、途中結果と話し中の区間の判定を捨てて返す（確定に要るジョブは残す）。 */
+    /** [openCard] 以外のカードの、閉じたら要らないジョブ（途中結果と話し中の区間の判定。[RecognitionPriority.droppable]）を捨てて返す。 */
     fun dropStale(openCard: Long?): List<RecognitionJob> {
-        val stale = jobs.filter { it.card != openCard && it.priority >= RecognitionPriority.LANGUAGE }
+        val stale = jobs.filter { it.priority.droppable && it.card != openCard }
         jobs.removeAll(stale)
         return stale
     }

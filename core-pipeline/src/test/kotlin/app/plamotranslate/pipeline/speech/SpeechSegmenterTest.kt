@@ -691,4 +691,32 @@ class SpeechSegmenterTest {
         // 区間は日本語と聞き違え、書き起こしは韓国語。書き起こしの言語が指定の写しなら、区間で決めた日本語のまま
         assertEquals("ja", finals(s.feed(Sound.KO to 6.0, Sound.SILENCE to 3.0)).single().lang)
     }
+
+    @Test
+    fun 確定を出すカードの音声を確定より先に渡す() {
+        val retained = mutableListOf<Pair<Long, Int>>()
+        val events = mutableListOf<SpeechEvent>()
+        val queue = RecognitionQueue()
+        val runner = RecognitionRunner(FakeRecognizer(::soundOf))
+        val segmenter = SpeechSegmenter(
+            FakeVad((profile.phraseSilenceSeconds * 10).toInt()), identifies = false, profile = profile,
+            emit = { e ->
+                if (e is SpeechEvent.Final) assertTrue("確定より先に音声を渡す", retained.any { it.first == e.utterance.id })
+                events += e
+            },
+            submit = queue::submit,
+            retain = { id, audio -> retained += id to audio.size },
+        ).apply { languages = SpeechLanguages(setOf("ja", "ko")) }
+        repeat(15) { segmenter.accept(FloatArray(FRAME) { Sound.JA.value }) }
+        repeat(30) {
+            segmenter.accept(FloatArray(FRAME) { 0f })
+            while (true) {
+                val job = queue.take(RecognitionLane.TRANSCRIBE) ?: queue.take(RecognitionLane.IDENTIFY) ?: break
+                segmenter.onResult(job.id, runner.run(job))
+            }
+        }
+        val card = finals(events).single()
+        // カードの音声（前に足した分を含む、確定の長さ）を渡す
+        assertEquals(card.durationMs * SAMPLE_RATE / 1000.0, retained.single().second.toDouble(), SAMPLE_RATE / 1000.0)
+    }
 }

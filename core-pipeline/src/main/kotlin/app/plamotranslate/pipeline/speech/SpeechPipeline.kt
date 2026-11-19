@@ -13,6 +13,9 @@ import kotlin.concurrent.thread
  * - 認識のワーカーのスレッド（[RecognitionLane] ごとに1本）：待ち行列（[RecognitionQueue]）から次のジョブを取り、[recognizer] で処理して、
  *   結果をセグメンターのスレッドへ返す。書き起こしのワーカーと識別のワーカーが分かれているので、重い書き起こしの間も言語の監視は止まらない。
  *
+ * 確定した発話の音声の取り置きと書き起こし直し（[retranscribe]）は [UtteranceRetention] が受け持ち、セグメンターのスレッドで動く。
+ * 書き起こし直しのジョブ（[RecognitionJob.Retranscribe]）の結果は、セグメンターでなく取り置きに渡す。
+ *
  * 状態はセグメンターのスレッドだけが持ち、ワーカーのスレッドとは待ち行列（[lock] で守る）と受け取り口（[inbox]）でだけやり取りする。
  * [timing] はジョブごとの待ち時間と処理時間を書く口（話した言葉は含めないので、いつも書く）。
  *
@@ -35,6 +38,7 @@ class SpeechPipeline(
         data object Cut : Input
         data object Flush : Input
         data object Reset : Input
+        class Retranscribe(val utterance: Long, val language: String) : Input
         class Result(val job: RecognitionJob, val output: RecognitionOutput) : Input
         data object Close : Input
     }
@@ -61,6 +65,8 @@ class SpeechPipeline(
     private var received = 0L
     private var lastLoad = RecognitionLoad()
 
+    private val retention = UtteranceRetention(emit = { listener(it) }, submit = ::enqueue, trace = trace)
+
     private val segmenter = SpeechSegmenter(
         vad,
         identifies = recognizer.identifies,
@@ -69,9 +75,12 @@ class SpeechPipeline(
         emit = { event ->
             if (event == SpeechEvent.Flushed) flushPending = false
             listener(event)
+            // 確定を出した後に取り置く（手放したイベント（Released）は、その確定の後に届く）
+            if (event is SpeechEvent.Final) retention.finalEmitted(event.utterance)
         },
         submit = ::enqueue,
         trace = trace,
+        retain = retention::retain,
     )
 
     override var languages: SpeechLanguages
@@ -100,6 +109,10 @@ class SpeechPipeline(
 
     override fun reset() {
         if (!closed) inbox.put(Input.Reset)
+    }
+
+    override fun retranscribe(utterance: Long, language: String) {
+        if (!closed) inbox.put(Input.Retranscribe(utterance, language))
     }
 
     /**
@@ -141,6 +154,8 @@ class SpeechPipeline(
                     Input.Reset -> {
                         synchronized(lock) { queue.clear() }
                         segmenter.reset()
+                        // 待っていた書き起こし直しは待ち行列ごと捨てたので、取り置いた音声から出し直す
+                        retention.reset()
                         // 止めている途中で始め直したら、止める処理は捨てたので、待っている呼び手に止め終わりを返す
                         if (flushPending) {
                             flushPending = false
@@ -148,7 +163,11 @@ class SpeechPipeline(
                         }
                         received = 0
                     }
-                    is Input.Result -> segmenter.onResult(input.job.id, input.output)
+                    is Input.Retranscribe -> retention.retranscribe(input.utterance, input.language)
+                    is Input.Result -> when (val job = input.job) {
+                        is RecognitionJob.Retranscribe -> retention.onResult(job, input.output)
+                        else -> segmenter.onResult(job.id, input.output)
+                    }
                     Input.Close -> {
                         runCatching { segmenter.close() }
                         if (flushPending) listener(SpeechEvent.Flushed)

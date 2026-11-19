@@ -3,6 +3,7 @@ package app.plamotranslate.pipeline.conversation
 import app.plamotranslate.llm.Language
 import app.plamotranslate.pipeline.conversation.ConversationSession.Effect
 import app.plamotranslate.pipeline.conversation.ConversationSession.Event
+import app.plamotranslate.pipeline.speech.RetranscribeFailure
 import app.plamotranslate.pipeline.speech.SpeechEvent
 import app.plamotranslate.pipeline.speech.Utterance
 import org.junit.Assert.assertEquals
@@ -12,8 +13,10 @@ import org.junit.Test
 
 /** 会話の訳す順番（[ConversationSession]）。 */
 class ConversationSessionTest {
-    private fun final(text: String, lang: String = "ja") =
-        Event.Speech(SpeechEvent.Final(Utterance(text, lang, startMs = 0, durationMs = 1000, recognizeMs = 100)))
+    private var nextUtterance = 0L
+
+    private fun final(text: String, lang: String = "ja", id: Long = nextUtterance++) =
+        Event.Speech(SpeechEvent.Final(Utterance(id, text, lang, startMs = 0, durationMs = 1000, recognizeMs = 100)))
 
     private fun partial(text: String, lang: String = "ja") = Event.Speech(SpeechEvent.Partial(text, lang))
 
@@ -260,5 +263,75 @@ class ConversationSessionTest {
         assertEquals(1000L, t.durationMs)
         assertEquals(100L, t.recognizeMs)
         assertEquals(300L, t.translateMs)
+    }
+
+    @Test
+    fun カードの言語を入れ替えたら先に話し手を替え書き起こし直しが届いたら原文を差し替えて訳す() {
+        val s = ConversationSession(PartnerMode(Language.KO))
+        // 韓国語の話を、音声認識が日本語（自分）の発話と取り違えた
+        val first = s.handle(final("가나다", lang = "ja", id = 7)).filterIsInstance<Effect.TranslateFinal>().single()
+        s.handle(Event.FinalDone(first.turn.id, "가나다", 100))
+        val turn = s.turns.single()
+        assertTrue(turn.swappable)
+
+        val asked = s.handle(Event.LanguageSwapped(turn.id))
+        assertEquals(listOf(Effect.Retranscribe(7, "ko")), asked)
+        // 向き（話し手）はその場で替わり、訳は空になる。原文は届くまで前のまま
+        val swapping = s.turns.single()
+        assertEquals(Direction(Language.KO, Language.JA, mine = false), swapping.direction)
+        assertEquals("가나다", swapping.original)
+        assertEquals("", swapping.translation)
+        assertEquals(turn.copy(swappable = true), swapping.swappedFrom?.copy(swappable = true))
+        // 書き起こし直している間は入れ替えられない（もう一度スライドしても頼み直さない）
+        assertEquals(false, swapping.swappable)
+        assertTrue(s.handle(Event.LanguageSwapped(turn.id)).isEmpty())
+
+        val redo = s.handle(Event.Speech(SpeechEvent.Retranscribed(7, Utterance(7, "가나다라", "ko", 0, 1000, 300))))
+        val redone = s.turns.single()
+        assertEquals("가나다라", redone.original)
+        assertEquals(Direction(Language.KO, Language.JA, mine = false), redone.direction)
+        assertEquals(null, redone.swappedFrom)
+        assertTrue(redone.swappable)
+        assertEquals(listOf("가나다라"), redo.filterIsInstance<Effect.TranslateFinal>().map { it.turn.original })
+    }
+
+    @Test
+    fun 書き起こし直せなかったら入れ替える前のカードに戻る() {
+        val s = ConversationSession(PartnerMode(Language.KO))
+        val first = s.handle(final("안녕하세요", lang = "ja", id = 3)).filterIsInstance<Effect.TranslateFinal>().single()
+        s.handle(Event.FinalDone(first.turn.id, "안녕하세요", 100))
+        val turn = s.turns.single()
+        s.handle(Event.LanguageSwapped(turn.id))
+        s.handle(Event.Speech(SpeechEvent.RetranscribeFailed(3, RetranscribeFailure.NOTHING_HEARD)))
+        assertEquals(turn.copy(swappable = true), s.turns.single())
+    }
+
+    @Test
+    fun 訳している最中に入れ替えたらその訳は書かない() {
+        val s = ConversationSession(PartnerMode(Language.KO))
+        val first = s.handle(final("가나다", lang = "ja", id = 1)).filterIsInstance<Effect.TranslateFinal>().single()
+        s.handle(Event.LanguageSwapped(first.turn.id))
+        s.handle(Event.FinalProgress(first.turn.id, "古い訳"))
+        s.handle(Event.FinalDone(first.turn.id, "古い訳", 100))
+        assertEquals("", s.turns.single().translation)
+        val redo = s.handle(Event.Speech(SpeechEvent.Retranscribed(1, Utterance(1, "가나다", "ko", 0, 1000, 300))))
+        assertEquals(listOf(Language.KO), redo.filterIsInstance<Effect.TranslateFinal>().map { it.turn.direction.source })
+    }
+
+    @Test
+    fun 音声を手放した発話と相手の決まっていない自分の発話は入れ替えられない() {
+        val s = ConversationSession(PartnerMode(Language.KO))
+        s.handle(final("こんにちは", id = 1))
+        s.handle(Event.Speech(SpeechEvent.Released(1)))
+        assertEquals(false, s.turns.single().swappable)
+        assertTrue(s.handle(Event.LanguageSwapped(s.turns.single().id)).isEmpty())
+
+        val auto = ConversationSession(PartnerMode.AUTO)
+        auto.handle(final("こんにちは", id = 2))
+        assertEquals(false, auto.turns.single().swappable)
+        assertTrue(auto.handle(Event.LanguageSwapped(auto.turns.single().id)).isEmpty())
+        // 相手が決まったら入れ替えられる
+        auto.handle(final("안녕하세요", lang = "ko", id = 3))
+        assertTrue(auto.turns.first().swappable)
     }
 }

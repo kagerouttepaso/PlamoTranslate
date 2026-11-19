@@ -40,6 +40,8 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  * カードの表示の言語（途中結果と確定の言語）は、話し手の時系列の [SpeakerTrack.label]。文・区切った残り・途中結果の書き起こしの
  * 言語のうち、認識器が音声から判定したもの（[LanguageSource.JUDGED]）も根拠として時系列に渡す（[noteTranscript]）。
  *
+ * 確定を出すカードの音声は [retain] に渡す（書き起こし直しのための取り置きは [UtteranceRetention] が持つ）。
+ *
  * 判断は部品に分ける：話し手は [SpeakerJudge]、区切る位置は [CutPoint]、認識した文字の聞き違いの判定は [TranscriptCleanup]、
  * ジョブの順番は [RecognitionQueue]。状態を持つので、すべての呼び出しは1本のスレッドから行う（[SpeechPipeline]）。
  * [trace] はセグメンターの経過を書く口（話した言葉を含むので、渡す側が詳しい記録を残すとき（デバッグ版の既定、正式版は
@@ -56,6 +58,8 @@ class SpeechSegmenter(
     private val submit: (RecognitionJob) -> Unit,
     private val trace: (() -> String) -> Unit = {},
     private val clock: () -> Long = System::nanoTime,
+    /** 確定を出すカードの番号（[Utterance.id]）と音声。確定の出来事より先に呼ぶ。 */
+    private val retain: (Long, FloatArray) -> Unit = { _, _ -> },
 ) {
     private val prerollSamples = (profile.prerollSeconds * SAMPLE_RATE).toInt()
     private val splitAfterSamples = (profile.splitAfterSeconds * SAMPLE_RATE).toInt()
@@ -129,7 +133,7 @@ class SpeechSegmenter(
         var recognition: Recognition? = null
     }
 
-    /** 区切ると決めたカード。[parts] の書き起こしがすべて届いたら確定を出す。 */
+    /** 区切ると決めたカード。[parts] の書き起こしがすべて届いたら確定を出す。[audio] はカードの音声（[retain] に渡す）。 */
     private class Closing(
         val start: Long,
         val end: Long,
@@ -138,6 +142,7 @@ class SpeechSegmenter(
         val parts: List<Phrase>,
         val manual: Boolean,
         val speakingEnd: Boolean,
+        val audio: FloatArray,
     )
 
     /** カード。[start] は聞き始めからの位置。 */
@@ -577,7 +582,7 @@ class SpeechSegmenter(
                 }
             }
         }
-        card.closing = Closing(start, end, reason, clock(), parts, manual, speakingEnd)
+        card.closing = Closing(start, end, reason, clock(), parts, manual, speakingEnd, capture(rel(start).coerceAtLeast(0), at))
         if (open === card) open = null
         trace { "区切ると決めた（$reason）${at(start)}〜${at(end)}" }
         finishIfReady(card)
@@ -585,7 +590,7 @@ class SpeechSegmenter(
 
     /**
      * 区切ると決めたカードの書き起こしがすべて届いていれば、確定を出す。言語はカードの表示の言語（[SpeakerTrack.label]。
-     * 決まっていなければ書き起こしの言語）。
+     * 決まっていなければ書き起こしの言語）。確定を出すカードの音声は [retain] に渡す。
      */
     private fun finishIfReady(card: Card) {
         val closing = card.closing ?: return
@@ -597,10 +602,12 @@ class SpeechSegmenter(
         if (label != card.lang) trace { "カードの表示の言語 $label（書き起こしの言語。区間と文の全体では ${card.lang}）" }
         trace { "確定（${closing.reason}）${at(closing.start)}〜${at(closing.end)}: [$lang] ${r.text} ／ 直前の途中 ${card.lastText}（区切ってから${waitedMs}ms）" }
         if (r.text.isNotEmpty()) {
+            retain(card.id, closing.audio)
             send(
                 card,
                 SpeechEvent.Final(
                     Utterance(
+                        id = card.id,
                         text = r.text,
                         lang = lang,
                         startMs = closing.start.coerceAtLeast(0) * 1000 / SAMPLE_RATE,

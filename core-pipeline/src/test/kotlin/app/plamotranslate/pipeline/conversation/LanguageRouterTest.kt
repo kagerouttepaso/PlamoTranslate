@@ -126,4 +126,11 @@ class LanguageRouterTest {
         // 自分が日本語なら中国語を探さず、漢字の多い日本語の聞き違いとして扱う
         assertEquals(false, LanguageRouter(PartnerMode.AUTO, Language.JA).chinese)
     }
+
+    @Test
+    fun 音声認識に指定する言語は比べる組と別にし繁体字の相手は広東語として聞く() {
+        assertEquals("ko", LanguageRouter.recognitionCode(Language.KO))
+        assertEquals("zh", LanguageRouter.recognitionCode(Language.ZH))
+        assertEquals("yue", LanguageRouter.recognitionCode(Language.ZH_HANT))
+    }
 }

@@ -24,6 +24,7 @@ import app.plamotranslate.pipeline.conversation.Direction
 import app.plamotranslate.pipeline.conversation.LiveSpeech
 import app.plamotranslate.pipeline.conversation.PartnerMode
 import app.plamotranslate.pipeline.conversation.Turn
+import app.plamotranslate.pipeline.speech.RetranscribeFailure
 import app.plamotranslate.pipeline.speech.SegmentationProfile
 import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.pipeline.speech.SpeechEngine
@@ -262,6 +263,9 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         engine.cut()
     }
 
+    /** 確定したカードの言語の取り違えを直す。もう一方の話し手の言語として書き起こし直し、訳し直す（[Event.LanguageSwapped]）。 */
+    fun swapLanguage(turnId: Long) = handle(Event.LanguageSwapped(turnId))
+
     fun clear() {
         handle(Event.Cleared)
         _state.update { it.copy(error = null) }
@@ -329,6 +333,8 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         when (val speech = (event as? Event.Speech)?.event) {
             is SpeechEvent.Partial -> logText { "途中 [${speech.lang}] ${speech.text}" }
             is SpeechEvent.Final -> speech.utterance.let { u -> logText { "認識 [${u.lang}] ${u.text} 認識${u.recognizeMs}ms" } }
+            is SpeechEvent.Retranscribed -> speech.utterance.let { u -> logText { "書き起こし直し 発話${u.id} [${u.lang}] ${u.text} ${u.recognizeMs}ms" } }
+            is SpeechEvent.RetranscribeFailed -> log("書き起こし直せなかった 発話${speech.id} ${speech.reason}")
             else -> Unit
         }
         handle(event)
@@ -349,6 +355,9 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
                 job.start()
             }
             is Effect.CancelPartial -> partialJobs[effect.requestId]?.cancel()
+            // 音声認識が無ければ書き起こし直せない（カードはそのまま）
+            is Effect.Retranscribe -> asr?.retranscribe(effect.utterance, effect.language)
+                ?: post(listOf(SpeechEvent.RetranscribeFailed(effect.utterance, RetranscribeFailure.UNAVAILABLE)))
         }
     }
 

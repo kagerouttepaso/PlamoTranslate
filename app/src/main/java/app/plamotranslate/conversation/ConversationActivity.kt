@@ -74,6 +74,7 @@ class ConversationActivity : ComponentActivity() {
                         self = vm::setSelf,
                         viewMode = vm::setViewMode,
                         clear = vm::clear,
+                        swapLanguage = vm::swapLanguage,
                         retry = vm::loadAsr,
                         shareLog = logExport::share,
                         saveLog = logExport::save,
@@ -127,6 +128,8 @@ internal class ConversationActions(
     val self: (Language) -> Unit,
     val viewMode: (ViewMode) -> Unit,
     val clear: () -> Unit,
+    /** 確定したカード（[Turn.id]）の言語の取り違えを直す（カードを横にスライド）。 */
+    val swapLanguage: (Long) -> Unit,
     val retry: () -> Unit,
     val shareLog: () -> Unit,
     val saveLog: () -> Unit,
@@ -139,18 +142,18 @@ private fun ConversationScreen(state: ConversationUiState, model: ModelState, ac
             when (state.viewMode) {
                 ViewMode.FACE_TO_FACE -> {
                     // 相手向け：相手の言語を大きく、逆さに出す
-                    PartnerHalf(state, Modifier.weight(1f).fillMaxWidth())
+                    PartnerHalf(state, actions, Modifier.weight(1f).fillMaxWidth())
                     Controls(state, model, actions)
                     // 自分向け：自分の言語を大きく出す
                     FollowingList(state, Modifier.weight(1f).fillMaxWidth()) {
-                        items(state.turns, key = { it.id }) { FaceCard(it, reader = Reader.ME) }
+                        items(state.turns, key = { it.id }) { FaceCard(it, reader = Reader.ME, onSwap = actions.swapLanguage) }
                         items(state.queued, key = { "queued-${it.id}" }) { QueuedCard(it, Reader.ME) }
                         state.live?.let { item(key = LIVE_KEY) { LiveCard(it, Reader.ME, state.level, state.lagSeconds) } }
                     }
                 }
                 ViewMode.SHARED -> {
                     FollowingList(state, Modifier.weight(1f).fillMaxWidth()) {
-                        items(state.turns, key = { it.id }) { SharedCard(it) }
+                        items(state.turns, key = { it.id }) { SharedCard(it, onSwap = actions.swapLanguage) }
                         items(state.queued, key = { "queued-${it.id}" }) { QueuedCard(it, reader = null) }
                         state.live?.let { item(key = LIVE_KEY) { LiveCard(it, reader = null, level = state.level, lagSeconds = state.lagSeconds) } }
                     }
@@ -169,10 +172,10 @@ private const val LIVE_KEY = "live"
  * 並びは下から上へ（reverseLayout）にする。相手から見ると上から下へ並び、指の動きと画面の動きが一致する。
  */
 @Composable
-private fun PartnerHalf(state: ConversationUiState, modifier: Modifier) {
+private fun PartnerHalf(state: ConversationUiState, actions: ConversationActions, modifier: Modifier) {
     // 背景は自分側と同じ地の色にする。別の色にすると、カードの色と混ざって見分けにくかった（2026-11-06、作者の指摘）
     FollowingList(state, modifier, reverse = true) {
-        items(state.turns, key = { it.id }) { Box(Modifier.rotate(180f)) { FaceCard(it, reader = Reader.PARTNER) } }
+        items(state.turns, key = { it.id }) { Box(Modifier.rotate(180f)) { FaceCard(it, reader = Reader.PARTNER, onSwap = actions.swapLanguage) } }
         items(state.queued, key = { "queued-${it.id}" }) { Box(Modifier.rotate(180f)) { QueuedCard(it, Reader.PARTNER) } }
         state.live?.let { item(key = LIVE_KEY) { Box(Modifier.rotate(180f)) { LiveCard(it, Reader.PARTNER, state.level, state.lagSeconds) } } }
     }

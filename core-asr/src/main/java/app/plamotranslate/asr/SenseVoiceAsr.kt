@@ -1,5 +1,6 @@
 package app.plamotranslate.asr
 
+import app.plamotranslate.pipeline.speech.LanguageSource
 import app.plamotranslate.pipeline.speech.Recognition
 import app.plamotranslate.pipeline.speech.SpeechBreak
 import app.plamotranslate.pipeline.speech.SpeechEngine
@@ -80,14 +81,43 @@ class SileroVoiceActivity private constructor(private val vad: Vad) : VoiceActiv
     }
 }
 
-/** インターフェース [SpeechRecognizer] の実装：SenseVoice Small。発話単位の一括認識で、言語タグ（日・韓・英・中・広東語）も返す。 */
-class SenseVoiceRecognizer private constructor(private val recognizer: OfflineRecognizer) : SpeechRecognizer {
-    override fun recognize(samples: FloatArray): Recognition {
-        val stream = recognizer.createStream()
+/**
+ * インターフェース [SpeechRecognizer] の実装：SenseVoice Small。発話単位の一括認識で、言語タグ（日・韓・英・中・広東語）も返す。
+ * ふだんは言語を自分で判定して書き起こす（`language = "auto"`）。
+ *
+ * 言語を指定した書き起こし（[recognizeAs]。利用者が言語の取り違えを直す書き起こし直し）は、言語を固定した認識器で行う。
+ * SenseVoice の言語は認識器の設定にしか無く、書き起こしごとの指定（`setOption("language")`）は効かない（PC で確かめた）。
+ * 設定の差し替え（`OfflineRecognizer.setConfig`）は、SenseVoice が読み込み時に直す特徴量の設定（ウィンドウ関数の種類・正規化）を初期値に戻す
+ * （sherpa-onnx 2.0.1 のソース）ので使えない。言語を固定した認識器は初めて頼まれたときに読み込み（約240MB、1秒ほど）、
+ * 最後に頼まれた言語の1つだけ持つ。書き起こし直しはまれなので、ふだんのメモリは増やさない。
+ */
+class SenseVoiceRecognizer private constructor(
+    private val recognizer: OfflineRecognizer,
+    private val pinnedFactory: (String) -> OfflineRecognizer,
+) : SpeechRecognizer {
+    /** 言語を固定した認識器と、その言語。 */
+    private var pinned: Pair<String, OfflineRecognizer>? = null
+
+    override fun recognize(samples: FloatArray): Recognition = recognizeWith(recognizer, samples)
+
+    /** [language] として書き起こす。SenseVoice の知らない言語か null なら、言語を自分で判定する。 */
+    @Synchronized
+    override fun recognizeAs(samples: FloatArray, language: String?): Recognition {
+        if (language == null || language !in KNOWN_LANGS) return recognize(samples)
+        val current = pinned?.takeIf { it.first == language }?.second ?: run {
+            pinned?.second?.release()
+            pinned = null
+            pinnedFactory(language).also { pinned = language to it }
+        }
+        return recognizeWith(current, samples).copy(lang = language, source = LanguageSource.SPECIFIED)
+    }
+
+    private fun recognizeWith(r: OfflineRecognizer, samples: FloatArray): Recognition {
+        val stream = r.createStream()
         try {
             stream.acceptWaveform(samples, SpeechEngine.SAMPLE_RATE)
-            recognizer.decode(stream)
-            val result = recognizer.getResult(stream)
+            r.decode(stream)
+            val result = r.getResult(stream)
             val lang = parseLang(result.lang)
             return Recognition(removeCjkSpaces(result.text.trim(), lang), lang, breaksOf(result.tokens, result.timestamps))
         } finally {
@@ -95,7 +125,12 @@ class SenseVoiceRecognizer private constructor(private val recognizer: OfflineRe
         }
     }
 
-    override fun close() = recognizer.release()
+    @Synchronized
+    override fun close() {
+        pinned?.second?.release()
+        pinned = null
+        recognizer.release()
+    }
 
     companion object {
         /**
@@ -105,22 +140,27 @@ class SenseVoiceRecognizer private constructor(private val recognizer: OfflineRe
         const val THREADS = 4
 
         fun load(modelDir: File, threads: Int = THREADS): SenseVoiceRecognizer = SenseVoiceRecognizer(
-            OfflineRecognizer(
-                assetManager = null,
-                config = OfflineRecognizerConfig(
-                    modelConfig = OfflineModelConfig(
-                        senseVoice = OfflineSenseVoiceModelConfig(
-                            model = File(modelDir, "sense-voice/model.int8.onnx").path,
-                            language = "auto",
-                            // 句読点を付け、数字を書き言葉にする。翻訳に渡す文として自然になる
-                            useInverseTextNormalization = true,
-                        ),
-                        tokens = File(modelDir, "sense-voice/tokens.txt").path,
-                        numThreads = threads,
+            create(modelDir, threads, AUTO),
+        ) { language -> create(modelDir, threads, language) }
+
+        /** [language] は SenseVoice の言語（`auto`・`ja`・`ko`・`en`・`zh`・`yue`）。 */
+        private fun create(modelDir: File, threads: Int, language: String) = OfflineRecognizer(
+            assetManager = null,
+            config = OfflineRecognizerConfig(
+                modelConfig = OfflineModelConfig(
+                    senseVoice = OfflineSenseVoiceModelConfig(
+                        model = File(modelDir, "sense-voice/model.int8.onnx").path,
+                        language = language,
+                        // 句読点を付け、数字を書き言葉にする。翻訳に渡す文として自然になる
+                        useInverseTextNormalization = true,
                     ),
+                    tokens = File(modelDir, "sense-voice/tokens.txt").path,
+                    numThreads = threads,
                 ),
             ),
         )
+
+        private const val AUTO = "auto"
 
         /** SenseVoiceの言語タグ（例 "<|ja|>"）からコードを取り出す。判定なし（"<|nospeech|>" など）は null。 */
         internal fun parseLang(tag: String?): String? {

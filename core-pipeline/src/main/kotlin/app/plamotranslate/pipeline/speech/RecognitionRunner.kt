@@ -17,6 +17,7 @@ class RecognitionRunner(private val recognizer: SpeechRecognizer) {
         )
         is RecognitionJob.Language -> scored(job.samples, job.languages, strict = true)
         is RecognitionJob.Seam -> RecognitionOutput.SeamFound(seam(job))
+        is RecognitionJob.Retranscribe -> RecognitionOutput.Transcribed(recognizer.recognizeAs(job.samples, job.language))
     }
 
     /**
@@ -63,7 +64,7 @@ class RecognitionRunner(private val recognizer: SpeechRecognizer) {
     companion object {
         /** 失敗したジョブ・捨てたジョブの結果（空）。確定を待たせ続けないため。 */
         fun empty(job: RecognitionJob): RecognitionOutput = when (job) {
-            is RecognitionJob.Transcribe -> RecognitionOutput.Transcribed(Recognition("", null))
+            is RecognitionJob.Transcribe, is RecognitionJob.Retranscribe -> RecognitionOutput.Transcribed(Recognition("", null))
             is RecognitionJob.Language -> RecognitionOutput.Scored(null)
             is RecognitionJob.Seam -> RecognitionOutput.SeamFound(null)
         }

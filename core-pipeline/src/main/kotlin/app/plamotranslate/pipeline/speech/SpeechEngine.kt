@@ -2,9 +2,11 @@ package app.plamotranslate.pipeline.speech
 
 /**
  * 話し終わった1つの発話（docs/設計/会話翻訳.md「音声認識」）。
- * [lang] は認識器が判定した言語のコード（"ja"・"ko"・"en"・"zh" など）。判定できなければ null。
+ * [lang] は話し手の言語のコード（"ja"・"ko"・"en"・"zh" など）。判定できなければ null。
  */
 data class Utterance(
+    /** 発話の番号（エンジンの中で一意）。書き起こし直し（[SpeechEngine.retranscribe]）で発話を指す。 */
+    val id: Long,
     val text: String,
     val lang: String?,
     /** 聞き始めからの発話の始まり（ミリ秒）。 */
@@ -30,6 +32,27 @@ sealed interface SpeechEvent {
 
     /** 止める前に話した分（[SpeechEngine.flush]）を、すべて確定し終えた。最後に届く。 */
     data object Flushed : SpeechEvent
+
+    /** 書き起こし直し（[SpeechEngine.retranscribe]）を終えた。[utterance] の言語は指定した言語、[Utterance.id] は [id]。 */
+    data class Retranscribed(val id: Long, val utterance: Utterance) : SpeechEvent
+
+    /** 発話 [id] を書き起こし直せなかった。発話はそのまま（言語も原文も替えない）。 */
+    data class RetranscribeFailed(val id: Long, val reason: RetranscribeFailure) : SpeechEvent
+
+    /** 発話 [id] の音声を手放した（直近の発話だけを取り置く）。この発話はもう書き起こし直せない。 */
+    data class Released(val id: Long) : SpeechEvent
+}
+
+/** 書き起こし直せなかった理由。 */
+enum class RetranscribeFailure {
+    /** 発話の音声をもう持っていない（[SpeechEvent.Released] の後）。 */
+    RELEASED,
+
+    /** 指定した言語では何も聞き取れなかった。 */
+    NOTHING_HEARD,
+
+    /** 音声認識がまだ無い・もう無い。 */
+    UNAVAILABLE,
 }
 
 /**
@@ -70,8 +93,16 @@ interface SpeechEngine : AutoCloseable {
      */
     fun cut()
 
-    /** 途中の音声を捨てて、新しい会話として始め直す。 */
+    /** 途中の音声を捨てて、新しい会話として始め直す。取り置いた直近の発話の音声は残す（書き起こし直せるように）。 */
     fun reset()
+
+    /**
+     * 確定した発話 [utterance]（[Utterance.id]）を、[language]（言語のコード）として書き起こし直す。利用者が発話の言語の
+     * 取り違えを直すときに使う。直近の発話（[SpeechEvent.Released] が届いていないもの）だけ書き起こせる。
+     * 結果は [SpeechEvent.Retranscribed] か [SpeechEvent.RetranscribeFailed] で、頼んだ発話ごとに1回届く。同じ発話を待っている間に
+     * 重ねて頼んだら、1つの結果にまとめる。[reset] をまたいでも待っている書き起こし直しは続け、[close] の後は届かない。
+     */
+    fun retranscribe(utterance: Long, language: String)
 
     companion object {
         const val SAMPLE_RATE = 16_000

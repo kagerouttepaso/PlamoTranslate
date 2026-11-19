@@ -119,7 +119,8 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
                         // 最初の確定で止める
                         is SpeechEvent.Final -> if (heard.compareAndSet(null, event.utterance.text)) mic.cancel()
                         SpeechEvent.Flushed -> break
-                        SpeechEvent.CutDone -> Unit
+                        // 区切りと書き起こし直しは会話翻訳だけが使う
+                        SpeechEvent.CutDone, is SpeechEvent.Retranscribed, is SpeechEvent.RetranscribeFailed, is SpeechEvent.Released -> Unit
                     }
                 }
             } catch (e: CancellationException) {
