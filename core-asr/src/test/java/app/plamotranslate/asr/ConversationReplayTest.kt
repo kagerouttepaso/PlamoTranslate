@@ -12,6 +12,8 @@ import app.plamotranslate.pipeline.speech.RecognitionRunner
 import app.plamotranslate.pipeline.speech.SegmentationProfile
 import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
 import app.plamotranslate.pipeline.speech.SpeechEvent
+import app.plamotranslate.pipeline.speech.SpeechModel
+import app.plamotranslate.pipeline.speech.SpeechRecognizer
 import app.plamotranslate.pipeline.speech.SpeechSegmenter
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -24,20 +26,31 @@ import java.io.File
  *
  * 環境変数で動かす（どれかが無ければ飛ばす）：
  * - PLAMO_REPLAY_WAV：会話の録音（端末の `files/asr-rec/conv_*.wav`）
- * - PLAMO_REPLAY_ASR：モデルの置き場（`silero_vad.onnx`・`qwen3-asr/`・`whisper-tiny/`。端末の `files/models/asr/` と同じ形）
+ * - PLAMO_REPLAY_ASR：モデルの置き場（`silero_vad.onnx`・`qwen3-asr/`・`whisper-tiny/`・`sense-voice/`。端末の `files/models/asr/` と同じ形）
+ * - PLAMO_REPLAY_MODEL：音声認識モデル（`QWEN3_ASR` か `SENSE_VOICE`。[SpeechModel] の名前。既定は `QWEN3_ASR`）
  * - PLAMO_REPLAY_OUT：結果を書くファイル（カードの一覧と区切りの経過）
  * - PLAMO_REPLAY_CUTS：手で区切った位置（秒、カンマ区切り。任意）
  * - PLAMO_REPLAY_PARTNER：相手の言語（auto か言語のコード。既定は auto）
  * - PLAMO_SHERPA_LIB：sherpa-onnx の Windows 版の JNI の lib（build.gradle.kts が読む）
  */
 class ConversationReplayTest {
-    /** 端末（REDMAGIC 11 Pro、Qwen3-ASR 6スレッド・Whisper tiny 2スレッド）で測った処理時間（2026-11-15 の会話の記録の回帰）。 */
+    /**
+     * 端末（REDMAGIC 11 Pro）で測った処理時間。Qwen3-ASR（6スレッド）・Whisper tiny（2スレッド）は 2026-11-15 の会話の記録の回帰、
+     * SenseVoice（4スレッド）は 2026-11-19 の会話の記録（1.5秒の区間 約0.07〜0.09秒、7.4秒の書き起こし 約0.31〜0.33秒、
+     * 境界探し 約0.1〜0.23秒）から。
+     */
     private object DeviceTiming {
-        fun millis(job: RecognitionJob): Long {
+        fun millis(job: RecognitionJob, model: SpeechModel): Long {
             val seconds = job.samples.size / SAMPLE_RATE.toDouble()
+            if (model == SpeechModel.SENSE_VOICE) {
+                return when (job) {
+                    is RecognitionJob.Language, is RecognitionJob.Transcribe, is RecognitionJob.Retranscribe -> 20 + 40 * seconds
+                    is RecognitionJob.Seam -> 170.0
+                }.toLong()
+            }
             return when (job) {
                 is RecognitionJob.Language -> if (job.lane == RecognitionLane.IDENTIFY) 330 + 21 * seconds else 256 + 203 * seconds
-                is RecognitionJob.Transcribe -> 256 + 203 * seconds
+                is RecognitionJob.Transcribe, is RecognitionJob.Retranscribe -> 256 + 203 * seconds
                 // 境界探しは識別の繰り返し（記録の平均）
                 is RecognitionJob.Seam -> 1700.0
             }.toLong()
@@ -109,19 +122,24 @@ class ConversationReplayTest {
         val partner = System.getenv("PLAMO_REPLAY_PARTNER")?.takeIf { it != "auto" }
             ?.let { code -> Language.entries.first { it.code == code } }
 
+        val model = System.getenv("PLAMO_REPLAY_MODEL")?.let(SpeechModel::valueOf) ?: SpeechModel.QWEN3_ASR
+
         val audio = WavFile.parse(wav!!.readBytes())
         val profile = SegmentationProfile.CONVERSATION
-        val recognizer = IdentifiedRecognizer(
-            WhisperLanguageIdentifier.load(File(asr, WhisperLanguageIdentifier.DIR), 4),
-            Qwen3Recognizer.load(File(asr, Qwen3Recognizer.DIR), 8),
-        )
+        val recognizer: SpeechRecognizer = when (model) {
+            SpeechModel.SENSE_VOICE -> SenseVoiceRecognizer.load(asr!!)
+            SpeechModel.QWEN3_ASR -> IdentifiedRecognizer(
+                WhisperLanguageIdentifier.load(File(asr, WhisperLanguageIdentifier.DIR), 4),
+                Qwen3Recognizer.load(File(asr, Qwen3Recognizer.DIR), 8),
+            )
+        }
         val vad = SileroVoiceActivity.load(File(asr, "silero_vad.onnx"), profile.phraseSilenceSeconds)
         val runner = RecognitionRunner(recognizer)
         val queue = RecognitionQueue()
         val session = ConversationSession(
             mode = partner?.let(::PartnerMode) ?: PartnerMode.AUTO,
             self = Language.JA,
-            heard = app.plamotranslate.pipeline.speech.SpeechModel.QWEN3_ASR.languages,
+            heard = model.languages,
         )
 
         var now = 0L // 模擬の時刻（サンプル数）
@@ -131,9 +149,9 @@ class ConversationReplayTest {
         lateinit var segmenter: SpeechSegmenter
         segmenter = SpeechSegmenter(
             vad,
-            identifies = true,
+            identifies = recognizer.identifies,
             profile = profile,
-            heavy = true,
+            heavy = model.heavy,
             emit = { event ->
                 if (event is SpeechEvent.Final) {
                     val u = event.utterance
@@ -155,7 +173,7 @@ class ConversationReplayTest {
                 if (lane in running) continue
                 val job = queue.take(lane) ?: continue
                 val output = runner.run(job)
-                running[lane] = Triple(job, output, now + DeviceTiming.millis(job) * SAMPLE_RATE / 1000)
+                running[lane] = Triple(job, output, now + DeviceTiming.millis(job, model) * SAMPLE_RATE / 1000)
             }
         }
         // 端末と同じく、閉じたカードの要らないジョブは捨て、空の結果を返す（SpeechPipeline）
