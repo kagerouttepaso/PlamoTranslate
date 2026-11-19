@@ -167,8 +167,9 @@ internal class ScreenMenu(private val context: Context, private val windowManage
         addView(
             WrapLayout(context, gap = context.dp(6)).apply {
                 entry.options.forEach { addView(chip(it)) }
+                // 「他の言語」は、画面の幅や選んだ言語の名前の長さに依らず、いつも次の段の頭に置く
                 entry.more?.let { more ->
-                    addView(chipView(more.label, more.checked).apply {
+                    addViewOnNewLine(chipView(more.label, more.checked).apply {
                         setOnClickListener {
                             OwnTouch.mark()
                             page = more

@@ -11,6 +11,23 @@ import android.view.ViewGroup
  * （ViewGroup は既定で余白の外側を描かない。2026-11-19、「他の言語」のページで最後の行が欠けた）。
  */
 internal class WrapLayout(context: Context, private val gap: Int) : ViewGroup(context) {
+    /** 必ず新しい行の頭に置く子（[addViewOnNewLine]）。 */
+    private val lineHeads = HashSet<View>()
+
+    /** [child] を、幅が足りていても新しい行の頭に置く（画面の幅や前の子の長さで、並び方が変わらないようにする）。 */
+    fun addViewOnNewLine(child: View) {
+        lineHeads += child
+        addView(child)
+    }
+
+    override fun onViewRemoved(child: View) {
+        super.onViewRemoved(child)
+        lineHeads -= child
+    }
+
+    /** [child] の前で折り返すか。[x] はその行で置いた幅。 */
+    private fun wrapsBefore(child: View, x: Int, limit: Int): Boolean = x > 0 && (child in lineHeads || x + child.measuredWidth > limit)
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val limit = if (MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.UNSPECIFIED) Int.MAX_VALUE
         else MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
@@ -22,7 +39,7 @@ internal class WrapLayout(context: Context, private val gap: Int) : ViewGroup(co
             val child = getChildAt(i)
             if (child.visibility == View.GONE) continue
             child.measure(MeasureSpec.makeMeasureSpec(limit.coerceAtLeast(0), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
-            if (x > 0 && x + child.measuredWidth > limit) {
+            if (wrapsBefore(child, x, limit)) {
                 y += rowHeight + gap
                 x = 0
                 rowHeight = 0
@@ -45,7 +62,7 @@ internal class WrapLayout(context: Context, private val gap: Int) : ViewGroup(co
         for (i in 0 until childCount) {
             val child = getChildAt(i)
             if (child.visibility == View.GONE) continue
-            if (x > 0 && x + child.measuredWidth > limit) {
+            if (wrapsBefore(child, x, limit)) {
                 y += rowHeight + gap
                 x = 0
                 rowHeight = 0
