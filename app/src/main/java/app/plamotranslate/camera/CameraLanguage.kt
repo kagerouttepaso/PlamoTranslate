@@ -2,39 +2,19 @@ package app.plamotranslate.camera
 
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.sameAs
-import app.plamotranslate.ocr.OcrLanguage
+import app.plamotranslate.overlay.READABLE_SOURCES
 
 /*
- * カメラ翻訳の原文の言語（2026-11-08、作者の要望「ライブラリとモデルで対応できる言語は全て選べるように」）。
- * 翻訳（PLaMo 3 Translate）は53言語を訳せるので、選べる言語は文字認識（ML Kit）が読める文字で決まる。
- * 同梱している認識器はラテン文字・中国語・日本語・韓国語の4つ（docs/設計/カメラ翻訳.md「原文の言語」）。
+ * カメラ翻訳の原文と訳す先の言語（2026-11-08、作者の要望「ライブラリとモデルで対応できる言語は全て選べるように」）。
+ * 原文に選べる言語と、言語ごとに動かす認識器は、画面翻訳と共通の表（overlay/SourceLanguages.kt）で決まる。
  * 訳す先と同じ言語は原文に選ばない（日本語へ訳すときは日本語を、英語へ訳すときは英語を出さない）。
- * アラビア文字・キリル文字・タイ文字・デーヴァナーガリーなどの言語は、読める認識器が無いので出さない。
  */
-
-/** ラテン文字で書く言語。ML Kitの英字の認識器で読む。セルビア語は看板がキリル文字のことが多いので入れない。 */
-private val LATIN_SCRIPT = setOf(
-    Language.EN, Language.AZ, Language.IT, Language.ID, Language.UZ, Language.ET, Language.NL, Language.CA,
-    Language.HR, Language.JV, Language.ES, Language.SK, Language.SL, Language.SW, Language.CEB, Language.TL,
-    Language.DE, Language.HU, Language.EU, Language.FR, Language.VI, Language.PL, Language.MS, Language.LV,
-    Language.LT,
-)
-
-/** その言語の原文を読むのに動かす認識器。読める認識器が無ければ null。 */
-internal val Language.ocrLanguage: OcrLanguage?
-    get() = when (this) {
-        Language.JA -> OcrLanguage.JAPANESE
-        Language.KO -> OcrLanguage.KOREAN
-        Language.ZH, Language.ZH_HANT -> OcrLanguage.CHINESE
-        in LATIN_SCRIPT -> OcrLanguage.LATIN
-        else -> null
-    }
 
 /** 訳す先に選べる言語。PLaMoはどの言語へも訳せるので、全53言語。 */
 internal val CAMERA_TARGETS: List<Language> = Language.entries
 
 /** 読める原文の言語（自動を除く）。並びは [Language] の順（よく使う言語が先、残りは五十音順）。 */
-internal val CAMERA_SOURCES: List<Language> = Language.entries.filter { it.ocrLanguage != null }
+internal val CAMERA_SOURCES: List<Language> = READABLE_SOURCES
 
 /** 訳す先が [target] のときに選べる原文の言語。訳す先と同じ言語は除く。 */
 internal fun cameraSources(target: Language): List<Language> = CAMERA_SOURCES.filterNot { it.sameAs(target) }
@@ -42,7 +22,3 @@ internal fun cameraSources(target: Language): List<Language> = CAMERA_SOURCES.fi
 /** 下の欄にチップで並べる言語（訳す先と同じ言語を除いて3つ）。ほかの言語は「他の言語」のメニューから選ぶ。 */
 internal fun cameraQuickSources(target: Language): List<Language> =
     listOf(Language.JA, Language.KO, Language.EN, Language.ZH).filterNot { it.sameAs(target) }.take(3)
-
-/** チップに出す短い名前。 */
-internal val Language.chipName: String
-    get() = if (this == Language.ZH) "中国語" else label

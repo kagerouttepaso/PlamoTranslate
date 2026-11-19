@@ -66,6 +66,7 @@ import app.plamotranslate.ModelState
 import app.plamotranslate.ModelSwitch
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.sameAs
+import app.plamotranslate.overlay.shortName
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -320,7 +321,7 @@ class CameraTranslateActivity : ComponentActivity() {
             FilterChip(selected = source == null, onClick = { chooseSource(null) }, label = { Text("自動") }, colors = chipColors)
             val quick = cameraQuickSources(target)
             quick.forEach { lang ->
-                FilterChip(selected = source == lang, onClick = { chooseSource(lang) }, label = { Text(lang.chipName) }, colors = chipColors)
+                FilterChip(selected = source == lang, onClick = { chooseSource(lang) }, label = { Text(lang.shortName) }, colors = chipColors)
             }
             var open by remember { mutableStateOf(false) }
             val other = source?.takeIf { it !in quick }
@@ -354,7 +355,7 @@ class CameraTranslateActivity : ComponentActivity() {
             FilterChip(
                 selected = target != Language.JA,
                 onClick = { open = true },
-                label = { Text("訳：${target.chipName} ▾") },
+                label = { Text("訳：${target.shortName} ▾") },
                 colors = FilterChipDefaults.filterChipColors(labelColor = Color.White),
             )
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {

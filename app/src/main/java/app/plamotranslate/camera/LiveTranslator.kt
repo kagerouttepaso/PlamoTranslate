@@ -13,6 +13,7 @@ import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.ocr.OcrLanguage
 import app.plamotranslate.overlay.BoxColors
 import app.plamotranslate.overlay.TextBlock
+import app.plamotranslate.overlay.recognizers
 import app.plamotranslate.overlay.selectTargets
 import app.plamotranslate.overlay.textLine
 import app.plamotranslate.overlay.toBox
@@ -115,8 +116,8 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
             }
         }
 
-    /** 動かす認識器。原文の言語から決める（CameraLanguage.kt）。 */
-    private val recognizers: OcrLanguage get() = source?.ocrLanguage ?: OcrLanguage.AUTO
+    /** 動かす認識器。原文の言語から決める（overlay/SourceLanguages.kt）。 */
+    private val recognizers: OcrLanguage get() = source.recognizers
 
     /** 文章のモード（行を段落にまとめる）か、表・メニューのモード（1行ずつ）か。 */
     var groupParagraphs = true

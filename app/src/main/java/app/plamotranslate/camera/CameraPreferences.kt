@@ -2,7 +2,8 @@ package app.plamotranslate.camera
 
 import android.content.Context
 import app.plamotranslate.llm.Language
-import app.plamotranslate.ocr.OcrLanguage
+import app.plamotranslate.overlay.storedCode
+import app.plamotranslate.overlay.storedSource
 
 /**
  * カメラ翻訳の設定（原文の言語・訳す先・表のモード）。端末に残し、次に開いたときも引き継ぐ
@@ -16,11 +17,8 @@ internal class CameraPreferences(context: Context) {
      * 以前は認識器の種類（OcrLanguage）を "language" に保存していたので、新しい値が無ければそれを読み替える。
      */
     var source: Language?
-        get() {
-            val code = prefs.getString(KEY_SOURCE, null) ?: return legacySource()
-            return Language.ofCode(code)?.takeIf { it in CAMERA_SOURCES }
-        }
-        set(language) = prefs.edit().putString(KEY_SOURCE, language?.code ?: AUTO).apply()
+        get() = storedSource(prefs.getString(KEY_SOURCE, null), prefs.getString(KEY_LEGACY_SOURCE, null), CAMERA_SOURCES)
+        set(language) = prefs.edit().putString(KEY_SOURCE, language.storedCode).apply()
 
     /** 訳す先。既定は日本語。 */
     var target: Language
@@ -32,19 +30,10 @@ internal class CameraPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_TABLE, false)
         set(table) = prefs.edit().putBoolean(KEY_TABLE, table).apply()
 
-    private fun legacySource(): Language? = when (OcrLanguage.parse(prefs.getString(KEY_LEGACY_SOURCE, null))) {
-        OcrLanguage.AUTO -> null
-        OcrLanguage.CHINESE -> Language.ZH
-        OcrLanguage.KOREAN -> Language.KO
-        OcrLanguage.LATIN -> Language.EN
-        OcrLanguage.JAPANESE -> Language.JA
-    }
-
     private companion object {
         const val KEY_SOURCE = "source"
         const val KEY_LEGACY_SOURCE = "language"
         const val KEY_TARGET = "target"
         const val KEY_TABLE = "table"
-        const val AUTO = "auto"
     }
 }
