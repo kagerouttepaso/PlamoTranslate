@@ -1,5 +1,6 @@
 package app.plamotranslate
 
+import app.plamotranslate.pipeline.translation.ParallelTuner
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -169,7 +170,7 @@ fun PerformanceCard(model: ModelState) {
                         measured[n] = runCatching { EngineBenchmark.runParallel(context, n) }
                             .onFailure { Logs.w("同時に訳す数の計測に失敗（${n}本）", it) }
                             .getOrNull() ?: 0.0
-                        parallel = ParallelTuner.best(measured)
+                        parallel = ParallelTuner.best(measured, TranslationEngine.DEFAULT_PARALLEL)
                         EngineHolder.setParallel(context, parallel)
                     }
                     tuning = report(true)
