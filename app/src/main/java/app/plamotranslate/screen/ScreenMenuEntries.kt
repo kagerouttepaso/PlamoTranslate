@@ -49,8 +49,8 @@ internal class ScreenMenuEntries(
         add(MenuEntry.Choice(
             "原文の言語",
             (listOf<Language?>(null) + SCREEN_QUICK_SOURCES).map(::sourceOption),
-            // サブメニューの言語を選んでいれば、その言語の名前で選択中の表示にする（行はすでに幅いっぱいで、
-            // この選択肢はいつも2段目に1つだけ置かれるので、長い名前でも段の数は変わらない）
+            // サブメニューの言語を選んでいれば、その言語の名前で選択中の表示にする（縦向きの電話では行がすでに幅いっぱいで、
+            // この選択肢は2段目に1つだけ置かれるので、長い名前でも段の数は変わらない）
             more = OptionPage(other?.label ?: "他の言語", checked = other != null, "原文の言語（他の言語）") {
                 SCREEN_OTHER_SOURCES.map(::sourceOption)
             },
