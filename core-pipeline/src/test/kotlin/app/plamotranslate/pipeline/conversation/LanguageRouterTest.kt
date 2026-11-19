@@ -11,24 +11,24 @@ class LanguageRouterTest {
     @Test
     fun 自動では相手が話した言語へ自分の発話を訳し_相手が分かる前の自分の発話は訳さない() {
         val router = LanguageRouter()
-        assertEquals(Direction(Language.JA, null), router.route("こんにちは", "ja"))
-        assertEquals(Direction(Language.EN, Language.JA), router.route("Hello", "en"))
-        assertEquals(Direction(Language.JA, Language.EN), router.route("元気です", "ja"))
+        assertEquals(Direction(Language.JA, null, mine = true), router.route("こんにちは", "ja"))
+        assertEquals(Direction(Language.EN, Language.JA, mine = false), router.route("Hello", "en"))
+        assertEquals(Direction(Language.JA, Language.EN, mine = true), router.route("元気です", "ja"))
         assertTrue(router.partnerFound)
     }
 
     @Test
     fun 途中結果では相手の言語を覚えない() {
         val router = LanguageRouter()
-        assertEquals(Direction(Language.EN, Language.JA), router.preview("Hello", "en"))
+        assertEquals(Direction(Language.EN, Language.JA, mine = false), router.preview("Hello", "en"))
         assertEquals(null, router.partner)
     }
 
     @Test
     fun 手動では判定が違っても固定した言語として扱う() {
         val router = LanguageRouter(PartnerMode.KOREAN)
-        assertEquals(Direction(Language.KO, Language.JA), router.route("Hello", "en"))
-        assertEquals(Direction(Language.JA, Language.KO), router.route("はい", "ja"))
+        assertEquals(Direction(Language.KO, Language.JA, mine = false), router.route("Hello", "en"))
+        assertEquals(Direction(Language.JA, Language.KO, mine = true), router.route("はい", "ja"))
     }
 
     @Test
@@ -42,25 +42,25 @@ class LanguageRouterTest {
     @Test
     fun 自動では中国語の判定を相手の言語にしない() {
         val router = LanguageRouter()
-        assertEquals(Direction(Language.JA, null), router.route("天気", "zh"))
+        assertEquals(Direction(Language.JA, null, mine = true), router.route("天気", "zh"))
         assertEquals(null, router.partner)
     }
 
     @Test
     fun 中国語の相手では中国語と広東語の判定を相手の発話とする() {
         val router = LanguageRouter(PartnerMode.CHINESE)
-        assertEquals(Direction(Language.ZH, Language.JA), router.route("你好", "zh"))
-        assertEquals(Direction(Language.ZH_HANT, Language.JA), router.route("你好嗎", "yue"))
-        assertEquals(Direction(Language.JA, Language.ZH), router.route("こんにちは", "ja"))
+        assertEquals(Direction(Language.ZH, Language.JA, mine = false), router.route("你好", "zh"))
+        assertEquals(Direction(Language.ZH_HANT, Language.JA, mine = false), router.route("你好嗎", "yue"))
+        assertEquals(Direction(Language.JA, Language.ZH, mine = true), router.route("こんにちは", "ja"))
         // 仮名を含めば、中国語と判定されても日本語の聞き違いとみなす
-        assertEquals(Direction(Language.JA, Language.ZH), router.route("今日は晴れ", "zh"))
+        assertEquals(Direction(Language.JA, Language.ZH, mine = true), router.route("今日は晴れ", "zh"))
     }
 
     @Test
     fun 繁体字の相手には自分の発話を繁体字へ訳す() {
         val router = LanguageRouter(PartnerMode.CHINESE_TRADITIONAL)
-        assertEquals(Direction(Language.JA, Language.ZH_HANT), router.route("ありがとう", "ja"))
-        assertEquals(Direction(Language.ZH_HANT, Language.JA), router.route("多謝", "yue"))
+        assertEquals(Direction(Language.JA, Language.ZH_HANT, mine = true), router.route("ありがとう", "ja"))
+        assertEquals(Direction(Language.ZH_HANT, Language.JA, mine = false), router.route("多謝", "yue"))
     }
 
     @Test

@@ -177,7 +177,7 @@ class ConversationSessionTest {
         val id = s.handle(final("こんにちは")).filterIsInstance<Effect.TranslateFinal>().single().turn.id
         s.handle(Event.FinalDone(id, "Hello", 100))
         val again = s.handle(Event.ModeChanged(PartnerMode.KOREAN)).filterIsInstance<Effect.TranslateFinal>().single()
-        assertEquals(Direction(Language.JA, Language.KO), again.turn.direction)
+        assertEquals(Direction(Language.JA, Language.KO, mine = true), again.turn.direction)
         assertEquals("", s.turns.single().translation)
         assertTrue(!s.turns.single().translated)
     }
@@ -348,7 +348,7 @@ class ConversationSessionTest {
         assertTrue(changed.filterIsInstance<Effect.TranslateFinal>().isEmpty())
         // 書き起こし直しが届いたら、今の相手の言語へ訳す
         val redo = s.handle(Event.Speech(SpeechEvent.Retranscribed(1, Utterance(1, "こんにちは。", "ja", 0, 1000, 300))))
-        assertEquals(listOf(Language.EN), redo.filterIsInstance<Effect.TranslateFinal>().map { it.turn.direction.target })
+        assertEquals(listOf(Language.EN), redo.filterIsInstance<Effect.TranslateFinal>().map { it.target })
     }
 
     @Test
@@ -361,6 +361,6 @@ class ConversationSessionTest {
         val back = s.handle(Event.Speech(SpeechEvent.RetranscribeFailed(1, RetranscribeFailure.NOTHING_HEARD)))
         val turn = s.turns.single()
         assertEquals(Direction(Language.JA, Language.EN, mine = true), turn.direction)
-        assertEquals(listOf(Language.EN), back.filterIsInstance<Effect.TranslateFinal>().map { it.turn.direction.target })
+        assertEquals(listOf(Language.EN), back.filterIsInstance<Effect.TranslateFinal>().map { it.target })
     }
 }

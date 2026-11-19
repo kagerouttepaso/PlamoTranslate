@@ -46,7 +46,7 @@ data class PartnerMode(val fixed: Language?) {
 }
 
 /** 1つの発話を、どの言語からどの言語へ訳すか。[mine] は自分の発話。[target] が null なら、相手の言語がまだ分からない（訳さない）。 */
-data class Direction(val source: Language, val target: Language?, val mine: Boolean = source == Language.JA)
+data class Direction(val source: Language, val target: Language?, val mine: Boolean)
 
 /**
  * 言語の状態と、発話ごとの訳す方向（docs/設計/会話翻訳.md「言語の判定と訳す方向」）。

@@ -16,9 +16,9 @@ class ConversationLogTest {
     @Test
     fun 発話ごとに時刻と話した人と原文と訳を並べる() {
         val turns = listOf(
-            Turn(0, Direction(Language.KO, Language.JA), "안녕하세요", "こんにちは", true, timeMillis = at(14, 3, 5)),
-            Turn(1, Direction(Language.JA, Language.KO), "元気です\n", "잘 지내요", true, timeMillis = at(14, 3, 12)),
-            Turn(2, Direction(Language.KO, Language.JA), "감사합니다", "", false, timeMillis = at(14, 10, 0)),
+            Turn(0, Direction(Language.KO, Language.JA, mine = false), "안녕하세요", "こんにちは", true, timeMillis = at(14, 3, 5)),
+            Turn(1, Direction(Language.JA, Language.KO, mine = true), "元気です\n", "잘 지내요", true, timeMillis = at(14, 3, 12)),
+            Turn(2, Direction(Language.KO, Language.JA, mine = false), "감사합니다", "", false, timeMillis = at(14, 10, 0)),
         )
         val expected = """
             |# 会話ログ 2026-11-06 14:03〜14:10

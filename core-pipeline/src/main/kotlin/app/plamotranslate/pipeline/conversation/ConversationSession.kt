@@ -134,10 +134,10 @@ class ConversationSession(
 
     sealed interface Effect {
         /** 確定した発話を訳す。終わったら [Event.FinalDone] を返す。 */
-        data class TranslateFinal(val turn: Turn) : Effect
+        data class TranslateFinal(val turn: Turn, val target: Language) : Effect
 
         /** 途中の文字を訳す。終わったら（取り消されても）[Event.PartialDone] を返す。 */
-        data class TranslatePartial(val requestId: Long, val text: String, val direction: Direction) : Effect
+        data class TranslatePartial(val requestId: Long, val text: String, val source: Language, val target: Language) : Effect
 
         /** 渡している途中訳を取り消す（確定訳を先にするため）。 */
         data class CancelPartial(val requestId: Long) : Effect
@@ -182,7 +182,7 @@ class ConversationSession(
     /** 話し始め・確定のたびに進める世代。途中訳が古い発話のものか見分ける。 */
     private var generation = 0L
 
-    private data class PartialRequest(val id: Long, val generation: Long, val text: String, val direction: Direction)
+    private data class PartialRequest(val id: Long, val generation: Long, val text: String, val source: Language, val target: Language)
 
     /** まだ渡していない確定した発話（話した順）。 */
     private val finalQueue = ArrayDeque<Turn>()
@@ -285,7 +285,8 @@ class ConversationSession(
                 val keep = live?.takeIf { it.direction == direction }?.translation.orEmpty()
                 live = LiveSpeech(event.text, direction, keep, live?.startedAtMs ?: clock())
                 // 文字の無い途中結果は言語の知らせ（カードの向きだけ決める）。訳すものは無い。相手不明の自分の発話も訳さない
-                if (event.text.isNotEmpty() && direction.target != null) partialPending = PartialRequest(nextRequestId++, generation, event.text, direction)
+                val target = direction.target
+                if (event.text.isNotEmpty() && target != null) partialPending = PartialRequest(nextRequestId++, generation, event.text, direction.source, target)
             }
             is SpeechEvent.Final -> {
                 // 確定訳を優先する：古い発話の途中訳は要らないので止める
@@ -419,9 +420,13 @@ class ConversationSession(
     /** 空いていれば、次の確定訳と途中訳を渡す。 */
     private fun dispatch(effects: MutableList<Effect>) {
         if (finalRunning == null) {
-            finalQueue.removeFirstOrNull()?.let { turn ->
+            // 列に入るのは訳す先のある発話だけ（[requeue]・[onUtterance]）。念のため、訳す先の無い発話は飛ばす
+            while (true) {
+                val turn = finalQueue.removeFirstOrNull() ?: break
+                val target = turn.direction.target ?: continue
                 finalRunning = turn.id
-                effects += Effect.TranslateFinal(turn)
+                effects += Effect.TranslateFinal(turn, target)
+                break
             }
         }
         if (partialRunning != null) return
@@ -435,7 +440,7 @@ class ConversationSession(
             return
         }
         partialRunning = request
-        effects += Effect.TranslatePartial(request.id, request.text, request.direction)
+        effects += Effect.TranslatePartial(request.id, request.text, request.source, request.target)
     }
 
     private fun updateTurn(id: Long, change: (Turn) -> Turn) {

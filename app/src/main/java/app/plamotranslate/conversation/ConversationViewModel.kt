@@ -20,7 +20,6 @@ import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.pipeline.conversation.ConversationSession
 import app.plamotranslate.pipeline.conversation.ConversationSession.Effect
 import app.plamotranslate.pipeline.conversation.ConversationSession.Event
-import app.plamotranslate.pipeline.conversation.Direction
 import app.plamotranslate.pipeline.conversation.LiveSpeech
 import app.plamotranslate.pipeline.conversation.PartnerMode
 import app.plamotranslate.pipeline.conversation.Turn
@@ -348,11 +347,11 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         val effects = session.handle(event)
         sync()
         for (effect in effects) when (effect) {
-            is Effect.TranslateFinal -> viewModelScope.launch { translate(effect.turn) }
+            is Effect.TranslateFinal -> viewModelScope.launch { translate(effect.turn, effect.target) }
             is Effect.TranslatePartial -> {
                 // 登録してから始める（画面のスレッドで始めると、その場で終わって後始末が登録より先に走ることがある）
                 val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
-                    translatePartial(effect.requestId, effect.text, effect.direction)
+                    translatePartial(effect.requestId, effect.text, effect.source, effect.target)
                 }
                 partialJobs[effect.requestId] = job
                 job.start()
@@ -375,7 +374,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     /** 途中の文字を訳す。終わったら（取り消されても）制御に知らせる。 */
-    private suspend fun translatePartial(requestId: Long, text: String, direction: Direction) {
+    private suspend fun translatePartial(requestId: Long, text: String, source: Language, target: Language) {
         var result: String? = null
         try {
             if (model.value !is ModelState.Ready) return
@@ -384,7 +383,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
             // 確定訳が来たら制御がこのコルーチンを取り消すので、ストリームも閉じて途中訳の生成を止める
             val update = coroutineScope {
                 val stream = Translations.open(
-                    this, app, TranslationStream.Options(direction.source, direction.target ?: return@coroutineScope null, maxTokens = PARTIAL_MAX_TOKENS),
+                    this, app, TranslationStream.Options(source, target, maxTokens = PARTIAL_MAX_TOKENS),
                 )
                 try {
                     stream.translateOne(text)
@@ -402,11 +401,10 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     /** 確定した発話を訳す。訳はトークンごとにカードへ出す。 */
-    private suspend fun translate(turn: Turn) {
+    private suspend fun translate(turn: Turn, target: Language) {
         var done: Event.FinalDone? = null
         try {
             coroutineScope {
-                val target = turn.direction.target ?: return@coroutineScope
                 val stream = Translations.open(this, app, TranslationStream.Options(turn.direction.source, target))
                 try {
                     val result = stream.translateOne(turn.original) { text -> handle(Event.FinalProgress(turn.id, text)) }
