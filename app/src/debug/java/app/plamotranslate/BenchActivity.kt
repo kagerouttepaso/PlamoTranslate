@@ -77,8 +77,14 @@ class BenchActivity : ComponentActivity() {
             say("ベンチ: 翻訳モデルを読めません")
             return
         }
-        // 原文の言語は言語コード（auto は自動）。動かす認識器の組は、画面翻訳と同じく言語から決める
-        val source = Language.ofCode(intent.getStringExtra("lang").orEmpty())
+        // 原文の言語は言語コード（auto は自動）。動かす認識器の組は、画面翻訳と同じく言語から決める。
+        // 読めない値を自動として流すと、前後の比べの条件が黙って変わるので止める
+        val lang = intent.getStringExtra("lang") ?: "auto"
+        val source = Language.ofCode(lang)
+        if (source == null && lang != "auto") {
+            say("ベンチ: 原文の言語を読めません（$lang）。auto か言語コード（zh-hans・ko・en など）で渡してください")
+            return
+        }
         val language = source.recognizers
         say("ベンチ: 原文の言語 ${source?.code ?: "auto"}（認識器の組 $language）")
         val ocr = MultiScriptOcr(ModelCatalog.ocrDir(this))
