@@ -1,11 +1,22 @@
 package app.plamotranslate.pipeline.speech
 
-/** 文字の種類。言語のコードと、認識した文の多数派の文字を、同じ基準で比べる。 */
+import app.plamotranslate.llm.Language
+
+/**
+ * 文字の種類。言語のコードと、認識した文の多数派の文字を、同じ基準で比べる。どの言語がどの文字で書かれるかの正本は
+ * [ofLanguage] の1か所で、文字認識の認識器の組（画面翻訳・カメラ翻訳の原文の言語）もここから導く。
+ */
 enum class Script {
     JAPANESE, HAN, HANGUL, LATIN, CYRILLIC, ARABIC, DEVANAGARI, THAI, GREEK, HEBREW, OTHER;
 
     companion object {
-        /** 言語のコードが使う文字。日本語は仮名と漢字、中国語は漢字。 */
+        /** 言語が使う文字。 */
+        fun of(language: Language): Script = ofLanguage(language.code)
+
+        /**
+         * 言語のコードが使う文字。日本語は仮名と漢字、中国語は漢字。挙げていない言語は [OTHER]（ラテン文字とみなさない。
+         * 言語を足すときは、ここに文字を足す）。
+         */
         fun ofLanguage(code: String): Script = when (code) {
             "ja" -> JAPANESE
             "zh", "yue", "zh-hans", "zh-hant" -> HAN
@@ -17,8 +28,15 @@ enum class Script {
             "el" -> GREEK
             "he" -> HEBREW
             "hy", "ka", "km", "gu", "ta", "te", "bn", "pa", "ml", "my", "si" -> OTHER
-            else -> LATIN
+            in LATIN_CODES -> LATIN
+            else -> OTHER
         }
+
+        /** ラテン文字で書く言語のコード。セルビア語はキリル文字で書くことが多いので入れない（上のキリル文字）。 */
+        private val LATIN_CODES = setOf(
+            "en", "az", "it", "id", "uz", "et", "nl", "ca", "hr", "jv", "es", "sk", "sl", "sw", "ceb", "tl",
+            "de", "hu", "eu", "fr", "vi", "pl", "ms", "lv", "lt", "pt", "tr",
+        )
 
         /** 文の多数派の文字。仮名が1つでもあれば日本語（漢字だけの日本語もあるが、仮名の無い文は中国語と区別できない）。 */
         fun ofText(text: String): Script? {

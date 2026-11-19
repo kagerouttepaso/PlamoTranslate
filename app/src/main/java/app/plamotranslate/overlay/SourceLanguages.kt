@@ -1,5 +1,6 @@
 package app.plamotranslate.overlay
 
+import app.plamotranslate.pipeline.speech.Script
 import app.plamotranslate.llm.Language
 import app.plamotranslate.ocr.OcrLanguage
 
@@ -11,21 +12,16 @@ import app.plamotranslate.ocr.OcrLanguage
  * 原文の言語は、機能の中では Language で持ち（自動は null）、文字認識に渡すときだけ認識器の組（OcrLanguage）にする。
  */
 
-/** ラテン文字で書く言語。ML Kitの英字の認識器で読む。セルビア語は看板がキリル文字のことが多いので入れない。 */
-private val LATIN_SCRIPT = setOf(
-    Language.EN, Language.AZ, Language.IT, Language.ID, Language.UZ, Language.ET, Language.NL, Language.CA,
-    Language.HR, Language.JV, Language.ES, Language.SK, Language.SL, Language.SW, Language.CEB, Language.TL,
-    Language.DE, Language.HU, Language.EU, Language.FR, Language.VI, Language.PL, Language.MS, Language.LV,
-    Language.LT,
-)
-
-/** その言語の原文を読むのに動かす認識器の組。読める認識器が無ければ null。 */
+/**
+ * その言語の原文を読むのに動かす認識器の組。読める認識器が無ければ null。どの言語がどの文字で書かれるかは中核の [Script.of] が決め、
+ * ここは文字の種類から認識器の組への対応だけを持つ（ラテン文字は ML Kit の英字の認識器で読む）。
+ */
 internal val Language.ocrLanguage: OcrLanguage?
-    get() = when (this) {
-        Language.JA -> OcrLanguage.JAPANESE
-        Language.KO -> OcrLanguage.KOREAN
-        Language.ZH, Language.ZH_HANT -> OcrLanguage.CHINESE
-        in LATIN_SCRIPT -> OcrLanguage.LATIN
+    get() = when (Script.of(this)) {
+        Script.JAPANESE -> OcrLanguage.JAPANESE
+        Script.HANGUL -> OcrLanguage.KOREAN
+        Script.HAN -> OcrLanguage.CHINESE
+        Script.LATIN -> OcrLanguage.LATIN
         else -> null
     }
 

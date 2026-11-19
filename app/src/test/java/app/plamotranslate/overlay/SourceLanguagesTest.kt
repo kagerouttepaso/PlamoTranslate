@@ -39,4 +39,12 @@ class SourceLanguagesTest {
         assertNull(storedSource(null, "JAPANESE", allowed))
         assertNull(storedSource(null, null, allowed))
     }
+
+    @Test
+    fun ラテン文字で書く言語は中核の文字の種類から決まりセルビア語は入れない() {
+        val latin = Language.entries.filter { it.ocrLanguage == OcrLanguage.LATIN }.toSet()
+        assertEquals(25, latin.size)
+        assertEquals(false, Language.SR in latin)
+        assertEquals(null, Language.RU.ocrLanguage)
+    }
 }
