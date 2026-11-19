@@ -24,6 +24,8 @@ import android.view.WindowManager
 import android.widget.Toast
 import app.plamotranslate.EngineHolder
 import app.plamotranslate.ThemePreferences
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.combine
 import app.plamotranslate.R
 import app.plamotranslate.log.Logs
 import app.plamotranslate.models.ModelCatalog
@@ -111,8 +113,8 @@ class ScreenTranslateService : Service() {
     /** 画面を回したら、前の向きで置いた訳の枠は位置が合わないので消す。フローティングボタンは今の画面の同じ割合の位置へ移す。 */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        // 端末の明暗が変わったら、フローティングボタンを今のテーマの色で塗り直す（メニューは開くたびに読み直す）
-        button?.applyPalette()
+        // 端末の明暗を、テーマの購読に渡す（塗り直すのは購読の1か所。[watchTheme]）
+        systemDark.value = ThemePreferences.systemDark(newConfig)
         if (newConfig.orientation == orientation) return
         orientation = newConfig.orientation
         menu?.dismiss()
@@ -174,7 +176,7 @@ class ScreenTranslateService : Service() {
         scope.launch { watch() }
         scope.launch { watchAccessibility() }
         // 設定の「画面の色」を変えたら、フローティングボタンを塗り直す
-        scope.launch { ThemePreferences.mode.collect { button?.applyPalette() } }
+        watchTheme()
         registerDebugReceiver()
         _running.value = true
         return START_NOT_STICKY
@@ -494,6 +496,21 @@ class ScreenTranslateService : Service() {
         val text = "ユーザー補助が切れています。ユーザー補助の設定で「${getString(R.string.a11y_overlay_label)}」を一度オフにしてからオンにしてください"
         overlay?.showStatus(text)
         Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+    }
+
+    /** 端末のダーク設定（[onConfigurationChanged] が更新する）。 */
+    private val systemDark by lazy { MutableStateFlow(ThemePreferences.systemDark(resources.configuration)) }
+
+    /**
+     * フローティングボタンを今のテーマの色で塗る。設定の「画面の色」と端末の明暗のどちらが変わっても、ダークで描くかが
+     * 変わったときだけ塗り直す（メニューは開くたびに読み直す）。
+     */
+    private fun watchTheme() {
+        scope.launch {
+            combine(ThemePreferences.mode, systemDark) { mode, system -> ThemePreferences.dark(mode, system) }
+                .distinctUntilChanged()
+                .collect { button?.applyPalette() }
+        }
     }
 
     /** 場面の設定（認識モードと訳の消え方から組み立てる撮り方・読み方・判定器）を今の設定に合わせ、判定器を作り直す。 */

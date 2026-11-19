@@ -1,15 +1,17 @@
 package app.plamotranslate.overlay
 
 import android.content.Context
-import android.content.res.Configuration
-import android.graphics.Color
-import app.plamotranslate.ThemeMode
+import androidx.compose.material3.ColorScheme
+import androidx.compose.ui.graphics.toArgb
+import app.plamotranslate.NightBird
+import app.plamotranslate.PaperChirp
 import app.plamotranslate.ThemePreferences
 
 /**
  * ほかのアプリの画面の上に出す部品（画面翻訳のフローティングボタン・メニュー・ステータス表示）の色（docs/設計/デザイン言語.md「色」）。
- * アプリのテーマ（夜の鳥・さえずりの紙）に合わせる。Android View で描くので MaterialTheme を使えず、値をここに置く
- * （値は Theme.kt の2つのテーマと同じ）。下の画面の明るさによらず見分けられるよう、面は少しだけ透かし、フローティングボタンにはプライマリカラーの縁を付ける。
+ * Android View で描くので MaterialTheme を使えないが、値はアプリのテーマ（夜の鳥・さえずりの紙。Theme.kt）の色の定数から作り、
+ * ダークで描くかの判定も同じもの（[ThemePreferences.dark]）を使う。下の画面の明るさによらず見分けられるよう、面は少しだけ透かし、
+ * フローティングボタンにはプライマリカラーの縁を付ける。
  */
 class OverlayPalette private constructor(
     /** 面。 */
@@ -25,36 +27,25 @@ class OverlayPalette private constructor(
     val outline: Int,
 ) {
     companion object {
-        /** 夜の鳥（ダーク）。 */
-        private val NIGHT = OverlayPalette(
-            surface = Color.argb(240, 0x14, 0x1A, 0x30),
-            surfaceRaised = Color.argb(235, 0x2C, 0x34, 0x58),
-            primary = Color.rgb(0xFF, 0x8A, 0x65),
-            onPrimary = Color.rgb(0x3B, 0x14, 0x08),
-            onSurface = Color.rgb(0xE8, 0xEA, 0xF6),
-            onSurfaceMuted = Color.rgb(0xB9, 0xBE, 0xDA),
-            outline = Color.rgb(0x5A, 0x63, 0x90),
+        /** テーマの色から作る。[surfaceAlpha]・[raisedAlpha] は面の透かし（ライトは地が明るいので少し濃くする）。 */
+        private fun of(scheme: ColorScheme, surfaceAlpha: Float, raisedAlpha: Float) = OverlayPalette(
+            surface = scheme.surface.copy(alpha = surfaceAlpha).toArgb(),
+            surfaceRaised = scheme.surfaceVariant.copy(alpha = raisedAlpha).toArgb(),
+            primary = scheme.primary.toArgb(),
+            onPrimary = scheme.onPrimary.toArgb(),
+            onSurface = scheme.onSurface.toArgb(),
+            onSurfaceMuted = scheme.onSurfaceVariant.toArgb(),
+            outline = scheme.outline.toArgb(),
         )
+
+        /** 夜の鳥（ダーク）。 */
+        private val NIGHT = of(NightBird, surfaceAlpha = 240 / 255f, raisedAlpha = 235 / 255f)
 
         /** さえずりの紙（ライト）。 */
-        private val PAPER = OverlayPalette(
-            surface = Color.argb(245, 0xFB, 0xF7, 0xF0),
-            surfaceRaised = Color.argb(240, 0xEF, 0xE6, 0xD8),
-            primary = Color.rgb(0xC2, 0x3B, 0x22),
-            onPrimary = Color.WHITE,
-            onSurface = Color.rgb(0x2A, 0x26, 0x22),
-            onSurfaceMuted = Color.rgb(0x6B, 0x61, 0x56),
-            outline = Color.rgb(0x9C, 0x90, 0x83),
-        )
+        private val PAPER = of(PaperChirp, surfaceAlpha = 245 / 255f, raisedAlpha = 240 / 255f)
 
         /** 今のテーマの色。設定の「画面の色」が端末に合わせるなら、[context] の明暗に従う。 */
-        fun current(context: Context): OverlayPalette {
-            val dark = when (ThemePreferences.mode.value) {
-                ThemeMode.SYSTEM -> context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-                ThemeMode.LIGHT -> false
-                ThemeMode.DARK -> true
-            }
-            return if (dark) NIGHT else PAPER
-        }
+        fun current(context: Context): OverlayPalette =
+            if (ThemePreferences.dark(ThemePreferences.mode.value, ThemePreferences.systemDark(context.resources.configuration))) NIGHT else PAPER
     }
 }

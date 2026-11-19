@@ -22,7 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
@@ -312,8 +311,8 @@ private fun Tile(
         }
         Box(Modifier.fillMaxSize()) {
             // アイコンは右下に大きく薄く置き、タイルの角で見切れさせる（空いた面を、何の機能かを示す模様にする）。
-            // 暗い面には面の文字の色を、明るい面には役割の色を薄く重ねる（暗い面に色相の違う役割の色を重ねると、茶に濁る）
-            val markColor = if (container.luminance() < 0.3f) content.copy(alpha = 0.14f) else accent.copy(alpha = 0.22f)
+            // ダークのテーマでは面の文字の色を、ライトでは役割の色を薄く重ねる（暗い面に色相の違う役割の色を重ねると、茶に濁る）
+            val markColor = if (LocalDarkTheme.current) content.copy(alpha = 0.14f) else accent.copy(alpha = 0.22f)
             Icon(
                 icon,
                 contentDescription = null,

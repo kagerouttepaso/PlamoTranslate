@@ -1,22 +1,20 @@
 package app.plamotranslate
 
 import android.app.Activity
-import android.content.Context
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 
 /*
  * アプリの色（docs/設計/デザイン言語.md「色」）。ダークは「夜の鳥」（紺の地にコーラルとミント）、
@@ -30,8 +28,8 @@ import kotlinx.coroutines.flow.asStateFlow
  * 色を暗くしただけの面（茶・くすんだ緑）は濁って見えるので作らない（docs/設計/デザイン言語.md「色」）。
  */
 
-/** 夜の鳥（ダーク）。 */
-private val NightBird: ColorScheme = darkColorScheme(
+/** 夜の鳥（ダーク）。重ね表示の色（[app.plamotranslate.overlay.OverlayPalette]）もここから作る。 */
+internal val NightBird: ColorScheme = darkColorScheme(
     primary = Color(0xFFFF8A65),
     onPrimary = Color(0xFF3B1408),
     primaryContainer = Color(0xFF6A2F42),
@@ -59,8 +57,8 @@ private val NightBird: ColorScheme = darkColorScheme(
     outlineVariant = Color(0xFF2C3458),
 )
 
-/** さえずりの紙（ライト）。 */
-private val PaperChirp: ColorScheme = lightColorScheme(
+/** さえずりの紙（ライト）。重ね表示の色もここから作る。 */
+internal val PaperChirp: ColorScheme = lightColorScheme(
     primary = Color(0xFFC23B22),
     onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0xFFFFDAD2),
@@ -88,28 +86,6 @@ private val PaperChirp: ColorScheme = lightColorScheme(
     outlineVariant = Color(0xFFE5DCCB),
 )
 
-/** 画面の色の選び方（設定の「画面の色」）。 */
-enum class ThemeMode(val label: String) { SYSTEM("端末に合わせる"), LIGHT("ライト（さえずりの紙）"), DARK("ダーク（夜の鳥）") }
-
-/** 画面の色の設定。変えたら開いている画面にもすぐ効くよう、`StateFlow` で持つ。 */
-object ThemePreferences {
-    private const val FILE = "appearance"
-    private const val KEY_MODE = "theme"
-    private val _mode = MutableStateFlow(ThemeMode.SYSTEM)
-    val mode: StateFlow<ThemeMode> = _mode.asStateFlow()
-
-    /** アプリの起動時に一度読む（App.onCreate）。 */
-    fun load(context: Context) {
-        val saved = context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY_MODE, null)
-        _mode.value = ThemeMode.entries.firstOrNull { it.name == saved } ?: ThemeMode.SYSTEM
-    }
-
-    fun set(context: Context, mode: ThemeMode) {
-        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString(KEY_MODE, mode.name).apply()
-        _mode.value = mode
-    }
-}
-
 /**
  * アプリ共通の色。すべての画面でこれを使う。設定の「画面の色」が端末に合わせるなら端末のダーク設定に従う。
  * ステータスバーとナビゲーションバーのアイコンの明暗も、アプリの明暗に合わせる（端末がダークでアプリがライトのときに見えなくならないように）。
@@ -117,11 +93,7 @@ object ThemePreferences {
 @Composable
 fun AppTheme(content: @Composable () -> Unit) {
     val mode by ThemePreferences.mode.collectAsState()
-    val dark = when (mode) {
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-    }
+    val dark = ThemePreferences.dark(mode, systemDark = isSystemInDarkTheme())
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
@@ -132,5 +104,10 @@ fun AppTheme(content: @Composable () -> Unit) {
             }
         }
     }
-    MaterialTheme(colorScheme = if (dark) NightBird else PaperChirp, content = content)
+    CompositionLocalProvider(LocalDarkTheme provides dark) {
+        MaterialTheme(colorScheme = if (dark) NightBird else PaperChirp, content = content)
+    }
 }
+
+/** 今の画面がダークのテーマで描かれているか（[AppTheme] が決める）。色の明るさから推し量らずに、これを見る。 */
+val LocalDarkTheme = staticCompositionLocalOf { false }
