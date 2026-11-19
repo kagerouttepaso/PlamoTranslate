@@ -49,6 +49,7 @@ import app.plamotranslate.pipeline.translation.TranslationStream
 import app.plamotranslate.translation.SqlitePersistentCache
 import app.plamotranslate.translation.Translations
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -285,23 +286,30 @@ class ScreenTranslateService : Service() {
     private fun recognize(session: Int) {
         val w = workOf(session) ?: return
         val frame = w.frame ?: return
-        val image = w.image ?: return
+        // 撮影画像はここで受け取って持ち主になり、読み終えたら（取り消されても）解放する。取り消し済みの作業でも
+        // 後始末が走るよう、必ず始める（ATOMIC。最初の中断点で取り消しを受ける）
+        val image = w.takeImage() ?: return
         val choice = frame.choice
-        scope.launch(w.job) {
-            overlay?.showStatus("文字を読んでいます…")
-            val t0 = SystemClock.uptimeMillis()
-            var error: String? = null
-            val lines = try {
-                // 白縁取り・白抜きの文字にも強い読み方（OutlinedText）は、場面の設定で選ぶ
-                if (choice.outlined) ocr.recognizeOutlined(image, choice.ocrLanguage) else ocr.recognize(image, choice.ocrLanguage)
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                error = "文字を読めませんでした: ${e.message}"
-                emptyList()
+        scope.launch(w.job, start = CoroutineStart.ATOMIC) {
+            try {
+                overlay?.showStatus("文字を読んでいます…")
+                val t0 = SystemClock.uptimeMillis()
+                var error: String? = null
+                val lines = try {
+                    // 白縁取り・白抜きの文字にも強い読み方（OutlinedText）は、場面の設定で選ぶ
+                    if (choice.outlined) ocr.recognizeOutlined(image, choice.ocrLanguage) else ocr.recognize(image, choice.ocrLanguage)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    error = "文字を読めませんでした: ${e.message}"
+                    emptyList()
+                }
+                // 枠の色も撮影画像から読むので、解放はその後
+                val page = PageLayout.of(frame, image, lines, SystemClock.uptimeMillis() - t0, error)
+                w.laidOut(page)
+                dispatch(SessionEvent.Recognized(session, page.targets.size))
+            } finally {
+                image.recycle()
             }
-            val page = PageLayout.of(frame, image, lines, SystemClock.uptimeMillis() - t0, error)
-            w.laidOut(page)
-            dispatch(SessionEvent.Recognized(session, page.targets.size))
         }
     }
 

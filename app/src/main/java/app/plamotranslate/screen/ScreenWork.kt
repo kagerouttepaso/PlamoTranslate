@@ -96,9 +96,11 @@ internal class TranslationRun(val model: String, val startedAt: Long) {
 internal class Work(val session: Int) {
     val job: CompletableJob = SupervisorJob()
 
-    /** 撮影画像。撮る工程が置き、枠を決めたら（[laidOut]）捨てる。 */
-    var image: Bitmap? = null
-        private set
+    /**
+     * 撮影画像。撮る工程が置き、読む工程が受け取って（[takeImage]）持ち主になり、使い終えたら解放する。
+     * 受け取られる前に取り消したら、[release] が解放する（読む途中の画像を、読んでいる認識器から取り上げない）。
+     */
+    private var image: Bitmap? = null
     var frame: ScreenFrame? = null
         private set
     var page: PageLayout? = null
@@ -116,12 +118,13 @@ internal class Work(val session: Int) {
         this.frame = frame
     }
 
-    /** 読む〜枠を決める工程の結果を置き、撮影画像を捨てる（枠の色はもう読んだ）。 */
+    /** 読む工程が撮影画像を受け取る。受け取った側が解放する。2度目は null。 */
+    fun takeImage(): Bitmap? = image.also { image = null }
+
+    /** 読む〜枠を決める工程の結果を置く。 */
     fun laidOut(page: PageLayout) {
         check(this.page == null) { "枠を決める工程の結果は1度だけ置く" }
         this.page = page
-        image?.recycle()
-        image = null
     }
 
     /** 訳す工程の結果を置く。 */
@@ -130,7 +133,7 @@ internal class Work(val session: Int) {
         this.run = run
     }
 
-    /** 作業を取り消し、撮影画像を捨てる。 */
+    /** 作業を取り消し、まだ受け取られていない撮影画像を捨てる。 */
     fun release() {
         job.cancel()
         image?.recycle()
