@@ -230,7 +230,7 @@ class ScreenTranslateService : Service() {
         val w = Work(session).also { work = it }
         val capturer = capturer ?: return dispatch(SessionEvent.Captured(session, ok = false))
         val profile = profile
-        val choice = LayoutChoice.of(preferences.source, preferences.settings)
+        val choice = LayoutChoice.of(preferences.source, preferences.settings, profile)
         scope.launch(w.job) {
             val hiddenAt = SystemClock.uptimeMillis()
             hiding = true

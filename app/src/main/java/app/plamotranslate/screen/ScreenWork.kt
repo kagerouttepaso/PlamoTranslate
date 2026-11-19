@@ -1,5 +1,6 @@
 package app.plamotranslate.screen
 
+import app.plamotranslate.pipeline.screen.SceneProfile
 import android.graphics.Bitmap
 import app.plamotranslate.llm.Language
 import app.plamotranslate.ocr.OcrLanguage
@@ -36,9 +37,12 @@ internal data class LayoutChoice(
     val ocrLanguage: OcrLanguage get() = source.recognizers
 
     companion object {
-        /** 原文の言語と工程の中身の組から作る。白縁の読み方も組（場面の設定）から決まる。 */
-        fun of(source: Language?, settings: ScreenSettings) =
-            LayoutChoice(source, settings.scene.outlinedText, settings.grouping, settings.fit)
+        /**
+         * 原文の言語と工程の中身の組、場面の設定 [scene] から作る。[scene] は撮り方と判定器に使っているもの（サービスが
+         * 設定を変えたときに作り直す1つ）を渡し、ここで設定から作り直さない（2つの場面の設定が食い違わないように）。
+         */
+        fun of(source: Language?, settings: ScreenSettings, scene: SceneProfile) =
+            LayoutChoice(source, scene.outlinedText, settings.grouping, settings.fit)
     }
 }
 
