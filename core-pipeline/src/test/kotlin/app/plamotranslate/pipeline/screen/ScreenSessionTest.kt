@@ -147,4 +147,50 @@ class ScreenSessionTest {
         val s = run(auto, SessionEvent.Settled, SessionEvent.Invalidated("x"), SessionEvent.Settled).first
         assertEquals(Phase.Capturing(2), s.phase)
     }
+
+    @Test
+    fun 訳している途中に画面に触れたらタップでも自動でも全部取り消す() {
+        // 2026-11-12、作者の要望「訳している途中に画面を操作したら全処理をキャンセル」
+        val (autoState, autoEffects) = run(translatingAuto(), SessionEvent.OutsideTouched)
+        assertEquals(Phase.Watching, autoState.phase)
+        assertEquals(listOf(Effect.Cancel(1), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), autoEffects)
+
+        val tapWorking = run(tap, SessionEvent.ButtonTapped, SessionEvent.Captured(1, true)).first
+        val (tapState, tapEffects) = run(tapWorking, SessionEvent.OutsideTouched)
+        assertEquals(Phase.Idle, tapState.phase)
+        assertEquals(listOf(Effect.Cancel(1), Effect.ClearOverlay, Effect.EndValidity), tapEffects)
+    }
+
+    @Test
+    fun メニューを開くと訳を消し閉じたら待ちから始め直す() {
+        val showing = run(translatingAuto(), SessionEvent.SegmentDone(1), SessionEvent.SegmentDone(1)).first
+        val (opened, openEffects) = run(showing, SessionEvent.MenuOpened)
+        assertTrue(opened.menuOpen)
+        assertEquals(listOf(Effect.Cancel(1), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), openEffects)
+        val (closed, closeEffects) = run(opened, SessionEvent.MenuClosed)
+        assertEquals(false, closed.menuOpen)
+        assertEquals(listOf(Effect.ResetStart), closeEffects)
+        // タップで訳すときは待ちが無いので、閉じても始め直すものは無い
+        val (_, tapClose) = run(tap, SessionEvent.MenuOpened, SessionEvent.MenuClosed)
+        assertEquals(false, tapClose.contains(Effect.ResetStart))
+    }
+
+    @Test
+    fun 始め方を変えると訳を消して新しい始め方で待つ() {
+        val (toTap, effects) = run(translatingAuto(), SessionEvent.TriggerChanged(Trigger.TAP))
+        assertEquals(Phase.Idle, toTap.phase)
+        assertEquals(listOf(Effect.Cancel(1), Effect.ClearOverlay, Effect.EndValidity, Effect.ButtonActive(true)), effects)
+        val (toAuto, autoEffects) = run(tap, SessionEvent.TriggerChanged(Trigger.AUTO))
+        assertEquals(Phase.Watching, toAuto.phase)
+        assertTrue(autoEffects.contains(Effect.ResetStart))
+    }
+
+    @Test
+    fun 翻訳に失敗したら知らせて訳を出したままの扱いにする() {
+        val (s, effects) = run(translatingAuto(), SessionEvent.TranslationFailed(1, "翻訳モデルを読めません"))
+        assertEquals(Phase.Showing(1), s.phase)
+        assertEquals(listOf(Effect.Failed(1, "翻訳モデルを読めません")), effects)
+        // 古いセッションの失敗は捨てる
+        assertEquals(emptyList<Effect>(), run(s, SessionEvent.TranslationFailed(0, "古い")).second)
+    }
 }
