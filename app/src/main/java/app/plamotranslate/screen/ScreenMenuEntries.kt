@@ -4,7 +4,7 @@ import android.content.Context
 import app.plamotranslate.EngineHolder
 import app.plamotranslate.ModelState
 import app.plamotranslate.models.TranslationModel
-import app.plamotranslate.ocr.OcrLanguage
+import app.plamotranslate.llm.Language
 import app.plamotranslate.pipeline.layout.Grouping
 import app.plamotranslate.pipeline.screen.Dismissal
 import app.plamotranslate.pipeline.screen.Recognition
@@ -41,13 +41,20 @@ internal class ScreenMenuEntries(
         } + listOfNotNull(
             if (preset == null) Option("カスタム", checked = true, enabled = false, disabledHint = "上の場面を選ぶと、下の行がまとめて変わります") {} else null,
         )))
+        // 自動とよく使う言語を行に並べ、ほかの読める言語は「他の言語」のページに並べる（行に並べるとメニューが縦に長くなる）。
         // 画面翻訳は日本語へ訳すので、日本語は原文の候補に出さない
-        add(MenuEntry.Choice("原文の言語", OcrLanguage.entries.filter { it.sourceLanguage != SCREEN_TARGET }.map { lang ->
-            Option(lang.menuName, checked = lang == preferences.language) {
-                preferences.language = lang
-                actions.labelChanged()
-            }
-        }))
+        val source = preferences.source
+        fun sourceOption(lang: Language?) = Option(lang.screenMenuName, checked = lang == source) { chooseSource(lang) }
+        val otherChosen = source in SCREEN_OTHER_SOURCES
+        add(MenuEntry.Choice(
+            "原文の言語",
+            (listOf<Language?>(null) + SCREEN_QUICK_SOURCES).map(::sourceOption),
+            // 選んだ言語の名前に替えると、長い名前（アゼルバイジャン語など）で行が2段になるので、名前は替えずに塗りで示す。
+            // どの言語かは、フローティングボタンのバッジとページの中で分かる
+            more = OptionPage("他の言語", checked = otherChosen, "原文の言語（他の言語）") {
+                SCREEN_OTHER_SOURCES.map(::sourceOption)
+            },
+        ))
         add(MenuEntry.Choice("始め方", ScreenTrigger.entries.map { t ->
             Option(t.menuName, checked = t == preferences.trigger) {
                 preferences.trigger = t
@@ -81,6 +88,11 @@ internal class ScreenMenuEntries(
             ) { if (m != current) actions.switchModel(m) }
         }))
         add(MenuEntry.Action("画面翻訳を終了") { actions.stop() })
+    }
+
+    private fun chooseSource(language: Language?) {
+        preferences.source = language
+        actions.labelChanged()
     }
 
     private fun change(settings: ScreenSettings) {

@@ -5,8 +5,8 @@ package app.plamotranslate.llm
  * [code] はPFML3の lang 属性に書く値（docs/設計/翻訳コア.md）。
  * 並びは選択肢に出す順：よく使う5つを先に、残りは五十音順。
  * どの機能でどの言語を選べるかは、前段の認識器が読める・聞き分けられる言語で決まる（カメラ翻訳・会話翻訳）。
- * `app` の中では、カメラ翻訳・会話翻訳・読み上げの言語もこの型で持つ（画面翻訳の原文は認識器の種類 OcrLanguage で持ち、
- * 翻訳へ渡すときにこの型にする）。`core-asr`・`core-tts` は言語をコード（文字列）で、`core-ocr` は OcrLanguage で受けるので、
+ * `app` の中では、画面翻訳・カメラ翻訳・会話翻訳・読み上げの言語もこの型で持つ。`core-asr`・`core-tts` は言語をコード（文字列）で、
+ * `core-ocr` は認識器の組 OcrLanguage で受けるので、
  * 境界で変換する（`docs/判断/2026-11-09_Languageを独立したファイルへ分け共通のモジュールは作らない.md`）。
  */
 enum class Language(val code: String, val label: String) {

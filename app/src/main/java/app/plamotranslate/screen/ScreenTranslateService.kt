@@ -163,7 +163,7 @@ class ScreenTranslateService : Service() {
             }
         }
         button = FloatingButton(this, wm, onTap = ::onButtonTap, onLongPress = ::showMenu).also {
-            it.setMode(preferences.language.buttonBadge(), preferences.trigger == ScreenTrigger.AUTO)
+            it.setMode(preferences.source.buttonBadge(), preferences.trigger == ScreenTrigger.AUTO)
             it.setActive(true)
             it.show()
         }
@@ -230,7 +230,7 @@ class ScreenTranslateService : Service() {
         val w = Work(session).also { work = it }
         val capturer = capturer ?: return dispatch(SessionEvent.Captured(session, ok = false))
         val profile = profile
-        val choice = LayoutChoice.of(preferences.language, preferences.settings)
+        val choice = LayoutChoice.of(preferences.source, preferences.settings)
         scope.launch(w.job) {
             val hiddenAt = SystemClock.uptimeMillis()
             hiding = true
@@ -291,7 +291,7 @@ class ScreenTranslateService : Service() {
             var error: String? = null
             val lines = try {
                 // 白縁取り・白抜きの文字にも強い読み方（OutlinedText）は、場面の設定で選ぶ
-                if (choice.outlined) ocr.recognizeOutlined(image, choice.language) else ocr.recognize(image, choice.language)
+                if (choice.outlined) ocr.recognizeOutlined(image, choice.ocrLanguage) else ocr.recognize(image, choice.ocrLanguage)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 error = "文字を読めませんでした: ${e.message}"
@@ -314,7 +314,7 @@ class ScreenTranslateService : Service() {
             return
         }
         overlay?.show(targets.map { it.slot }, "${targets.size}件を翻訳中…")
-        val source = frame.choice.language.sourceLanguage
+        val source = frame.choice.source
         scope.launch(w.job) {
             val ready = EngineHolder.awaitReady(this@ScreenTranslateService)
             if (ready == null) {
@@ -521,7 +521,7 @@ class ScreenTranslateService : Service() {
     private val menuEntries by lazy {
         ScreenMenuEntries(this, preferences, object : ScreenMenuEntries.Actions {
             override fun labelChanged() {
-                button?.setMode(preferences.language.buttonBadge(), preferences.trigger == ScreenTrigger.AUTO)
+                button?.setMode(preferences.source.buttonBadge(), preferences.trigger == ScreenTrigger.AUTO)
             }
 
             override fun triggerChanged(trigger: ScreenTrigger) = dispatch(SessionEvent.TriggerChanged(trigger.toTrigger()))

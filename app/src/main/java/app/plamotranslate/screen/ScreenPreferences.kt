@@ -1,7 +1,9 @@
 package app.plamotranslate.screen
 
 import android.content.Context
-import app.plamotranslate.ocr.OcrLanguage
+import app.plamotranslate.llm.Language
+import app.plamotranslate.overlay.storedCode
+import app.plamotranslate.overlay.storedSource
 import app.plamotranslate.pipeline.layout.Grouping
 import app.plamotranslate.pipeline.screen.Dismissal
 import app.plamotranslate.pipeline.screen.Recognition
@@ -54,16 +56,19 @@ internal val Grouping.menuName: String
 
 /**
  * 画面翻訳の設定（原文の言語、始め方、工程の中身の組（認識モード・まとめ方・訳の枠・訳の消え方））。端末に残し、次に始めたときも引き継ぐ。
- * カメラ翻訳は言語そのものを選ぶので別に持つ（camera/CameraPreferences.kt）。
+ * カメラ翻訳は訳す先も選ぶので別に持つ（camera/CameraPreferences.kt）。
  * 翻訳モデルはアプリ全体で1つなので、ここではなく TranslationPreferences が持つ。
  */
 internal class ScreenPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("screen_translate", Context.MODE_PRIVATE)
 
-    /** フローティングボタンの長押しで選んだ原文の言語。読めなければ自動。 */
-    var language: OcrLanguage
-        get() = OcrLanguage.parse(prefs.getString(KEY_LANGUAGE, null))
-        set(language) = prefs.edit().putString(KEY_LANGUAGE, language.name).apply()
+    /**
+     * フローティングボタンの長押しで選んだ原文の言語。null は自動。読めない値・選べない言語なら自動。
+     * 以前は認識器の組（OcrLanguage）を "language" に保存していたので、新しい値が無ければそれを読み替える。
+     */
+    var source: Language?
+        get() = storedSource(prefs.getString(KEY_SOURCE, null), prefs.getString(KEY_LEGACY_LANGUAGE, null), SCREEN_SOURCES)
+        set(language) = prefs.edit().putString(KEY_SOURCE, language.storedCode).apply()
 
     /** フローティングボタンの長押しで選んだ始め方。読めなければタップで訳す。 */
     var trigger: ScreenTrigger
@@ -100,7 +105,8 @@ internal class ScreenPreferences(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_OPAQUE_OVERLAY, value).apply()
 
     private companion object {
-        const val KEY_LANGUAGE = "language"
+        const val KEY_SOURCE = "source"
+        const val KEY_LEGACY_LANGUAGE = "language"
         const val KEY_RECOGNITION = "recognition"
         const val KEY_TRIGGER = "trigger"
         const val KEY_DISMISSAL = "dismissal"

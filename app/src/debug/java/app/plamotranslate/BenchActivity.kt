@@ -11,13 +11,14 @@ import android.text.TextPaint
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
+import app.plamotranslate.llm.Language
 import app.plamotranslate.log.Logs
 import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.ocr.MultiScriptOcr
-import app.plamotranslate.ocr.OcrLanguage
 import app.plamotranslate.overlay.OverlaySlot
 import app.plamotranslate.overlay.dp
 import app.plamotranslate.overlay.groupLines
+import app.plamotranslate.overlay.recognizers
 import app.plamotranslate.overlay.selectTargets
 import app.plamotranslate.overlay.spToPx
 import app.plamotranslate.pipeline.layout.Grouping
@@ -30,7 +31,6 @@ import app.plamotranslate.screen.ScreenTranslateService
 import app.plamotranslate.screen.Tategaki
 import app.plamotranslate.screen.VerticalTextView
 import app.plamotranslate.screen.Yokogaki
-import app.plamotranslate.screen.sourceLanguage
 import app.plamotranslate.screen.statusBarHeight
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -77,8 +77,10 @@ class BenchActivity : ComponentActivity() {
             say("ベンチ: 翻訳モデルを読めません")
             return
         }
-        val language = OcrLanguage.parse(intent.getStringExtra("lang"))
-        say("ベンチ: 原文の言語 $language")
+        // 原文の言語は言語コード（auto は自動）。動かす認識器の組は、画面翻訳と同じく言語から決める
+        val source = Language.ofCode(intent.getStringExtra("lang").orEmpty())
+        val language = source.recognizers
+        say("ベンチ: 原文の言語 ${source?.code ?: "auto"}（認識器の組 $language）")
         val ocr = MultiScriptOcr(ModelCatalog.ocrDir(this))
         say("ベンチ: PP-OCR ${ocr.paddleSources.ifEmpty { setOf("なし（ML Kitだけ）") }.joinToString("・")}")
         val statusBar = statusBarHeight()
@@ -102,7 +104,7 @@ class BenchActivity : ComponentActivity() {
             val t1 = SystemClock.uptimeMillis()
             // 訳す対象が無い画像（日本語だけ・空の画面）ではストリームを開かない。空の依頼は何も流さないので、確定を待つと止まる
             if (targets.isNotEmpty()) coroutineScope {
-                val stream = TranslationStream(this, { TranslationStream.Backend(ready.engine, ready.model.origin) }, TranslationStream.Options(language.sourceLanguage, SCREEN_TARGET))
+                val stream = TranslationStream(this, { TranslationStream.Backend(ready.engine, ready.model.origin) }, TranslationStream.Options(source, SCREEN_TARGET))
                 try {
                     stream.submit(targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })
                     val done = HashSet<Long>()

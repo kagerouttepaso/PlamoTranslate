@@ -1,10 +1,12 @@
 package app.plamotranslate.screen
 
 import android.graphics.Bitmap
+import app.plamotranslate.llm.Language
 import app.plamotranslate.ocr.OcrLanguage
 import app.plamotranslate.ocr.OcrLine
 import app.plamotranslate.overlay.TranslationTarget
 import app.plamotranslate.overlay.groupLines
+import app.plamotranslate.overlay.recognizers
 import app.plamotranslate.overlay.selectTargets
 import app.plamotranslate.pipeline.layout.Grouping
 import app.plamotranslate.pipeline.screen.ScreenSettings
@@ -24,15 +26,19 @@ import kotlinx.coroutines.SupervisorJob
 
 /** 1回の翻訳で使う工程の中身。撮るときに1度だけ、メニューの設定から作る（[of]）。セッションの間は変えない。 */
 internal data class LayoutChoice(
-    val language: OcrLanguage,
+    /** 原文の言語。null は自動（翻訳モデルが原文から判定する）。 */
+    val source: Language?,
     val outlined: Boolean,
     val grouping: Grouping,
     val fitBubbles: Boolean,
 ) {
+    /** 動かす認識器の組。原文の言語から決まり、自動ならすべて（docs/設計/画面翻訳.md「原文の言語の指定」）。 */
+    val ocrLanguage: OcrLanguage get() = source.recognizers
+
     companion object {
         /** 原文の言語と工程の中身の組から作る。白縁の読み方も組（場面の設定）から決まる。 */
-        fun of(language: OcrLanguage, settings: ScreenSettings) =
-            LayoutChoice(language, settings.scene.outlinedText, settings.grouping, settings.fit)
+        fun of(source: Language?, settings: ScreenSettings) =
+            LayoutChoice(source, settings.scene.outlinedText, settings.grouping, settings.fit)
     }
 }
 

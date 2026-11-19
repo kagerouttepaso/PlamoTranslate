@@ -170,12 +170,17 @@ class FloatingButton(
     private val markBackground = ImageView(context).apply { setImageResource(R.drawable.ic_launcher_background) }
     private val mark = ImageView(context).apply { setImageResource(R.drawable.ic_launcher_foreground) }
 
-    /** 原文の言語を決めているときだけ出す、右下の小さなバッジ（中・韓・英・日）。 */
+    /**
+     * 原文の言語を決めているときだけ出す、右下の小さなバッジ（中・韓・英などの1文字か、言語コードの2文字。ScreenLanguage.kt）。
+     * 文字の大きさは端末の設定で変わるので、幅は文字に合わせて広げ（最小は高さと同じ丸）、角を丸めた形にする。
+     */
     private val badge = TextView(context).apply {
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
         typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
         includeFontPadding = false
+        minWidth = context.dp(18)
+        setPadding(context.dp(3), 0, context.dp(3), 0)
         visibility = View.GONE
     }
 
@@ -192,7 +197,7 @@ class FloatingButton(
         contentDescription = "画面翻訳"
         clipChildren = false
         addView(face, FrameLayout.LayoutParams(faceSize, faceSize, Gravity.CENTER))
-        addView(badge, FrameLayout.LayoutParams(context.dp(18), context.dp(18), Gravity.BOTTOM or Gravity.END))
+        addView(badge, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, context.dp(18), Gravity.BOTTOM or Gravity.END))
     }
 
     /** 自動で訳すか。自動なら、丸の外側にもう1本の輪を出す（丸は縮めない）。 */
@@ -206,7 +211,7 @@ class FloatingButton(
         val palette = OverlayPalette.current(context)
         badge.setTextColor(palette.onPrimary)
         badge.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
+            cornerRadius = context.dp(9).toFloat()
             setColor(palette.primary)
         }
         // 丸の形（切り抜きの形）と、ロゴの上に重ねる縁

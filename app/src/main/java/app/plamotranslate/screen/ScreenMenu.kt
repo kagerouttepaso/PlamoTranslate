@@ -16,15 +16,16 @@ import android.widget.TextView
 import app.plamotranslate.overlay.OverlayPalette
 import app.plamotranslate.overlay.dp
 
-/** フローティングボタンのメニューの1行。[Choice] は設定1つ（横に並べた選択肢から1つ選ぶ）、[Action] は押すと閉じて行う操作。 */
+/**
+ * フローティングボタンのメニューの1行。[Choice] は設定1つ（横に並べた選択肢から1つ選ぶ）、[Action] は押すと閉じて行う操作。
+ * [Choice.more] があれば、選択肢の最後に、ほかの選択肢を並べたページを開く選択肢を出す。
+ */
 internal sealed interface MenuEntry {
-    class Choice(val label: String, val options: List<Option>) : MenuEntry
+    class Choice(val label: String, val options: List<Option>, val more: OptionPage? = null) : MenuEntry
     class Action(val label: String, val action: () -> Unit) : MenuEntry
 }
 
-/**
- * [MenuEntry.Choice] の選択肢。[enabled] でないものは薄く出し、押すと [disabledHint] をトーストで出す。
- */
+/** [MenuEntry.Choice] の選択肢。[enabled] でないものは薄く出し、押すと [disabledHint] をトーストで出す。 */
 internal class Option(
     val label: String,
     val checked: Boolean,
@@ -32,6 +33,13 @@ internal class Option(
     val disabledHint: String? = null,
     val action: () -> Unit,
 )
+
+/**
+ * 1行に並べきれない選択肢を並べるページ（2026-11-19、原文の「他の言語」）。行に並べるとメニューが縦に長くなるので、ページに分ける。
+ * 行には [label] の選択肢として出し（ページの選択肢を選んでいれば [checked]）、押すとメニューの中身がこのページに替わる。
+ * ページはメニューと同じ幅に選択肢を折り返して並べ、選ぶか上の戻る行を押すと元のメニューに戻る。
+ */
+internal class OptionPage(val label: String, val checked: Boolean, val title: String, val options: () -> List<Option>)
 
 /**
  * フローティングボタンの長押しで出すメニュー（2026-11-05、作者の要望）。
@@ -44,6 +52,12 @@ internal class ScreenMenu(private val context: Context, private val windowManage
     private var params: WindowManager.LayoutParams? = null
     private var anchor = 0 to 0
     private var build: () -> List<MenuEntry> = { emptyList() }
+
+    /** 開いているページ（null なら設定の行の一覧）。 */
+    private var page: OptionPage? = null
+
+    /** 設定の行の一覧を最後に出したときの幅。ページを同じ幅で出し、開いたときにメニューの幅と位置が変わらないようにする。 */
+    private var rootWidth = 0
 
     /** 今のテーマの色（開くたび・描き直すたびに読み直す。docs/設計/デザイン言語.md「色」）。 */
     private var palette = OverlayPalette.current(context)
@@ -59,6 +73,7 @@ internal class ScreenMenu(private val context: Context, private val windowManage
         root = null
         anchor = anchorX to anchorY
         build = entries
+        page = null
         val view = ScrollView(context).apply {
             // 画面に収まらないとき（横向きなど）は、続きがあると分かるようにスクロールバーを出したままにする。
             // 収まっていればスクロールできないので、バーは出ない
@@ -102,12 +117,17 @@ internal class ScreenMenu(private val context: Context, private val windowManage
                 cornerRadius = context.dp(12).toFloat()
             }
         }
-        for (entry in build()) list.addView(
-            when (entry) {
-                is MenuEntry.Choice -> choiceRow(entry)
-                is MenuEntry.Action -> actionRow(entry)
-            },
-        )
+        val open = page
+        if (open == null) {
+            for (entry in build()) list.addView(
+                when (entry) {
+                    is MenuEntry.Choice -> choiceRow(entry)
+                    is MenuEntry.Action -> actionRow(entry)
+                },
+            )
+        } else {
+            pageRows(open).forEach(list::addView)
+        }
         view.removeAllViews()
         view.addView(list)
 
@@ -115,10 +135,11 @@ internal class ScreenMenu(private val context: Context, private val windowManage
         val (anchorX, anchorY) = anchor
         // ボタンの左に収まる幅にする（ボタンに重ねない）。左が狭すぎるときだけ画面の幅まで使う
         val maxWidth = (anchorX - context.dp(16)).takeIf { it >= context.dp(280) } ?: (screen.width() - context.dp(16))
-        list.measure(
-            View.MeasureSpec.makeMeasureSpec(maxWidth, View.MeasureSpec.AT_MOST),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-        )
+        // ページは設定の行の一覧と同じ幅にする（ページを開いてもメニューの幅と位置が変わらない）
+        val widthSpec = if (open != null && rootWidth > 0) View.MeasureSpec.makeMeasureSpec(minOf(rootWidth, maxWidth), View.MeasureSpec.EXACTLY)
+        else View.MeasureSpec.makeMeasureSpec(maxWidth, View.MeasureSpec.AT_MOST)
+        list.measure(widthSpec, View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        if (open == null) rootWidth = list.measuredWidth
         // ウィンドウの大きさは、ここで測った大きさに固定する。中身に合わせて測り直させると、ここで測った幅とずれ、
         // 折り返しの数が変わって下が切れる
         list.minimumWidth = list.measuredWidth
@@ -144,36 +165,73 @@ internal class ScreenMenu(private val context: Context, private val windowManage
             setPadding(context.dp(2), context.dp(8), context.dp(6), 0)
         })
         addView(
-            WrapLayout(context, gap = context.dp(6)).apply { entry.options.forEach { addView(chip(it)) } },
+            WrapLayout(context, gap = context.dp(6)).apply {
+                entry.options.forEach { addView(chip(it)) }
+                entry.more?.let { more ->
+                    addView(chipView(more.label, more.checked).apply {
+                        setOnClickListener {
+                            OwnTouch.mark()
+                            page = more
+                            refresh()
+                        }
+                    })
+                }
+            },
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
         )
     }
 
-    /** 選択肢1つ。選んでいるものは塗り、ほかは枠だけにする。 */
-    private fun chip(option: Option): View = TextView(context).apply {
-        text = option.label
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-        setTextColor(if (option.checked) palette.onPrimary else palette.onSurface)
-        gravity = Gravity.CENTER
-        // 選択肢の名前は1行で出す（縦に潰さない）
-        maxLines = 1
-        setPadding(context.dp(12), context.dp(7), context.dp(12), context.dp(7))
-        background = GradientDrawable().apply {
-            cornerRadius = context.dp(16).toFloat()
-            if (option.checked) setColor(palette.primary) else setStroke(context.dp(1), palette.outline)
-        }
-        if (!option.enabled) alpha = 0.4f
+    /**
+     * 選択肢1つ。押すと、選んでいなければ選び、メニューを描き直す。[inPage] ならページを閉じて元のメニューに戻る
+     * （選んでいる選択肢を押しても戻る）。
+     */
+    private fun chip(option: Option, inPage: Boolean = false): View = chipView(option.label, option.checked, option.enabled).apply {
         setOnClickListener {
             OwnTouch.mark()
             if (!option.enabled) {
                 option.disabledHint?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_SHORT).show() }
                 return@setOnClickListener
             }
-            if (option.checked) return@setOnClickListener
-            option.action()
+            if (!option.checked) option.action()
+            if (inPage) page = null
             refresh()
         }
     }
+
+    /** 選択肢の見た目。選んでいるものは塗り、ほかは枠だけにする。選べないものは薄く出す。 */
+    private fun chipView(label: String, checked: Boolean, enabled: Boolean = true): TextView = TextView(context).apply {
+        text = label
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+        setTextColor(if (checked) palette.onPrimary else palette.onSurface)
+        gravity = Gravity.CENTER
+        // 選択肢の名前は1行で出す（縦に潰さない）
+        maxLines = 1
+        setPadding(context.dp(12), context.dp(7), context.dp(12), context.dp(7))
+        background = GradientDrawable().apply {
+            cornerRadius = context.dp(16).toFloat()
+            if (checked) setColor(palette.primary) else setStroke(context.dp(1), palette.outline)
+        }
+        if (!enabled) alpha = 0.4f
+    }
+
+    /** ページの中身：上に戻る行、その下に選択肢を折り返して並べる。 */
+    private fun pageRows(open: OptionPage): List<View> = listOf(
+        TextView(context).apply {
+            text = "‹  ${open.title}"
+            setTextColor(palette.primary)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setPadding(context.dp(2), context.dp(6), context.dp(4), context.dp(10))
+            setOnClickListener {
+                OwnTouch.mark()
+                page = null
+                refresh()
+            }
+        },
+        WrapLayout(context, gap = context.dp(6)).apply {
+            open.options().forEach { addView(chip(it, inPage = true)) }
+            setPadding(0, 0, 0, context.dp(4))
+        },
+    )
 
     /** 押すとメニューを閉じて行う操作の行（終了）。 */
     private fun actionRow(entry: MenuEntry.Action): View = TextView(context).apply {
@@ -194,6 +252,7 @@ internal class ScreenMenu(private val context: Context, private val windowManage
         runCatching { windowManager.removeView(view) }
         root = null
         params = null
+        page = null
         onDismiss?.invoke()
     }
 
