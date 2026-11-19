@@ -133,7 +133,7 @@ class ConversationSession(
     }
 
     sealed interface Effect {
-        /** 確定した発話を訳す。終わったら [Event.FinalDone] を返す。 */
+        /** 確定した発話を [target]（発話の向きの訳す先。null でないもの）へ訳す。終わったら [Event.FinalDone] を返す。 */
         data class TranslateFinal(val turn: Turn, val target: Language) : Effect
 
         /** 途中の文字を訳す。終わったら（取り消されても）[Event.PartialDone] を返す。 */
@@ -185,7 +185,17 @@ class ConversationSession(
     private data class PartialRequest(val id: Long, val generation: Long, val text: String, val source: Language, val target: Language)
 
     /** まだ渡していない確定した発話（話した順）。 */
-    private val finalQueue = ArrayDeque<Turn>()
+    private val finalQueue = ArrayDeque<QueuedFinal>()
+
+    /** 訳す列の1件：発話と、null でない訳す先。訳す先の無い発話（相手不明の間の自分の発話）は列に入れない。 */
+    private data class QueuedFinal(val turn: Turn, val target: Language) {
+        val id: Long get() = turn.id
+    }
+
+    /** 発話 [turn] に訳す先があれば、訳す列の後ろに入れる。 */
+    private fun enqueue(turn: Turn) {
+        turn.direction.target?.let { finalQueue.addLast(QueuedFinal(turn, it)) }
+    }
 
     /** 渡している確定訳。 */
     private var finalRunning: Long? = null
@@ -315,7 +325,7 @@ class ConversationSession(
         // 話し続けていれば次の途中結果が来るので、ここでは聞き取り中の表示だけ空にする。
         // 書き起こし待ちがあれば、この確定はその分なので、ボタンの後に始めた話し中のカードはそのままにする
         if (queued.isEmpty()) live = live?.let { LiveSpeech("", null, startedAtMs = clock()) }
-        if (direction.target != null) finalQueue.addLast(turn)
+        enqueue(turn)
     }
 
     /**
@@ -408,7 +418,7 @@ class ConversationSession(
      */
     private fun requeue(ids: Set<Long>) {
         ids.forEach(::unqueue)
-        turns.filter { it.id in ids && it.direction.target != null && it.swappedFrom == null }.forEach { finalQueue.addLast(it) }
+        turns.filter { it.id in ids && it.swappedFrom == null }.forEach(::enqueue)
     }
 
     /** 発話 [id] を訳す列から外す。走っている訳がそれなら、その結果は書かない。 */
@@ -420,13 +430,9 @@ class ConversationSession(
     /** 空いていれば、次の確定訳と途中訳を渡す。 */
     private fun dispatch(effects: MutableList<Effect>) {
         if (finalRunning == null) {
-            // 列に入るのは訳す先のある発話だけ（[requeue]・[onUtterance]）。念のため、訳す先の無い発話は飛ばす
-            while (true) {
-                val turn = finalQueue.removeFirstOrNull() ?: break
-                val target = turn.direction.target ?: continue
-                finalRunning = turn.id
-                effects += Effect.TranslateFinal(turn, target)
-                break
+            finalQueue.removeFirstOrNull()?.let { next ->
+                finalRunning = next.id
+                effects += Effect.TranslateFinal(next.turn, next.target)
             }
         }
         if (partialRunning != null) return

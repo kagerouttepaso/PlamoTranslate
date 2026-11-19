@@ -32,10 +32,16 @@ enum class Script {
             else -> OTHER
         }
 
-        /** ラテン文字で書く言語のコード。セルビア語はキリル文字で書くことが多いので入れない（上のキリル文字）。 */
+        /**
+         * ラテン文字で書く言語のコード。アプリの言語（`Language`）に加え、音声認識が返しうるコード（Qwen3-ASR の言語、
+         * Whisper の識別のラテン文字の言語。Whisper はジャワ語を `jw` と書く）も入れる。セルビア語はキリル文字で書くことが多いので
+         * 入れない（上のキリル文字）。
+         */
         private val LATIN_CODES = setOf(
-            "en", "az", "it", "id", "uz", "et", "nl", "ca", "hr", "jv", "es", "sk", "sl", "sw", "ceb", "tl",
-            "de", "hu", "eu", "fr", "vi", "pl", "ms", "lv", "lt", "pt", "tr",
+            "en", "az", "it", "id", "uz", "et", "nl", "ca", "hr", "jv", "jw", "es", "sk", "sl", "sw", "ceb", "tl",
+            "de", "hu", "eu", "fr", "vi", "pl", "ms", "lv", "lt", "pt", "tr", "sv", "da", "fi", "cs", "ro",
+            "no", "nn", "is", "fo", "cy", "ga", "gl", "af", "sq", "bs", "mt", "lb", "oc", "br", "la", "mi",
+            "haw", "ht", "ln", "mg", "sn", "so", "su", "yo", "ha", "tk",
         )
 
         /** 文の多数派の文字。仮名が1つでもあれば日本語（漢字だけの日本語もあるが、仮名の無い文は中国語と区別できない）。 */

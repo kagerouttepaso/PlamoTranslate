@@ -32,7 +32,10 @@ enum class OcrLanguage {
 
 /** 文字認識のインターフェース（CLAUDE.md「差し替え可能に作る」）。 */
 interface OcrEngine {
-    /** 行を読み順（上から下、左から右）に並べて返す。[language] を決めると、その言語に要る認識器だけを動かす。 */
+    /**
+     * 行を読み順（上から下、左から右）に並べて返す。[language] を決めると、その言語に要る認識器だけを動かす。
+     * 戻ったら（取り消されて戻ったときも）[bitmap] にもう触らない。呼んだ側は、戻った後に画像を解放してよい。
+     */
     suspend fun recognize(bitmap: Bitmap, language: OcrLanguage = OcrLanguage.AUTO): List<OcrLine>
     fun close()
 }

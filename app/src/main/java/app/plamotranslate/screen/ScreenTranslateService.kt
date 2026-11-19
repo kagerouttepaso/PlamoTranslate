@@ -23,9 +23,6 @@ import android.os.SystemClock
 import android.view.WindowManager
 import android.widget.Toast
 import app.plamotranslate.EngineHolder
-import app.plamotranslate.ThemePreferences
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.combine
 import app.plamotranslate.R
 import app.plamotranslate.log.Logs
 import app.plamotranslate.models.ModelCatalog
@@ -49,7 +46,6 @@ import app.plamotranslate.pipeline.translation.TranslationStream
 import app.plamotranslate.translation.SqlitePersistentCache
 import app.plamotranslate.translation.Translations
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -114,8 +110,8 @@ class ScreenTranslateService : Service() {
     /** 画面を回したら、前の向きで置いた訳の枠は位置が合わないので消す。フローティングボタンは今の画面の同じ割合の位置へ移す。 */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        // 端末の明暗を、テーマの購読に渡す（塗り直すのは購読の1か所。[watchTheme]）
-        systemDark.value = ThemePreferences.systemDark(newConfig)
+        // 端末の明暗をフローティングボタンに渡す（塗り直すかはボタンが決める）
+        button?.configurationChanged(newConfig)
         if (newConfig.orientation == orientation) return
         orientation = newConfig.orientation
         menu?.dismiss()
@@ -176,8 +172,6 @@ class ScreenTranslateService : Service() {
         if (state.phase == Phase.Watching) startJudge.reset(SystemClock.uptimeMillis())
         scope.launch { watch() }
         scope.launch { watchAccessibility() }
-        // 設定の「画面の色」を変えたら、フローティングボタンを塗り直す
-        watchTheme()
         registerDebugReceiver()
         _running.value = true
         return START_NOT_STICKY
@@ -280,37 +274,33 @@ class ScreenTranslateService : Service() {
     }
 
     /**
-     * 読む工程を動かし、続けてまとめる・選ぶ・枠を決める工程（[PageLayout.of]）を行う。前提（[ScreenFrame]）と撮影画像は読むだけで、
-     * 結果を置くと撮影画像は捨てられる（[Work.laidOut]）。
+     * 読む工程を動かし、続けてまとめる・選ぶ・枠を決める工程（[PageLayout.of]）を行う。前提（[ScreenFrame]）は読むだけ。
+     * 撮影画像は [Work.takeImage] で受け取り、この工程が終わったら解放する。
      */
     private fun recognize(session: Int) {
         val w = workOf(session) ?: return
         val frame = w.frame ?: return
-        // 撮影画像はここで受け取って持ち主になり、読み終えたら（取り消されても）解放する。取り消し済みの作業でも
-        // 後始末が走るよう、必ず始める（ATOMIC。最初の中断点で取り消しを受ける）
+        // 撮影画像はここで受け取って持ち主になり、読む工程が終わったら（始まる前に取り消されても、取り消されて止まっても）
+        // 解放する。文字認識は戻るまで画像を読む（OcrEngine.recognize の約束）ので、終わった後なら安全
         val image = w.takeImage() ?: return
         val choice = frame.choice
-        scope.launch(w.job, start = CoroutineStart.ATOMIC) {
-            try {
-                overlay?.showStatus("文字を読んでいます…")
-                val t0 = SystemClock.uptimeMillis()
-                var error: String? = null
-                val lines = try {
-                    // 白縁取り・白抜きの文字にも強い読み方（OutlinedText）は、場面の設定で選ぶ
-                    if (choice.outlined) ocr.recognizeOutlined(image, choice.ocrLanguage) else ocr.recognize(image, choice.ocrLanguage)
-                } catch (e: Exception) {
-                    if (e is CancellationException) throw e
-                    error = "文字を読めませんでした: ${e.message}"
-                    emptyList()
-                }
-                // 枠の色も撮影画像から読むので、解放はその後
-                val page = PageLayout.of(frame, image, lines, SystemClock.uptimeMillis() - t0, error)
-                w.laidOut(page)
-                dispatch(SessionEvent.Recognized(session, page.targets.size))
-            } finally {
-                image.recycle()
+        scope.launch(w.job) {
+            overlay?.showStatus("文字を読んでいます…")
+            val t0 = SystemClock.uptimeMillis()
+            var error: String? = null
+            val lines = try {
+                // 白縁取り・白抜きの文字にも強い読み方（OutlinedText）は、場面の設定で選ぶ
+                if (choice.outlined) ocr.recognizeOutlined(image, choice.ocrLanguage) else ocr.recognize(image, choice.ocrLanguage)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                error = "文字を読めませんでした: ${e.message}"
+                emptyList()
             }
-        }
+            // 枠の色も撮影画像から読むので、解放はその後
+            val page = PageLayout.of(frame, image, lines, SystemClock.uptimeMillis() - t0, error)
+            w.laidOut(page)
+            dispatch(SessionEvent.Recognized(session, page.targets.size))
+        }.invokeOnCompletion { image.recycle() }
     }
 
     /** 訳す・流し込む工程：空の訳の枠を出し、翻訳のストリームを開いて訳を流し込む。 */
@@ -504,21 +494,6 @@ class ScreenTranslateService : Service() {
         val text = "ユーザー補助が切れています。ユーザー補助の設定で「${getString(R.string.a11y_overlay_label)}」を一度オフにしてからオンにしてください"
         overlay?.showStatus(text)
         Toast.makeText(this, text, Toast.LENGTH_LONG).show()
-    }
-
-    /** 端末のダーク設定（[onConfigurationChanged] が更新する）。 */
-    private val systemDark by lazy { MutableStateFlow(ThemePreferences.systemDark(resources.configuration)) }
-
-    /**
-     * フローティングボタンを今のテーマの色で塗る。設定の「画面の色」と端末の明暗のどちらが変わっても、ダークで描くかが
-     * 変わったときだけ塗り直す（メニューは開くたびに読み直す）。
-     */
-    private fun watchTheme() {
-        scope.launch {
-            combine(ThemePreferences.mode, systemDark) { mode, system -> ThemePreferences.dark(mode, system) }
-                .distinctUntilChanged()
-                .collect { button?.applyPalette() }
-        }
     }
 
     /** 場面の設定（認識モードと訳の消え方から組み立てる撮り方・読み方・判定器）を今の設定に合わせ、判定器を作り直す。 */

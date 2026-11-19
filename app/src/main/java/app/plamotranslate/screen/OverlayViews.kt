@@ -1,5 +1,13 @@
 package app.plamotranslate.screen
 
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.MainScope
+import app.plamotranslate.ThemePreferences
+import android.content.res.Configuration
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
@@ -203,6 +211,17 @@ class FloatingButton(
     /** 自動で訳すか。自動なら、丸の外側にもう1本の輪を出す（丸は縮めない）。 */
     private var auto = false
 
+    /** 端末のダーク設定（[configurationChanged] で受け取る）。 */
+    private val systemDark = MutableStateFlow(ThemePreferences.systemDark(context.resources.configuration))
+
+    /** テーマの購読。[remove] で止める。 */
+    private val themeScope = MainScope()
+
+    /** 端末の設定が変わった（サービスの onConfigurationChanged から）。明暗が変わってダークで描くかが変われば塗り直す。 */
+    fun configurationChanged(config: Configuration) {
+        systemDark.value = ThemePreferences.systemDark(config)
+    }
+
     /**
      * 今のテーマの色で塗り直す（作ったとき、テーマや端末の明暗が変わったとき、訳し方を変えたとき）。ロゴはアイコンの色のままで、
      * その周りの縁・輪・バッジをテーマのプライマリカラーにする。縁は、暗い画面の上でも紺のロゴが埋もれないようにする（docs/設計/デザイン言語.md「色」）。
@@ -224,7 +243,14 @@ class FloatingButton(
     }
 
     init {
+        // 作ったときはその場で塗る（購読の最初の値は後で届くので、それまで素の見た目にしない）
         applyPalette()
+        // 設定の「画面の色」と端末の明暗のどちらが変わっても、ダークで描くかが変わったときだけ塗り直す（入口はこの購読の1つ）
+        themeScope.launch {
+            combine(ThemePreferences.mode, systemDark) { mode, system -> ThemePreferences.dark(mode, system) }
+                .distinctUntilChanged()
+                .collect { applyPalette() }
+        }
         val slop = ViewConfiguration.get(context).scaledTouchSlop
         var downX = 0f
         var downY = 0f
@@ -300,7 +326,10 @@ class FloatingButton(
     val position: Pair<Int, Int> get() = params.x to params.y
 
     fun show() = windowManager.addView(view, params)
-    fun remove() = runCatching { windowManager.removeView(view) }
+    fun remove() {
+        themeScope.cancel()
+        runCatching { windowManager.removeView(view) }
+    }
     fun setVisible(visible: Boolean) {
         view.visibility = if (visible) View.VISIBLE else View.INVISIBLE
     }

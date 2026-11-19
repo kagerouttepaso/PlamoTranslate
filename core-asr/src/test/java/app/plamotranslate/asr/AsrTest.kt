@@ -83,4 +83,11 @@ class AsrTest {
             samples.forEach { putShort(it) }
         }.array()
     }
+
+    @Test
+    fun qwen3が聞く言語はどれも文字の種類が決まっている() {
+        // 決まっていない言語は、話し手の判定の根拠（LanguageEvidence）から外れる
+        val unknown = Qwen3Recognizer.NAMES.keys.filter { app.plamotranslate.pipeline.speech.Script.ofLanguage(it) == app.plamotranslate.pipeline.speech.Script.OTHER }
+        assertEquals(emptyList<String>(), unknown)
+    }
 }
