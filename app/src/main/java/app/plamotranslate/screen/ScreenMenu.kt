@@ -60,6 +60,10 @@ internal class ScreenMenu(private val context: Context, private val windowManage
         anchor = anchorX to anchorY
         build = entries
         val view = ScrollView(context).apply {
+            // 画面に収まらないとき（横向きなど）は、続きがあると分かるようにスクロールバーを出したままにする。
+            // 収まっていればスクロールできないので、バーは出ない
+            isVerticalScrollBarEnabled = true
+            isScrollbarFadingEnabled = false
             setOnTouchListener { _, e ->
                 if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) dismiss() else OwnTouch.mark()
                 false
@@ -115,6 +119,10 @@ internal class ScreenMenu(private val context: Context, private val windowManage
             View.MeasureSpec.makeMeasureSpec(maxWidth, View.MeasureSpec.AT_MOST),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
         )
+        // ウィンドウの大きさは、ここで測った大きさに固定する。中身に合わせて測り直させると、ここで測った幅とずれ、
+        // 折り返しの数が変わって下が切れる
+        list.minimumWidth = list.measuredWidth
+        p.width = list.measuredWidth
         val height = minOf(list.measuredHeight, screen.height() - context.dp(32))
         p.height = height
         // ボタンの左に出す（画面の右端に寄せたボタンでも見切れないように）。下にはみ出すなら上へずらす
