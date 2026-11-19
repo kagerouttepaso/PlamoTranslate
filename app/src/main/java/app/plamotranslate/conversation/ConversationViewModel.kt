@@ -29,6 +29,7 @@ import app.plamotranslate.pipeline.speech.SegmentationProfile
 import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechEvent
+import app.plamotranslate.pipeline.speech.UtteranceRetention
 import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
 import app.plamotranslate.pipeline.translation.translateOne
@@ -134,7 +135,9 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         viewModelScope.launch {
             val begin = System.nanoTime()
             val result = withContext(Dispatchers.Default) {
-                runCatching { SpeechEngines.load(speechModel, dir, recognition.profile(PROFILE), recognition.asrTuning) }
+                runCatching {
+                    SpeechEngines.load(speechModel, dir, recognition.profile(PROFILE), recognition.asrTuning, UtteranceRetention.KEEP_UTTERANCES)
+                }
             }
             log("音声認識を読み込みました: $speechModel ${(System.nanoTime() - begin) / 1_000_000}ms")
             result.onSuccess { asr = it.also(::attach) }

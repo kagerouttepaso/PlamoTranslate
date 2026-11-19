@@ -1,5 +1,6 @@
 package app.plamotranslate.pipeline.speech
 
+import app.plamotranslate.llm.Language
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -16,7 +17,7 @@ class RecognitionQueueTest {
         q.submit(transcribe(1, card = 0, RecognitionPriority.PARTIAL))
         q.submit(RecognitionJob.Language(2, 0, RecognitionLane.TRANSCRIBE, RecognitionPriority.LANGUAGE, FloatArray(0), 0, "試験", languages))
         q.submit(transcribe(3, card = 0, RecognitionPriority.FINAL))
-        q.submit(RecognitionJob.Retranscribe(4, utterance = 0, FloatArray(0), "試験", "ko"))
+        q.submit(RecognitionJob.Retranscribe(4, utterance = 0, FloatArray(0), "試験", Language.KO))
         q.submit(transcribe(5, card = 1, RecognitionPriority.PARTIAL))
         assertEquals(listOf(1L, 2L), q.dropStale(openCard = 1).map { it.id })
         // 処理の順：確定に要るジョブ、書き起こし直し、話し中のカードの途中結果
@@ -26,7 +27,7 @@ class RecognitionQueueTest {
     @Test
     fun 書き起こし直しは確定に要るジョブに数えない() {
         val q = RecognitionQueue()
-        q.submit(RecognitionJob.Retranscribe(1, utterance = 0, FloatArray(0), "試験", "ko"))
+        q.submit(RecognitionJob.Retranscribe(1, utterance = 0, FloatArray(0), "試験", Language.KO))
         assertEquals(false, q.hasUrgent())
         assertEquals(null, q.oldestTranscribeEnd())
     }

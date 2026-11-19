@@ -60,6 +60,8 @@ class SpeechSegmenter(
     private val clock: () -> Long = System::nanoTime,
     /** 確定を出すカードの番号（[Utterance.id]）と音声。確定の出来事より先に呼ぶ。 */
     private val retain: (Long, FloatArray) -> Unit = { _, _ -> },
+    /** ジョブの番号の採番（同じエンジンの中でほかにジョブを出す部品と同じものを渡す）。 */
+    private val jobIds: JobIds = JobIds(),
 ) {
     private val prerollSamples = (profile.prerollSeconds * SAMPLE_RATE).toInt()
     private val splitAfterSamples = (profile.splitAfterSeconds * SAMPLE_RATE).toInt()
@@ -187,7 +189,6 @@ class SpeechSegmenter(
     private var open: Card? = null
     private var nextCard = 0L
 
-    private var nextJob = 0L
     private val handlers = HashMap<Long, (RecognitionOutput) -> Unit>()
 
     private var closed = false
@@ -707,7 +708,7 @@ class SpeechSegmenter(
     // ---- ジョブと出来事 ----
 
     private fun job(make: (Long) -> RecognitionJob, handler: (RecognitionOutput) -> Unit) {
-        val id = nextJob++
+        val id = jobIds.next()
         handlers[id] = handler
         submit(make(id))
     }

@@ -32,9 +32,24 @@ data class Turn(
      * 原文は書き起こし直しが届いてから差し替える。書き起こし直せなければ、この発話に戻す。
      */
     val swappedFrom: Turn? = null,
-    /** 利用者がカードの言語を入れ替えられるか（[ConversationSession] が決める。画面はこれだけを見る）。 */
-    val swappable: Boolean = false,
+    /** 言語の入れ替えについての状態（[ConversationSession] が決める。画面はこれだけを見る）。 */
+    val swap: SwapState = SwapState.UNAVAILABLE,
 )
+
+/** 確定したカードの言語の入れ替えについての状態（docs/設計/会話翻訳.md「カードの言語の取り違えを直す」）。 */
+enum class SwapState {
+    /** 入れ替えられる。 */
+    AVAILABLE,
+
+    /** 入れ替えて、書き起こし直しを待っている。 */
+    REWRITING,
+
+    /** 音声認識が音声を破棄したので、もう入れ替えられない（古いカード）。 */
+    EXPIRED,
+
+    /** 今は入れ替えられない（相手の言語がまだ決まっていない間の自分の発話など）。古いカードではない。 */
+    UNAVAILABLE,
+}
 
 /**
  * 話している最中の聞き取り。話し終わると [Turn] に置き換わる。
@@ -106,7 +121,7 @@ class ConversationSession(
          * 自分の言語として書き起こし直してもらい（[Effect.Retranscribe]）、届いたら原文と向きを替えて訳し直す。
          * 利用者の指定は、音声認識の判定より先にする。向き（話し手と訳す先）はその場で替え（画面はすぐ新しい話し手のカードになる）、
          * 原文は書き起こし直しが届いてから差し替えて訳す。書き起こし直せなければ、入れ替える前のカードに戻す（原文の文字は
-         * 指定した言語で書かれていないかもしれないので、言語だけを替えたままにはしない）。入れ替えられるのは [Turn.swappable] の発話だけ。
+         * 指定した言語で書かれていないかもしれないので、言語だけを替えたままにはしない）。入れ替えられるのは [Turn.swap] が [SwapState.AVAILABLE] の発話だけ。
          */
         data class LanguageSwapped(val turnId: Long) : Event
 
@@ -127,8 +142,8 @@ class ConversationSession(
         /** 渡している途中訳を取り消す（確定訳を先にするため）。 */
         data class CancelPartial(val requestId: Long) : Effect
 
-        /** 発話 [utterance] を [language]（音声認識の言語のコード）として書き起こし直してもらう（[SpeechEngine.retranscribe]）。 */
-        data class Retranscribe(val utterance: Long, val language: String) : Effect
+        /** 発話 [utterance] を [language] として書き起こし直してもらう（[SpeechEngine.retranscribe]）。 */
+        data class Retranscribe(val utterance: Long, val language: Language) : Effect
     }
 
     private val router = LanguageRouter(mode, self, heard)
@@ -241,7 +256,7 @@ class ConversationSession(
             }
         }
         dispatch(effects)
-        refreshSwappable()
+        refreshSwapState()
         return effects
     }
 
@@ -327,7 +342,12 @@ class ConversationSession(
      * 利用者がカードの言語を入れ替えられるか。音声認識が音声を取り置いていて、書き起こし直している最中でなく、もう一方の話し手の
      * 言語が決まっていること（相手がまだ決まっていない間の自分の発話は、相手の言語が分からないので直せない）。
      */
-    private fun swappable(turn: Turn): Boolean = turn.retained && turn.swappedFrom == null && swappedLanguage(turn) != null
+    private fun swapState(turn: Turn): SwapState = when {
+        turn.swappedFrom != null -> SwapState.REWRITING
+        turn.utteranceId != null && !turn.retained -> SwapState.EXPIRED
+        turn.retained && swappedLanguage(turn) != null -> SwapState.AVAILABLE
+        else -> SwapState.UNAVAILABLE
+    }
 
     /**
      * 利用者が発話 [turnId] の言語を入れ替えた。向きをもう一方の話し手のものにその場で替え（訳はいったん空にし、走っている訳は
@@ -336,7 +356,7 @@ class ConversationSession(
     private fun swapLanguage(turnId: Long, effects: MutableList<Effect>) {
         val turn = turns.firstOrNull { it.id == turnId } ?: return
         val utterance = turn.utteranceId ?: return
-        if (!swappable(turn)) return
+        if (swapState(turn) != SwapState.AVAILABLE) return
         val language = swappedLanguage(turn) ?: return
         updateTurn(turnId) {
             it.copy(
@@ -345,7 +365,7 @@ class ConversationSession(
             )
         }
         unqueue(turnId)
-        effects += Effect.Retranscribe(utterance, LanguageRouter.recognitionCode(language))
+        effects += Effect.Retranscribe(utterance, language)
     }
 
     /** 書き起こし直しが届いた。原文を差し替えて訳す（向きは入れ替えたときに替えてある）。 */
@@ -355,11 +375,19 @@ class ConversationSession(
         requeue(setOf(turn.id))
     }
 
-    /** 書き起こし直せなかった。入れ替える前のカードに戻す（その間に訳が止まっていれば、訳し直す）。 */
+    /**
+     * 書き起こし直せなかった。入れ替える前の原文と話し手に戻す。訳す先は今の相手の言語で決め直す（待っている間に利用者が
+     * 相手の言語を選び直していれば、前の訳は使わず訳し直す。その間に訳が止まっていても訳し直す）。
+     */
     private fun onRetranscribeFailed(id: Long) {
         val turn = turns.firstOrNull { it.utteranceId == id } ?: return
         val before = turn.swappedFrom ?: return
-        val restored = before.copy(retained = turn.retained)
+        val target = if (before.direction.mine) router.partner else router.self
+        val retargeted = before.direction.target != target
+        val restored = before.copy(
+            retained = turn.retained,
+            direction = before.direction.copy(target = target),
+        ).let { if (retargeted) it.copy(translation = "", translated = false, translateMs = null, failure = null) else it }
         updateTurn(turn.id) { restored }
         if (!restored.translated) requeue(setOf(turn.id))
     }
@@ -368,15 +396,18 @@ class ConversationSession(
         turns = turns.map { if (it.utteranceId == id) change(it) else it }
     }
 
-    /** 入れ替えられるかを、発話と言語の状態にそろえる（相手が決まった・音声を手放した・書き起こし直し始めた、で変わる）。 */
-    private fun refreshSwappable() {
-        if (turns.any { it.swappable != swappable(it) }) turns = turns.map { it.copy(swappable = swappable(it)) }
+    /** 入れ替えの状態を、発話と言語の状態にそろえる（相手が決まった・音声を破棄した・書き起こし直し始めた、で変わる）。 */
+    private fun refreshSwapState() {
+        if (turns.any { it.swap != swapState(it) }) turns = turns.map { it.copy(swap = swapState(it)) }
     }
 
-    /** 発話 [ids] を訳し直す列に入れる（話した順）。走っている訳がそのどれかなら、その結果は書かない。 */
+    /**
+     * 発話 [ids] を訳し直す列に入れる（話した順）。走っている訳がそのどれかなら、その結果は書かない。
+     * 書き起こし直しを待っている発話は、原文がまだ前の言語のものなので入れない（届いたときに入れる）。
+     */
     private fun requeue(ids: Set<Long>) {
         ids.forEach(::unqueue)
-        turns.filter { it.id in ids && it.direction.target != null }.forEach { finalQueue.addLast(it) }
+        turns.filter { it.id in ids && it.direction.target != null && it.swappedFrom == null }.forEach { finalQueue.addLast(it) }
     }
 
     /** 発話 [id] を訳す列から外す。走っている訳がそれなら、その結果は書かない。 */

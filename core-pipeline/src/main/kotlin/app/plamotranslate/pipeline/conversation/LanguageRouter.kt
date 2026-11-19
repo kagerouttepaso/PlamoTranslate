@@ -136,16 +136,6 @@ class LanguageRouter(
         /** 音声認識の言語の組（`LanguageEvidence.group`）での言語。中国語は字体によらず1つの組。 */
         private fun speechGroup(language: Language): String = if (language.isChinese) "zh" else language.code
 
-        /**
-         * 音声認識に「この言語で書き起こす」と指定するときのコード（[SpeechEngine.retranscribe]）。比べるための組（[speechGroup]）とは
-         * 別にする。繁体字の中国語は広東語（`yue`）として聞く：会話では広東語を繁体字の中国語として訳すので（[spokenLanguage]）、
-         * 繁体字の相手は広東語の話し手として扱う。
-         */
-        fun recognitionCode(language: Language): String = when (language) {
-            Language.ZH -> "zh"
-            Language.ZH_HANT -> "yue"
-            else -> language.code
-        }
 
         /**
          * 認識器の言語判定を、会話で扱う言語に絞る。

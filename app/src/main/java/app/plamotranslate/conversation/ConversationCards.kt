@@ -2,30 +2,14 @@ package app.plamotranslate.conversation
 
 import app.plamotranslate.pipeline.conversation.Direction
 import app.plamotranslate.pipeline.conversation.LiveSpeech
+import app.plamotranslate.pipeline.conversation.SwapState
 import app.plamotranslate.pipeline.conversation.Turn
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
-import kotlinx.coroutines.launch
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.layout.offset
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.IntOffset
-import kotlin.math.roundToInt
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -45,9 +29,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import kotlinx.coroutines.delay
@@ -158,17 +142,10 @@ internal fun SharedCard(turn: Turn, onSwap: (Long) -> Unit) {
  * 訳文をタップすると、訳した先の言語で読み上げる（2026-11-08、作者の要望。[ReadAloud]）。読んでいる間は見出しに🔊を出し、
  * もう一度タップすると止める。
  *
- * 言語の入れ替え（[onSwap]。もう一方の話し手の言語として書き起こし直し、訳し直す）は、カードをもう一方の話し手のカードの
- * 位置へ横にずらして行う（2026-11-19、作者の要望）。動かせるかは会話の中核が決める（[Turn.swappable]）。入れ替えられる
- * カードはふつうのまま見せ、もう入れ替えられない古いカード（音声を手放したもの）は、色を地の色へ少し寄せて落ち着かせ、
- * ずらそうとしても少し動いて跳ね返る（入れ替えられるカードに記号やハンドルを足すと主張が強かった）。
- * - カードはもう一方の話し手のカードの位置までしか動かず、そこで止まる（行き過ぎない）。指を [SWAP_TRAVEL] 動かすと届き、
- *   届いた時に端末を短く振動させる。動かすにつれて、色がもう一方の話し手の色へ移る。
- * - 届いて離したら入れ替える。会話の中核はその場で話し手を替えるので、カードは新しい話し手の位置と色のまま残り、
- *   原文は書き起こし直しが届くまで薄く出し、訳は届いた順に出る。届く前に離したら元の位置と色へ戻る。
- * - 位置と色は、指の動き・入れ替え・書き起こし直せずに戻ったときのどれでも、跳ばずにつながって動く。
- * 向きは、もう一方の話し手のカードのある側だけ（対面の相手側は逆さに出すが、カードの中の向きで数えるので同じ）。
- * 読み上げを使う人のために、同じ操作をアクセシビリティの操作にも置く。
+ * 言語の入れ替え（[onSwap]）は、カードをもう一方の話し手のカードの位置へ横にずらして行う。操作と、その間の位置と色の
+ * 進み具合は [cardSwapGesture]・[rememberCardSwap] が持ち、ここはその進み具合で位置と色を決める。もう入れ替えられない古いカード
+ * （[SwapState.EXPIRED]）は、色を背景色へ少し寄せて落ち着かせる。書き起こし直しを待っている間（[SwapState.REWRITING]）は、
+ * 原文を薄く出す。
  */
 @Composable
 private fun UtteranceCard(
@@ -188,95 +165,32 @@ private fun UtteranceCard(
     onSwap: (Long) -> Unit,
 ) {
     val context = LocalContext.current
-    val haptics = LocalHapticFeedback.current
     val speaking by ReadAloud.speaking.collectAsStateWithLifecycle()
     val key = "turn-${turn.id}"
     val speak = Modifier.clickable(enabled = turn.translated && turn.failure == null && turn.translation.isNotBlank()) {
         turn.direction.target?.let { ReadAloud.toggle(context, key, turn.translation, it) }
     }
-    val swappable = turn.swappable
     // 書き起こし直しを待っている間は、原文がまだ前の言語のもの
-    val rewriting = turn.swappedFrom != null
+    val rewriting = turn.swap == SwapState.REWRITING
     val widthFraction = if (compact) 0.96f else 0.92f
-    val scope = rememberCoroutineScope()
-    val travel = with(LocalDensity.current) { SWAP_TRAVEL.toPx() }
-    val lockedReach = with(LocalDensity.current) { LOCKED_REACH.toPx() }
-    // 音声を手放した古いカード（もう入れ替えられない）。相手がまだ決まっていない間の自分のカードは古くないので含めない
-    val locked = turn.utteranceId != null && !turn.retained
-    val nudge = remember(turn.id) { Animatable(0f) }
-
-    // 入れ替えの進み具合（0：表示している話し手の位置と色、1：もう一方の話し手の位置と色）
-    val progress = remember(turn.id) { Animatable(0f) }
-    // 表示している話し手（寄せる側と色）。話し手が替わったら（入れ替えた・書き起こし直せずに戻った）、同じフレームで
-    // 表示する話し手と進み具合を置き換え、そこから新しい話し手の位置と色へ動かす。入れ替えて届いていた（1）なら、
-    // 新しい話し手から見てちょうど 0 なので動かない。ずらしていなければ、前の位置と色から新しい方へ動く
-    var shown by remember(turn.id) { mutableStateOf(right to mine) }
-    LaunchedEffect(right, mine) {
-        if (shown == (right to mine)) return@LaunchedEffect
-        progress.snapTo(1f - progress.value)
-        shown = right to mine
-        progress.animateTo(0f)
-    }
-    val (shownRight, shownMine) = shown
-    val (ownContainer, ownContent) = speakerColors(shownMine)
-    val (otherContainer, otherContent) = speakerColors(!shownMine)
+    val swap = rememberCardSwap(turn.id, right, mine)
+    val (ownContainer, ownContent) = speakerColors(swap.shownMine)
+    val (otherContainer, otherContent) = speakerColors(!swap.shownMine)
 
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         // もう一方の話し手のカードの位置までの距離（左右の寄せの差）
         val gap = constraints.maxWidth * (1f - widthFraction)
-        val toward = if (shownRight) -1f else 1f
-        val p = progress.value
-        // 古いカード（音声を手放し、もう入れ替えられない）は、色を地の色へ少し寄せて落ち着かせる。手放したときにじわっと変わる
-        val settled by animateFloatAsState(if (locked) 1f else 0f, tween(SETTLE_MILLIS), label = "settled")
+        val p = swap.progress.value
+        // 古いカードは、色を背景色へ少し寄せて落ち着かせる。音声を破棄したときにじわっと変わる
+        val settled by animateFloatAsState(if (turn.swap == SwapState.EXPIRED) 1f else 0f, tween(SETTLE_MILLIS), label = "settled")
         val container = lerp(lerp(ownContainer, otherContainer, p), MaterialTheme.colorScheme.surface, SETTLED_MIX * settled)
         val content = lerp(ownContent, otherContent, p)
         val pendingColor = content.copy(alpha = 0.45f)
-        var reached by remember(turn.id) { mutableStateOf(false) }
-        val swap = Modifier
-            .align(if (shownRight) Alignment.TopEnd else Alignment.TopStart)
-            .offset { IntOffset((toward * gap * p + nudge.value).roundToInt(), 0) }
-            .pointerInput(turn.id, swappable, locked, shownRight) {
-                if (locked) {
-                    // 古いカードは、ずらそうとしても少しだけ動いて重く跳ね返る（入れ替えられない手応え）
-                    detectHorizontalDragGestures(
-                        onDragEnd = { scope.launch { nudge.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy)) } },
-                        onDragCancel = { scope.launch { nudge.animateTo(0f) } },
-                    ) { change, amount ->
-                        change.consume()
-                        scope.launch { nudge.snapTo((nudge.value + amount * LOCKED_RESISTANCE).coerceIn(-lockedReach, lockedReach)) }
-                    }
-                    return@pointerInput
-                }
-                if (!swappable) return@pointerInput
-                var moved = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = {
-                        moved = 0f
-                        reached = false
-                    },
-                    onDragEnd = {
-                        if (reached) {
-                            onSwap(turn.id)
-                        } else {
-                            scope.launch { progress.animateTo(0f) }
-                        }
-                    },
-                    onDragCancel = { scope.launch { progress.animateTo(0f) } },
-                ) { change, amount ->
-                    change.consume()
-                    // もう一方の話し手の側へ動いた分だけ数え、届いたらそこで止める
-                    moved = (moved + amount * toward).coerceIn(0f, travel)
-                    val nowReached = moved >= travel
-                    if (nowReached && !reached) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    reached = nowReached
-                    scope.launch { progress.snapTo(moved / travel) }
-                }
-            }
-            .semantics {
-                if (swappable) customActions = listOf(CustomAccessibilityAction("言語を入れ替えて書き直す") { onSwap(turn.id); true })
-            }
+        val placed = Modifier
+            .align(if (swap.shownRight) Alignment.TopEnd else Alignment.TopStart)
+            .cardSwapGesture(swap, turn.swap, gap) { onSwap(turn.id) }
         Surface(
-            modifier = swap.fillMaxWidth(widthFraction),
+            modifier = placed.fillMaxWidth(widthFraction),
             shape = RoundedCornerShape(16.dp),
             color = container,
             contentColor = content,
@@ -437,17 +351,9 @@ private fun ownName(language: Language): String {
 }
 
 /**
- * 確定したカードを、もう一方の話し手のカードの位置まで動かすのに要る指の動き。カードの寄せの差（画面の幅の4〜8%）だけでは
- * 縦のスクロールの指のぶれでも届くので、指はこれだけ動かし、カードはその間に寄せの差だけ動く。
- */
-private val SWAP_TRAVEL = 72.dp
-
-/**
- * 古いカード（音声を手放し、もう入れ替えられない）の見せ方。入れ替えられるカードに記号やハンドルを足すと主張が強かった
- * （2026-11-19、作者の指摘）ので、入れ替えられるカードはふつうのまま、古いカードの側を落ち着かせる。色は地の色へ寄せる割合、
- * ずらそうとしたときに動く上限と、指の動きに対する割合。文字の濃さは変えない（2人が読むので読みやすさを落とさない）。
+ * 古いカード（音声を破棄し、もう入れ替えられない）の色。入れ替えられるカードに記号やハンドルを足すと主張が強かった
+ * （2026-11-19、作者の指摘）ので、入れ替えられるカードはふつうのまま、古いカードの側を落ち着かせる。背景色へ寄せる割合と、
+ * 移る時間。文字の色は変えない（2人が読むので読みやすさを落とさない）。
  */
 private const val SETTLED_MIX = 0.35f
 private const val SETTLE_MILLIS = 600
-private val LOCKED_REACH = 6.dp
-private const val LOCKED_RESISTANCE = 0.15f

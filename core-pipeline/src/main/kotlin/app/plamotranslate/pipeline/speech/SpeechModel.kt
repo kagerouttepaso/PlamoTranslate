@@ -92,6 +92,8 @@ class IdentifiedRecognizer(
 
     override val identifies: Boolean get() = true
 
+    override fun languageCode(language: Language): String = recognizer.languageCode(language)
+
     /** 識別器のスコアを、比べるための組（中国語・広東語は1つの組）にまとめる。 */
     override fun scores(samples: FloatArray, languages: SpeechLanguages): Map<String, Float>? {
         val raw = identifier.scores(samples, languages.groups) ?: return null

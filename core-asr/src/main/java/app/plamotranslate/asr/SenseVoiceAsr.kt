@@ -1,5 +1,6 @@
 package app.plamotranslate.asr
 
+import app.plamotranslate.llm.Language
 import app.plamotranslate.pipeline.speech.LanguageSource
 import app.plamotranslate.pipeline.speech.Recognition
 import app.plamotranslate.pipeline.speech.SpeechBreak
@@ -88,7 +89,7 @@ class SileroVoiceActivity private constructor(private val vad: Vad) : VoiceActiv
  * 言語を指定した書き起こし（[recognizeAs]。利用者が言語の取り違えを直す書き起こし直し）は、言語を固定した認識器で行う。
  * SenseVoice の言語は認識器の設定にしか無く、書き起こしごとの指定（`setOption("language")`）は効かない（PC で確かめた）。
  * 設定の差し替え（`OfflineRecognizer.setConfig`）は、SenseVoice が読み込み時に直す特徴量の設定（ウィンドウ関数の種類・正規化）を初期値に戻す
- * （sherpa-onnx 2.0.1 のソース）ので使えない。言語を固定した認識器は初めて頼まれたときに読み込み（約240MB、1秒ほど）、
+ * （sherpa-onnx 2.0.1 のソース）ので使えない。言語を固定した認識器は初めて頼まれたときに読み込み（モデルは約240MB。読み込みの時間とメモリの増え方は測っていない）、
  * 最後に頼まれた言語の1つだけ持つ。書き起こし直しはまれなので、ふだんのメモリは増やさない。
  */
 class SenseVoiceRecognizer private constructor(
@@ -111,6 +112,12 @@ class SenseVoiceRecognizer private constructor(
         }
         return recognizeWith(current, samples).copy(lang = language, source = LanguageSource.SPECIFIED)
     }
+
+    /**
+     * 繁体字の中国語は広東語（`yue`）として聞く。会話では SenseVoice の広東語の判定を繁体字の中国語として訳すので、
+     * 繁体字の話し手を広東語の話し手として扱う（繁体字で北京語を話す人は、指定すると広東語として書き起こされる）。
+     */
+    override fun languageCode(language: Language): String = if (language == Language.ZH_HANT) "yue" else super.languageCode(language)
 
     private fun recognizeWith(r: OfflineRecognizer, samples: FloatArray): Recognition {
         val stream = r.createStream()

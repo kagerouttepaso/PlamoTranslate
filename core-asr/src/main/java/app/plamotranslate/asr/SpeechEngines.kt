@@ -52,6 +52,8 @@ object SpeechEngines {
         asrDir: File,
         profile: SegmentationProfile = SegmentationProfile.CONVERSATION,
         tuning: AsrTuning = AsrTuning(),
+        /** 書き起こし直しのために保持する確定した発話の数（会話翻訳だけ。0 なら保持しない）。 */
+        retainUtterances: Int = 0,
     ): SpeechEngine {
         val missing = missingFiles(model, asrDir)
         require(missing.isEmpty()) { "音声認識のモデルがありません: ${missing.joinToString()}" }
@@ -72,6 +74,7 @@ object SpeechEngines {
             trace = { message -> Logs.text { "会話の認識: ${message()}" } },
             // ジョブごとの待ち時間と処理時間は、話した言葉を含まないので正式版でも書く（遅さの切り分けに使う）
             timing = { message -> Logs.i("会話の認識: $message") },
+            retainUtterances = retainUtterances,
         )
     }
 

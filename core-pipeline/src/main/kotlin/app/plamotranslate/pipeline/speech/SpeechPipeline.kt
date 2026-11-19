@@ -1,5 +1,7 @@
 package app.plamotranslate.pipeline.speech
 
+import app.plamotranslate.llm.Language
+
 import java.util.concurrent.LinkedBlockingQueue
 import kotlin.concurrent.thread
 
@@ -29,6 +31,8 @@ class SpeechPipeline(
     heavy: Boolean = false,
     trace: (() -> String) -> Unit = {},
     private val timing: (String) -> Unit = {},
+    /** 書き起こし直しのために保持する確定した発話の数（[UtteranceRetention]）。0 なら保持しない。 */
+    retainUtterances: Int = 0,
 ) : SpeechEngine {
     override var listener: (SpeechEvent) -> Unit = {}
     override var loadListener: (RecognitionLoad) -> Unit = {}
@@ -38,7 +42,7 @@ class SpeechPipeline(
         data object Cut : Input
         data object Flush : Input
         data object Reset : Input
-        class Retranscribe(val utterance: Long, val language: String) : Input
+        class Retranscribe(val utterance: Long, val language: Language) : Input
         class Result(val job: RecognitionJob, val output: RecognitionOutput) : Input
         data object Close : Input
     }
@@ -65,7 +69,10 @@ class SpeechPipeline(
     private var received = 0L
     private var lastLoad = RecognitionLoad()
 
-    private val retention = UtteranceRetention(emit = { listener(it) }, submit = ::enqueue, trace = trace)
+    /** ジョブの番号の採番。区切りと保持が同じものを使い、番号が重ならないようにする。 */
+    private val jobIds = JobIds()
+
+    private val retention = UtteranceRetention(retainUtterances, emit = { listener(it) }, submit = ::enqueue, trace = trace, jobIds = jobIds)
 
     private val segmenter = SpeechSegmenter(
         vad,
@@ -81,6 +88,7 @@ class SpeechPipeline(
         submit = ::enqueue,
         trace = trace,
         retain = retention::retain,
+        jobIds = jobIds,
     )
 
     override var languages: SpeechLanguages
@@ -111,7 +119,7 @@ class SpeechPipeline(
         if (!closed) inbox.put(Input.Reset)
     }
 
-    override fun retranscribe(utterance: Long, language: String) {
+    override fun retranscribe(utterance: Long, language: Language) {
         if (!closed) inbox.put(Input.Retranscribe(utterance, language))
     }
 

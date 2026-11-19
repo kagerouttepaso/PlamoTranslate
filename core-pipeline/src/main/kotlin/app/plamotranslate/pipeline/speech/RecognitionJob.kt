@@ -87,7 +87,8 @@ sealed interface RecognitionJob {
         val utterance: Long,
         override val samples: FloatArray,
         override val purpose: String,
-        val language: String,
+        /** 会話の言語（このジョブの入れ子の型 [Language] と別のもの）。 */
+        val language: app.plamotranslate.llm.Language,
     ) : RecognitionJob {
         override val card get() = NO_CARD
         override val lane get() = RecognitionLane.TRANSCRIBE
@@ -101,6 +102,16 @@ sealed interface RecognitionJob {
         /** カードに属さないジョブの [card]。 */
         const val NO_CARD = -1L
     }
+}
+
+/**
+ * ジョブの番号の採番。1つのエンジンの中で、ジョブを出す部品（[SpeechSegmenter]・[UtteranceRetention]）が同じ採番を使い、
+ * 番号が重ならないようにする（[SpeechPipeline] は番号で待ち時間を引く）。採番は1本のスレッドから行う。
+ */
+class JobIds {
+    private var next = 0L
+
+    fun next(): Long = next++
 }
 
 /** 認識の結果。失敗したら空の結果を返す（確定を待たせ続けないため）。 */

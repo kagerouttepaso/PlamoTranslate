@@ -1,5 +1,7 @@
 package app.plamotranslate.pipeline.speech
 
+import app.plamotranslate.llm.Language
+
 /**
  * 話し終わった1つの発話（docs/設計/会話翻訳.md「音声認識」）。
  * [lang] は話し手の言語のコード（"ja"・"ko"・"en"・"zh" など）。判定できなければ null。
@@ -53,6 +55,9 @@ enum class RetranscribeFailure {
 
     /** 音声認識がまだ無い・もう無い。 */
     UNAVAILABLE,
+
+    /** 認識器がその言語を指定して書き起こせなかった（指定を無視して自分で判定した）。 */
+    UNSUPPORTED,
 }
 
 /**
@@ -97,12 +102,13 @@ interface SpeechEngine : AutoCloseable {
     fun reset()
 
     /**
-     * 確定した発話 [utterance]（[Utterance.id]）を、[language]（言語のコード）として書き起こし直す。利用者が発話の言語の
+     * 確定した発話 [utterance]（[Utterance.id]）を、[language] として書き起こし直す（認識器に渡す言語のコードは、認識器が
+     * [SpeechRecognizer.languageCode] で決める）。利用者が発話の言語の
      * 取り違えを直すときに使う。直近の発話（[SpeechEvent.Released] が届いていないもの）だけ書き起こせる。
      * 結果は [SpeechEvent.Retranscribed] か [SpeechEvent.RetranscribeFailed] で、頼んだ発話ごとに1回届く。同じ発話を待っている間に
      * 重ねて頼んだら、1つの結果にまとめる。[reset] をまたいでも待っている書き起こし直しは続け、[close] の後は届かない。
      */
-    fun retranscribe(utterance: Long, language: String)
+    fun retranscribe(utterance: Long, language: Language)
 
     companion object {
         const val SAMPLE_RATE = 16_000
@@ -169,6 +175,15 @@ interface SpeechRecognizer : AutoCloseable {
      * 結果の [Recognition.source] は、指定した言語で書き起こしたら [LanguageSource.SPECIFIED]。
      */
     fun recognizeAs(samples: FloatArray, language: String?): Recognition = recognize(samples)
+
+    /**
+     * 会話の言語 [language] を、この認識器に指定する言語のコード（[recognizeAs]）にする。既定は言語のコードで、中国語は字体によらず
+     * `zh`。言語の扱いが違う認識器は上書きする（SenseVoice は繁体字の中国語を広東語 `yue` として聞く）。
+     */
+    fun languageCode(language: Language): String = when (language) {
+        Language.ZH, Language.ZH_HANT -> "zh"
+        else -> language.code
+    }
 
     /**
      * 書き起こさずに言語のスコアを出せるか（[scores]）。出せる認識器（言語の識別を前に置く組み立て）は、セグメンターが言語の判定を

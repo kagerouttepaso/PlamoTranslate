@@ -1,5 +1,6 @@
 package app.plamotranslate.pipeline.speech
 
+import app.plamotranslate.llm.Language
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -22,7 +23,7 @@ class UtteranceRetentionTest {
     fun 直近の発話だけ取り置き古いものは手放して知らせる() {
         (0L..3L).forEach(::final)
         assertEquals(listOf(SpeechEvent.Released(0)), events)
-        retention.retranscribe(0, "ko")
+        retention.retranscribe(0, Language.KO)
         assertEquals(SpeechEvent.RetranscribeFailed(0, RetranscribeFailure.RELEASED), events.last())
         assertTrue(jobs.isEmpty())
     }
@@ -30,9 +31,9 @@ class UtteranceRetentionTest {
     @Test
     fun 取り置いた音声を指定した言語で書き起こし直す() {
         final(5)
-        retention.retranscribe(5, "ko")
+        retention.retranscribe(5, Language.KO)
         val job = jobs.single()
-        assertEquals("ko", job.language)
+        assertEquals(Language.KO, job.language)
         assertEquals(5f, job.samples.first())
         answer(job, "가나다라")
         val done = events.last() as SpeechEvent.Retranscribed
@@ -42,7 +43,7 @@ class UtteranceRetentionTest {
     @Test
     fun 何も聞き取れなければ書き起こし直せなかったと知らせる() {
         final(1)
-        retention.retranscribe(1, "ko")
+        retention.retranscribe(1, Language.KO)
         answer(jobs.single(), "")
         assertEquals(SpeechEvent.RetranscribeFailed(1, RetranscribeFailure.NOTHING_HEARD), events.last())
     }
@@ -50,8 +51,8 @@ class UtteranceRetentionTest {
     @Test
     fun 待っている間に重ねて頼まれたら1つの結果にまとめる() {
         final(1)
-        retention.retranscribe(1, "ko")
-        retention.retranscribe(1, "ko")
+        retention.retranscribe(1, Language.KO)
+        retention.retranscribe(1, Language.KO)
         assertEquals(1, jobs.size)
         answer(jobs.single(), "가")
         assertEquals(1, events.count { it is SpeechEvent.Retranscribed })
@@ -60,7 +61,7 @@ class UtteranceRetentionTest {
     @Test
     fun 始め直したら待っている書き起こし直しを出し直し前のジョブの結果は使わない() {
         final(1)
-        retention.retranscribe(1, "ko")
+        retention.retranscribe(1, Language.KO)
         val before = jobs.single()
         retention.reset()
         val after = jobs.last()
@@ -76,7 +77,25 @@ class UtteranceRetentionTest {
         retention.retain(9, FloatArray(10))
         retention.reset()
         retention.finalEmitted(Utterance(9, "가", "ko", 0, 100, 0))
-        retention.retranscribe(9, "ja")
+        retention.retranscribe(9, Language.JA)
         assertEquals(SpeechEvent.RetranscribeFailed(9, RetranscribeFailure.RELEASED), events.last())
+    }
+
+    @Test
+    fun 指定した言語で書き起こせなかった結果は書き起こせなかったと知らせる() {
+        final(1)
+        retention.retranscribe(1, Language.KO)
+        retention.onResult(jobs.single(), RecognitionOutput.Transcribed(Recognition("あいう", "ja", source = LanguageSource.JUDGED)))
+        assertEquals(SpeechEvent.RetranscribeFailed(1, RetranscribeFailure.UNSUPPORTED), events.last())
+    }
+
+    @Test
+    fun 保持する数が0なら保持せず破棄のイベントも出さない() {
+        val none = UtteranceRetention(capacity = 0, emit = { events += it }, submit = { jobs += it as RecognitionJob.Retranscribe })
+        none.retain(1, FloatArray(10))
+        none.finalEmitted(Utterance(1, "가", "ko", 0, 100, 0))
+        assertTrue(events.isEmpty())
+        none.retranscribe(1, Language.JA)
+        assertEquals(listOf<SpeechEvent>(SpeechEvent.RetranscribeFailed(1, RetranscribeFailure.RELEASED)), events)
     }
 }

@@ -1,5 +1,7 @@
 package app.plamotranslate.pipeline.speech
 
+import app.plamotranslate.llm.Language
+
 /**
  * 確定した発話の音声の取り置きと、書き起こし直し（docs/設計/会話翻訳.md「カードの言語の取り違えを直す」）。
  * 利用者が確定したカードの言語の取り違えに気づいて直すのは直近の数枚なので、直近 [capacity] 枚の音声だけをメモリに持つ
@@ -11,16 +13,19 @@ package app.plamotranslate.pipeline.speech
  * （[SpeechPipeline]）。[trace] は経過を書く口（話した言葉を含む）。
  */
 class UtteranceRetention(
+    /** 保持する発話の数。0 なら保持しない（書き起こし直しを使わない、テキスト翻訳の音声入力など）。 */
     private val capacity: Int = KEEP_UTTERANCES,
     private val emit: (SpeechEvent) -> Unit,
     private val submit: (RecognitionJob) -> Unit,
     private val trace: (() -> String) -> Unit = {},
     private val clock: () -> Long = System::nanoTime,
+    /** ジョブの番号の採番（区切りと同じものを渡す）。 */
+    private val jobIds: JobIds = JobIds(),
 ) {
     private class Kept(val id: Long, val audio: FloatArray, val startMs: Long, val durationMs: Long)
 
     /** 書き起こし直しを待っている発話。[jobId] は出している書き起こし直しのジョブ。 */
-    private class Pending(val language: String, val startedAt: Long, var jobId: Long)
+    private class Pending(val language: Language, val startedAt: Long, var jobId: Long)
 
     /** カードを閉じたときに渡された音声（確定が出るまで）。 */
     private val closing = HashMap<Long, FloatArray>()
@@ -30,11 +35,9 @@ class UtteranceRetention(
 
     private val pending = HashMap<Long, Pending>()
 
-    /** ジョブの番号。区切りのジョブと混ざらないよう負の数にする（結果はジョブの型で振り分ける）。 */
-    private var nextJob = -1L
-
     /** 閉じたカード [id] の音声。確定（[finalEmitted]）が出たら取り置く。 */
     fun retain(id: Long, audio: FloatArray) {
+        if (capacity == 0) return
         closing[id] = audio
     }
 
@@ -52,7 +55,7 @@ class UtteranceRetention(
      * 発話 [id] を [language] として書き起こし直す。音声を持っていなければ、すぐ [RetranscribeFailure.RELEASED] を返す。
      * 同じ発話を待っている間に重ねて頼まれたら、1つの結果にまとめる（最初の言語のまま）。
      */
-    fun retranscribe(id: Long, language: String) {
+    fun retranscribe(id: Long, language: Language) {
         if (id in pending) return
         val audio = kept.firstOrNull { it.id == id }?.audio
         if (audio == null) {
@@ -73,11 +76,13 @@ class UtteranceRetention(
         val k = kept.firstOrNull { it.id == job.utterance }
         when {
             r.text.isEmpty() -> emit(SpeechEvent.RetranscribeFailed(job.utterance, RetranscribeFailure.NOTHING_HEARD))
+            // 指定した言語で書き起こせなかった結果に、指定した言語を付けない（原文と言語が食い違うカードを作らない）
+            r.source != LanguageSource.SPECIFIED -> emit(SpeechEvent.RetranscribeFailed(job.utterance, RetranscribeFailure.UNSUPPORTED))
             // 待っている間に手放した（新しい確定が続いた）。結果はできているので返す
             else -> emit(
                 SpeechEvent.Retranscribed(
                     job.utterance,
-                    Utterance(job.utterance, r.text, p.language, k?.startMs ?: 0, k?.durationMs ?: 0, (clock() - p.startedAt) / 1_000_000),
+                    Utterance(job.utterance, r.text, r.lang, k?.startMs ?: 0, k?.durationMs ?: 0, (clock() - p.startedAt) / 1_000_000),
                 ),
             )
         }
@@ -98,7 +103,7 @@ class UtteranceRetention(
     }
 
     private fun submitJob(id: Long, p: Pending, audio: FloatArray) {
-        p.jobId = nextJob--
+        p.jobId = jobIds.next()
         submit(RecognitionJob.Retranscribe(p.jobId, id, audio, PURPOSE, p.language))
     }
 

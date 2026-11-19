@@ -272,18 +272,18 @@ class ConversationSessionTest {
         val first = s.handle(final("가나다", lang = "ja", id = 7)).filterIsInstance<Effect.TranslateFinal>().single()
         s.handle(Event.FinalDone(first.turn.id, "가나다", 100))
         val turn = s.turns.single()
-        assertTrue(turn.swappable)
+        assertEquals(SwapState.AVAILABLE, turn.swap)
 
         val asked = s.handle(Event.LanguageSwapped(turn.id))
-        assertEquals(listOf(Effect.Retranscribe(7, "ko")), asked)
+        assertEquals(listOf(Effect.Retranscribe(7, Language.KO)), asked)
         // 向き（話し手）はその場で替わり、訳は空になる。原文は届くまで前のまま
         val swapping = s.turns.single()
         assertEquals(Direction(Language.KO, Language.JA, mine = false), swapping.direction)
         assertEquals("가나다", swapping.original)
         assertEquals("", swapping.translation)
-        assertEquals(turn.copy(swappable = true), swapping.swappedFrom?.copy(swappable = true))
+        assertEquals(turn, swapping.swappedFrom)
         // 書き起こし直している間は入れ替えられない（もう一度スライドしても頼み直さない）
-        assertEquals(false, swapping.swappable)
+        assertEquals(SwapState.REWRITING, swapping.swap)
         assertTrue(s.handle(Event.LanguageSwapped(turn.id)).isEmpty())
 
         val redo = s.handle(Event.Speech(SpeechEvent.Retranscribed(7, Utterance(7, "가나다라", "ko", 0, 1000, 300))))
@@ -291,7 +291,7 @@ class ConversationSessionTest {
         assertEquals("가나다라", redone.original)
         assertEquals(Direction(Language.KO, Language.JA, mine = false), redone.direction)
         assertEquals(null, redone.swappedFrom)
-        assertTrue(redone.swappable)
+        assertEquals(SwapState.AVAILABLE, redone.swap)
         assertEquals(listOf("가나다라"), redo.filterIsInstance<Effect.TranslateFinal>().map { it.turn.original })
     }
 
@@ -303,7 +303,7 @@ class ConversationSessionTest {
         val turn = s.turns.single()
         s.handle(Event.LanguageSwapped(turn.id))
         s.handle(Event.Speech(SpeechEvent.RetranscribeFailed(3, RetranscribeFailure.NOTHING_HEARD)))
-        assertEquals(turn.copy(swappable = true), s.turns.single())
+        assertEquals(turn, s.turns.single())
     }
 
     @Test
@@ -323,15 +323,44 @@ class ConversationSessionTest {
         val s = ConversationSession(PartnerMode(Language.KO))
         s.handle(final("こんにちは", id = 1))
         s.handle(Event.Speech(SpeechEvent.Released(1)))
-        assertEquals(false, s.turns.single().swappable)
+        assertEquals(SwapState.EXPIRED, s.turns.single().swap)
         assertTrue(s.handle(Event.LanguageSwapped(s.turns.single().id)).isEmpty())
 
         val auto = ConversationSession(PartnerMode.AUTO)
         auto.handle(final("こんにちは", id = 2))
-        assertEquals(false, auto.turns.single().swappable)
+        assertEquals(SwapState.UNAVAILABLE, auto.turns.single().swap)
         assertTrue(auto.handle(Event.LanguageSwapped(auto.turns.single().id)).isEmpty())
         // 相手が決まったら入れ替えられる
         auto.handle(final("안녕하세요", lang = "ko", id = 3))
-        assertTrue(auto.turns.first().swappable)
+        assertEquals(SwapState.AVAILABLE, auto.turns.first().swap)
+    }
+
+    @Test
+    fun 書き起こし直しを待っている間に相手を選び直しても前の原文は訳さない() {
+        val s = ConversationSession(PartnerMode(Language.KO))
+        // 相手の発話（韓国語と判定）を、自分の発話（日本語）に入れ替えた
+        val first = s.handle(final("こんにちは", lang = "ko", id = 1)).filterIsInstance<Effect.TranslateFinal>().single()
+        s.handle(Event.FinalDone(first.turn.id, "こんにちは", 100))
+        s.handle(Event.LanguageSwapped(first.turn.id))
+        assertTrue(s.turns.single().direction.mine)
+        // 待っている間に相手の言語を選び直す（自分の発話は新しい相手へ訳し直す対象）
+        val changed = s.handle(Event.ModeChanged(PartnerMode(Language.EN)))
+        assertTrue(changed.filterIsInstance<Effect.TranslateFinal>().isEmpty())
+        // 書き起こし直しが届いたら、今の相手の言語へ訳す
+        val redo = s.handle(Event.Speech(SpeechEvent.Retranscribed(1, Utterance(1, "こんにちは。", "ja", 0, 1000, 300))))
+        assertEquals(listOf(Language.EN), redo.filterIsInstance<Effect.TranslateFinal>().map { it.turn.direction.target })
+    }
+
+    @Test
+    fun 書き起こし直せずに戻したカードは今の相手の言語へ訳す() {
+        val s = ConversationSession(PartnerMode(Language.KO))
+        val first = s.handle(final("こんにちは", id = 1)).filterIsInstance<Effect.TranslateFinal>().single()
+        s.handle(Event.FinalDone(first.turn.id, "안녕하세요", 100))
+        s.handle(Event.LanguageSwapped(first.turn.id))
+        s.handle(Event.ModeChanged(PartnerMode(Language.EN)))
+        val back = s.handle(Event.Speech(SpeechEvent.RetranscribeFailed(1, RetranscribeFailure.NOTHING_HEARD)))
+        val turn = s.turns.single()
+        assertEquals(Direction(Language.JA, Language.EN, mine = true), turn.direction)
+        assertEquals(listOf(Language.EN), back.filterIsInstance<Effect.TranslateFinal>().map { it.turn.direction.target })
     }
 }
