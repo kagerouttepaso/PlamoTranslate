@@ -92,10 +92,30 @@ interface VoiceActivity : AutoCloseable {
 }
 
 /**
- * 認識器が返したそのままの結果。[lang] は判定した言語のコード（判定なしは null）。
+ * 認識器が返したそのままの結果。[lang] は言語のコード（無ければ null）、[source] はその言語の出どころ。
  * [breaks] は、認識した文の中の切れ目（句点・読点）が、渡した音声の何サンプル目に当たるか。認識器が時刻を返さなければ空。
  */
-data class Recognition(val text: String, val lang: String?, val breaks: List<SpeechBreak> = emptyList())
+data class Recognition(
+    val text: String,
+    val lang: String?,
+    val breaks: List<SpeechBreak> = emptyList(),
+    val source: LanguageSource = LanguageSource.JUDGED,
+)
+
+/**
+ * 認識の結果の言語の出どころ。話し手の根拠になるのは、音声から判定した言語（[JUDGED]）だけ
+ * （指定した言語は指定の写し、文字の種類からの推定は音声を見ていない）。
+ */
+enum class LanguageSource {
+    /** 認識器か言語の識別が、音声から判定した（SenseVoice の書き起こし、識別してから書き起こした結果）。 */
+    JUDGED,
+
+    /** 指定した言語として書き起こした。 */
+    SPECIFIED,
+
+    /** 書き起こした文字の種類から推定した（[ScriptLanguage]）。 */
+    GUESSED,
+}
 
 /** 認識した文の切れ目。[sentence] が true なら文の終わり（句点・疑問符・感嘆符）、false なら読点。 */
 data class SpeechBreak(val at: Int, val sentence: Boolean)
@@ -113,7 +133,10 @@ interface SpeechRecognizer : AutoCloseable {
      */
     fun recognize(samples: FloatArray, languages: SpeechLanguages, fallback: String?): Recognition = recognize(samples, languages)
 
-    /** [language]（言語のコード）として書き起こす。言語を指定できない認識器は無視する。null なら指定しない。 */
+    /**
+     * [language]（言語のコード）として書き起こす。null なら指定しない。言語を指定できない認識器は無視する。
+     * 結果の [Recognition.source] は、指定した言語で書き起こしたら [LanguageSource.SPECIFIED]。
+     */
     fun recognizeAs(samples: FloatArray, language: String?): Recognition = recognize(samples)
 
     /**

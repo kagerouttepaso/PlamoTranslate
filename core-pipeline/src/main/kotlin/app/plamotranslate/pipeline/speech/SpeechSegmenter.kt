@@ -37,6 +37,9 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  * 区切る位置までの残りをつなぐ。書き起こしの重いモデル（[heavy]、Qwen3-ASR）には、話し始めの前に足した音声のうち、
  * 声の始まり（[SpeechOnset]）より前を渡さない（書き起こしの時間は音声の長さに比例する）。
  *
+ * カードの表示の言語（途中結果と確定の言語）は、話し手の時系列の [SpeakerTrack.label]。文・区切った残り・途中結果の書き起こしの
+ * 言語のうち、認識器が音声から判定したもの（[LanguageSource.JUDGED]）も根拠として時系列に渡す（[noteTranscript]）。
+ *
  * 判断は部品に分ける：話し手は [SpeakerJudge]、区切る位置は [CutPoint]、認識した文字の聞き違いの判定は [TranscriptCleanup]、
  * ジョブの順番は [RecognitionQueue]。状態を持つので、すべての呼び出しは1本のスレッドから行う（[SpeechPipeline]）。
  * [trace] はセグメンターの経過を書く口（話した言葉を含むので、渡す側が詳しい記録を残すとき（デバッグ版の既定、正式版は
@@ -392,6 +395,7 @@ class SpeechSegmenter(
     private fun transcribePhrase(card: Card, phrase: Phrase, recognition: Recognition?) {
         fun done(r: Recognition) {
             phrase.recognition = r
+            noteTranscript(card, phrase, r)
             if (card === open) showStitched(card)
             finishIfReady(card)
         }
@@ -456,7 +460,7 @@ class SpeechSegmenter(
         if (card !== open) return
         // 仮の言語で書き起こした途中結果は古いので、決めた言語で書き起こし直す
         card.tail = null
-        if (card.lastText.isEmpty()) send(card, SpeechEvent.Partial("", lang))
+        if (card.lastText.isEmpty()) send(card, SpeechEvent.Partial("", card.track.label()))
         sinceLastPartial = 0
         requestPartial(card)
     }
@@ -554,6 +558,7 @@ class SpeechSegmenter(
             if (rest.lang != null) {
                 transcribe(card, rest, RecognitionPriority.FINAL, "確定の残り", rest.lang) { r ->
                     rest.recognition = r
+                    noteTranscript(card, rest, r)
                     finishIfReady(card)
                 }
             } else scores(card, rest.from, rest.end, RecognitionPriority.PHRASE_LANGUAGE, PURPOSE_REST) { scores, recognition ->
@@ -561,11 +566,13 @@ class SpeechSegmenter(
                 rest.lang = card.lang ?: fallbackLang(card)
                 if (recognition != null) {
                     rest.recognition = recognition
+                    noteTranscript(card, rest, recognition)
                     finishIfReady(card)
                     return@scores
                 }
                 transcribe(card, rest, RecognitionPriority.FINAL, "確定の残り", rest.lang) { r ->
                     rest.recognition = r
+                    noteTranscript(card, rest, r)
                     finishIfReady(card)
                 }
             }
@@ -576,13 +583,18 @@ class SpeechSegmenter(
         finishIfReady(card)
     }
 
-    /** 区切ると決めたカードの書き起こしがすべて届いていれば、確定を出す。言語はカードの話し手（決まっていなければ書き起こしの言語）。 */
+    /**
+     * 区切ると決めたカードの書き起こしがすべて届いていれば、確定を出す。言語はカードの表示の言語（[SpeakerTrack.label]。
+     * 決まっていなければ書き起こしの言語）。
+     */
     private fun finishIfReady(card: Card) {
         val closing = card.closing ?: return
         if (card.done || closing.parts.any { it.recognition == null }) return
         val r = TranscriptJoin.stitch(closing.parts.mapNotNull { it.recognition })
-        val lang = card.lang ?: r.lang
+        val label = card.track.label(closing.end)
+        val lang = label ?: r.lang
         val waitedMs = (clock() - closing.startedAt) / 1_000_000
+        if (label != card.lang) trace { "カードの表示の言語 $label（書き起こしの言語。区間と文の全体では ${card.lang}）" }
         trace { "確定（${closing.reason}）${at(closing.start)}〜${at(closing.end)}: [$lang] ${r.text} ／ 直前の途中 ${card.lastText}（区切ってから${waitedMs}ms）" }
         if (r.text.isNotEmpty()) {
             send(
@@ -627,6 +639,7 @@ class SpeechSegmenter(
             val costSamples = ((clock() - submittedAt) / 1_000_000 * SAMPLE_RATE / 1000).toInt()
             partialInterval = maxOf(MIN_PARTIAL_INTERVAL, costSamples * if (heavy) HEAVY_PARTIAL_COST_RATIO else PARTIAL_COST_RATIO)
             if (card !== open || card.lang != lang) return@transcribe
+            noteTranscript(card, phrase, r)
             lastPartial = r
             lastPartialStart = fromAbs
             card.tail = r
@@ -654,11 +667,24 @@ class SpeechSegmenter(
         showPartial(card, TranscriptJoin.stitch(parts))
     }
 
-    /** 途中結果を知らせる。同じ文字を続けて出さない（話し終わってから区切るまでの無音の間は同じ文字が続く）。言語はカードの話し手。 */
+    /**
+     * 途中結果を知らせる。同じ文字を続けて出さない（話し終わってから区切るまでの無音の間は同じ文字が続く）。
+     * 言語はカードの表示の言語（[SpeakerTrack.label]）。
+     */
     private fun showPartial(card: Card, r: Recognition) {
         if (r.text.isEmpty() || r.text == card.lastText) return
         card.lastText = r.text
-        send(card, SpeechEvent.Partial(r.text, card.lang ?: r.lang))
+        send(card, SpeechEvent.Partial(r.text, card.track.label() ?: r.lang))
+    }
+
+    /**
+     * カードの [phrase] の範囲を書き起こした結果を、話し手の時系列に書き起こしの言語の根拠として渡す。根拠になるのは、
+     * 認識器が音声から判定した言語（[LanguageSource.JUDGED]）だけ。指定した言語で書き起こした結果（Qwen3-ASR）の言語は
+     * 指定の写しなので、根拠にしない（同じ頭の前の根拠は消える）。
+     */
+    private fun noteTranscript(card: Card, phrase: Phrase, r: Recognition) {
+        val judged = LanguageEvidence.of(r, languages)?.takeIf { r.source == LanguageSource.JUDGED }
+        card.track.transcribed(phrase.from, phrase.end, judged)
     }
 
     /**

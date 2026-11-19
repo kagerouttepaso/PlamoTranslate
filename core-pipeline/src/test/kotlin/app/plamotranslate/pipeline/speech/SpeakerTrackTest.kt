@@ -140,4 +140,37 @@ class SpeakerTrackTest {
         val unknown = track().apply { close() }
         assertEquals(Verdict.Assign("en"), unknown.phrase(0.0, 1.0, "en"))
     }
+
+    @Test
+    fun 書き起こしの言語が十分な長さなら表示の言語は書き起こしの言語にする() {
+        val t = sureJa()
+        t.transcribed(s(0.0), s(3.0), "ko")
+        assertEquals("ko", t.label(Long.MAX_VALUE))
+        // 区切る位置と書き起こす言語の指定に使う話し手は、区間の根拠のまま
+        assertEquals("ja", t.lang)
+    }
+
+    @Test
+    fun 短いか半分に届かない書き起こしの言語では区間で決めた話し手のまま() {
+        val short = sureJa().apply { transcribed(s(0.0), s(1.5), "ko") }
+        assertEquals("ja", short.label(Long.MAX_VALUE))
+        // 2つの言語が同じ長さなら決めない（区間で決めた話し手が無ければ null）
+        val even = track().apply {
+            transcribed(s(0.0), s(2.5), "ko")
+            transcribed(s(2.5), s(5.0), "ja")
+        }
+        assertEquals(null, even.label(Long.MAX_VALUE))
+    }
+
+    @Test
+    fun 同じ頭から書き起こし直した根拠は前の根拠を置き換え区切った後ろは数えない() {
+        val t = sureJa()
+        // 途中結果は同じ頭から伸びていく。根拠にならない書き起こしは、同じ頭の前の根拠を消す
+        t.transcribed(s(0.0), s(3.0), "ko")
+        t.transcribed(s(0.0), s(4.0), null)
+        assertEquals("ja", t.label(Long.MAX_VALUE))
+        // 区切る位置（2秒）より後ろから始まる根拠は、このカードのものではない
+        t.transcribed(s(2.0), s(6.0), "ko")
+        assertEquals("ja", t.label(s(2.0)))
+    }
 }

@@ -25,6 +25,15 @@ package app.plamotranslate.pipeline.speech
  *   まだ確かでなければ、届いた文で決める。
  * 決められなかった区間（null）は、連続区間を伸ばしも切りもしない（覆った長さにも数えないので、離れた2回の判定は確かにならない）。
  * 境界が見つからなかった連続区間（[seamMissed]）は聞き違いとして、確かな根拠から外す。
+ * - 書き起こしの言語（[transcribed]）：言語を自分で判定する認識器（SenseVoice）が、カードの文・区切った残り・途中結果を
+ *   書き起こしたときに判定した言語。区間（1.5秒）より長い音声の判定なので、カードの表示の言語（[label]）では区間より先にする
+ *   （2026-11-19、韓国語の話し手の1.5秒の区間を SenseVoice が約4割日本語と判定し、同じカードの全体は8枚とも韓国語と判定した）。
+ *   区切る位置と書き起こす言語の指定には使わない：区切った後のカードは1人の話し（の大部分）なので、カードの範囲の多数決を
+ *   表示の言語に使えるが、区切る前の範囲の多数決は、2人をまたぐと少ない方の話し手を消す（設計の原則の7）。
+ *
+ * 根拠の優先度は用途ごとに決まる：区切る位置と [lang]（書き起こす言語の指定）は 区間の連続区間 ＞ 文の全体、
+ * 表示の言語（[label]）は 書き起こしの言語 ＞ [lang]。確定したカードの言語の利用者の指定は、会話の中核
+ * （`ConversationSession`）が受ける（カードを閉じた後なので、この時系列は無い）。
  *
  * 位置は聞き始めからのサンプル数。[start] はカードの始まり、[minTurn] はサンプル数。
  */
@@ -158,6 +167,37 @@ class SpeakerTrack(private val start: Long, private val minTurn: Long) {
         lastAgreeFrom = maxOf(lastAgreeFrom, from)
         return Verdict.Keep
     }
+
+    /** 書き起こしの言語の根拠。頭の位置ごとに1つ（同じ頭から書き起こし直したら、新しい方に置き換える）。 */
+    private class Transcript(val to: Long, val lang: String)
+
+    private val transcripts = HashMap<Long, Transcript>()
+
+    /**
+     * [from]〜[to] を書き起こし、認識器が言語を [judged] と判定した（話し手の根拠にならなければ null）。同じ頭の前の根拠を置き換える：
+     * 途中結果は同じ頭から伸びていき、文や区切った残りは、同じ頭の途中結果を書き起こし直したものになる。
+     */
+    fun transcribed(from: Long, to: Long, judged: String?) {
+        if (judged == null) transcripts.remove(from) else transcripts[from] = Transcript(to, judged)
+    }
+
+    /**
+     * カードの表示の言語（[end] までの範囲）。書き起こしの言語の根拠を音声の長さで数え、一番長い言語が [minTurn] 以上で、
+     * 根拠の半分を超えればその言語。届かなければ [lang]（区間と文の全体で決めた話し手）。
+     */
+    fun label(end: Long): String? {
+        val totals = HashMap<String, Long>()
+        for ((from, t) in transcripts) {
+            if (from >= end) continue
+            val length = minOf(t.to, end) - from
+            if (length > 0) totals[t.lang] = (totals[t.lang] ?: 0) + length
+        }
+        val best = totals.maxByOrNull { it.value } ?: return lang
+        return if (best.value >= minTurn && best.value * 2 > totals.values.sum()) best.key else lang
+    }
+
+    /** 今までの根拠でのカードの表示の言語（話し中のカード）。 */
+    fun label(): String? = label(Long.MAX_VALUE)
 
     /** 区間を連続区間に足す。最後の連続区間と同じ言語なら伸ばし、違えば新しい連続区間を始める。 */
     private fun extend(judged: String, from: Long, to: Long): Run {

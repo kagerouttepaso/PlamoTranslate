@@ -75,17 +75,19 @@ class IdentifiedRecognizer(
      */
     override fun recognize(samples: FloatArray, languages: SpeechLanguages, fallback: String?): Recognition {
         val groups = languages.groups
-        val lang = SpeakerJudge.decide(scores(samples, languages), languages.copy(primary = null), 0f)
-            ?: fallback?.takeIf { groups == null || it in groups }
-        return recognizeAs(samples, lang, groups)
+        val identified = SpeakerJudge.decide(scores(samples, languages), languages.copy(primary = null), 0f)
+        if (identified != null) return recognizeAs(samples, identified, groups, LanguageSource.JUDGED)
+        return recognizeAs(samples, fallback?.takeIf { groups == null || it in groups }, groups, LanguageSource.SPECIFIED)
     }
 
     /** 言語が分かっているとき（話し手の言語）。識別を省いて、その言語として書き起こす。 */
-    override fun recognizeAs(samples: FloatArray, language: String?): Recognition = recognizeAs(samples, language, null)
+    override fun recognizeAs(samples: FloatArray, language: String?): Recognition =
+        recognizeAs(samples, language, null, LanguageSource.SPECIFIED)
 
-    private fun recognizeAs(samples: FloatArray, lang: String?, groups: Set<String>?): Recognition {
+    /** [lang] として書き起こす（[source] はその言語の出どころ）。言語が無ければ指定せずに書き起こし、文字の種類から推定する。 */
+    private fun recognizeAs(samples: FloatArray, lang: String?, groups: Set<String>?, source: LanguageSource): Recognition {
         val r = recognizer.recognizeAs(samples, lang)
-        return r.copy(lang = lang ?: ScriptLanguage.guess(r.text, groups))
+        return if (lang != null) r.copy(lang = lang, source = source) else r.copy(lang = ScriptLanguage.guess(r.text, groups), source = LanguageSource.GUESSED)
     }
 
     override val identifies: Boolean get() = true

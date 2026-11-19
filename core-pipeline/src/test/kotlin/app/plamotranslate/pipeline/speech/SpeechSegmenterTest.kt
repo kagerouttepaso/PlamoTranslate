@@ -651,4 +651,44 @@ class SpeechSegmenterTest {
     companion object {
         private const val FRAME = SAMPLE_RATE / 10
     }
+
+    /**
+     * 1.5秒の区間では韓国語を日本語と聞き違え（それらしい仮名を書く）、長い音声なら韓国語と判定する認識器
+     * （作者の会話の録音の SenseVoice。話し中の区間の判定がカードの言語を日本語にしても、カードの書き起こしは韓国語だった）。
+     */
+    private class ShortWindowMishearing(private val inner: SpeechRecognizer) : SpeechRecognizer {
+        override fun recognize(samples: FloatArray): Recognition {
+            val r = inner.recognize(samples)
+            return if (r.lang == "ko" && samples.size <= SAMPLE_RATE * 16 / 10) Recognition("こういうこと", "ja") else r
+        }
+
+        override fun close() = Unit
+    }
+
+    @Test
+    fun 区間が言語を聞き違えてもカードの書き起こしの言語で確定と途中結果の言語を決める() {
+        val s = Harness(ShortWindowMishearing(FakeRecognizer(::soundOf)), profile, heavy = false, languages = SpeechLanguages(setOf("ja", "ko")))
+        val events = s.feed(Sound.KO to 6.0, Sound.SILENCE to 3.0)
+        val card = finals(events).single()
+        assertEquals("ko", card.lang)
+        assertTrue(card.text.all { it == '가' })
+        // 話し中のカードの言語（区間の判定）は日本語になっていた
+        assertTrue(s.traces.toString(), s.traces.any { it.startsWith("カードの言語 ja") })
+        // 文字のある途中結果は、書き起こしの言語が届いてからは韓国語として出す
+        assertEquals("ko", events.filterIsInstance<SpeechEvent.Partial>().last { it.text.isNotEmpty() }.lang)
+    }
+
+    /** 結果の言語を指定の写し（[LanguageSource.SPECIFIED]）として返す認識器（Qwen3-ASR のように言語を指定して書き起こすもの）。 */
+    private class SpecifiedLanguage(private val inner: SpeechRecognizer) : SpeechRecognizer {
+        override fun recognize(samples: FloatArray) = inner.recognize(samples).copy(source = LanguageSource.SPECIFIED)
+        override fun close() = Unit
+    }
+
+    @Test
+    fun 指定した言語で書き起こした結果の言語はカードの言語の根拠にしない() {
+        val recognizer = SpecifiedLanguage(ShortWindowMishearing(FakeRecognizer(::soundOf)))
+        val s = Harness(recognizer, profile, heavy = false, languages = SpeechLanguages(setOf("ja", "ko")))
+        // 区間は日本語と聞き違え、書き起こしは韓国語。書き起こしの言語が指定の写しなら、区間で決めた日本語のまま
+        assertEquals("ja", finals(s.feed(Sound.KO to 6.0, Sound.SILENCE to 3.0)).single().lang)
+    }
 }
