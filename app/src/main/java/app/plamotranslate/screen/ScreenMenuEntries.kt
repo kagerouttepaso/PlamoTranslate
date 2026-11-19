@@ -45,13 +45,13 @@ internal class ScreenMenuEntries(
         // 画面翻訳は日本語へ訳すので、日本語は原文の候補に出さない
         val source = preferences.source
         fun sourceOption(lang: Language?) = Option(lang.screenMenuName, checked = lang == source) { chooseSource(lang) }
-        val otherChosen = source in SCREEN_OTHER_SOURCES
+        val other = source?.takeIf { it in SCREEN_OTHER_SOURCES }
         add(MenuEntry.Choice(
             "原文の言語",
             (listOf<Language?>(null) + SCREEN_QUICK_SOURCES).map(::sourceOption),
-            // 選んだ言語の名前に替えると、長い名前（アゼルバイジャン語など）で行が2段になるので、名前は替えずに塗りで示す。
-            // どの言語かは、フローティングボタンのバッジとページの中で分かる
-            more = OptionPage("他の言語", checked = otherChosen, "原文の言語（他の言語）") {
+            // サブメニューの言語を選んでいれば、その言語の名前で選択中の表示にする（行はすでに幅いっぱいで、
+            // この選択肢はいつも2段目に1つだけ置かれるので、長い名前でも段の数は変わらない）
+            more = OptionPage(other?.label ?: "他の言語", checked = other != null, "原文の言語（他の言語）") {
                 SCREEN_OTHER_SOURCES.map(::sourceOption)
             },
         ))
