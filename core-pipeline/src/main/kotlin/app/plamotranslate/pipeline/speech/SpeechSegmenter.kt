@@ -106,8 +106,8 @@ class SpeechSegmenter(
     private var inGap = false
     private var gapSamples = 0
 
-    /** 直前のカードの話し手の言語。決められない音声は、前の話し手として扱う。 */
-    private var lastLang: String? = null
+    /** カードをまたぐ話し手（前のカードの話し手と、決められない音声に使う言語）。 */
+    private val handoff = SpeakerHandoff()
 
     /** 前の途中結果を頼んでから、話している音声がどれだけ増えたか。 */
     private var sinceLastPartial = 0
@@ -267,7 +267,7 @@ class SpeechSegmenter(
         received = 0
         bufferStart = 0
         speechStart = 0
-        lastLang = null
+        handoff.reset()
         requests.resetPacing()
         startSpeech()
     }
@@ -309,7 +309,7 @@ class SpeechSegmenter(
     }
 
     /** 決められない音声に使う言語：カードの言語、前の話し手、自分の言語の順。 */
-    private fun fallbackLang(card: Card): String? = card.lang ?: lastLang ?: languages.primary
+    private fun fallbackLang(card: Card): String? = handoff.fallback(card.lang, languages)
 
     /**
      * 文が終わった。[end] までのまだ書き起こしていない音声を1つの文にし、文の全体で話し手を決めてから書き起こす（[judgePhrase]）。
@@ -344,16 +344,7 @@ class SpeechSegmenter(
      * 閉じると決めたカードでは区切らない（確定を待たせない）。
      */
     private fun judgePhrase(card: Card, phrase: Phrase, judged: String?, recognition: Recognition?) {
-        val before = card.lang
-        when (val verdict = card.track.phrase(phrase.from, phrase.end, judged)) {
-            is SpeakerTrack.Verdict.Cut -> {
-                // 決めた話し手を文に持たせて次のカードへ渡す（同じ音声をもう一度判定しない）
-                phrase.lang = verdict.lang
-                cutAt(rel(verdict.at), "話し手の交代（文：$before→${verdict.lang}）", lang = verdict.lang, sure = true)
-                return
-            }
-            else -> follow(card, verdict)
-        }
+        if (follow(card, card.track.phrase(phrase.from, phrase.end, judged), phrase)) return
         phrase.lang = card.lang ?: fallbackLang(card)
         transcribePhrase(card, phrase, recognition)
     }
@@ -389,9 +380,7 @@ class SpeechSegmenter(
     private fun watchLanguage(card: Card) {
         if (buffer.size < speechStart + cardLangSamples) return
         if (card.watchPending || card.seamPending) return
-        if (card.lang == null && buffer.size - speechStart >= CARD_LANG_MAX_SAMPLES) {
-            fallbackLang(card)?.let { setCardLang(card, it, sure = false) }
-        }
+        handoff.provisional(card.track, buffer.size - speechStart, languages)?.let { setCardLang(card, it, sure = false) }
         val from = if (card.lang == null) speechStart else (buffer.size - LANG_WINDOW_SAMPLES).coerceAtLeast(speechStart)
         val fromAbs = abs(from)
         val toAbs = abs(buffer.size)
@@ -406,13 +395,23 @@ class SpeechSegmenter(
         }
     }
 
-    /** 話し手の時系列の判定を実行する（文の頭で区切る [SpeakerTrack.Verdict.Cut] は [judgePhrase] が行う）。 */
-    private fun follow(card: Card, verdict: SpeakerTrack.Verdict) {
+    /**
+     * 話し手の時系列の判定を実行する（判定を実行するのはここだけ）。文の頭で区切る判定（[SpeakerTrack.Verdict.Cut]）は
+     * 文の全体の判定（[phrase] の文）からだけ来る。決めた話し手を文に持たせて次のカードへ渡す（同じ音声をもう一度判定しない）。
+     * 区切ったら true（文は次のカードで書き起こす）。
+     */
+    private fun follow(card: Card, verdict: SpeakerTrack.Verdict, phrase: Phrase? = null): Boolean {
         when (verdict) {
             is SpeakerTrack.Verdict.Assign -> langChanged(card)
             is SpeakerTrack.Verdict.Seek -> findSeam(card, verdict)
-            is SpeakerTrack.Verdict.Cut, SpeakerTrack.Verdict.Keep -> Unit
+            is SpeakerTrack.Verdict.Cut -> {
+                phrase?.lang = verdict.lang
+                cutAt(rel(verdict.at), "話し手の交代（文：${card.lang}→${verdict.lang}）", lang = verdict.lang, sure = true)
+                return true
+            }
+            SpeakerTrack.Verdict.Keep -> Unit
         }
+        return false
     }
 
     /** カードの言語を決める（前のカードから引き継ぐ・決められないときの仮）。 */
@@ -488,7 +487,7 @@ class SpeechSegmenter(
         val cutAbs = abs(at)
         val moved = card.text.phrases.filter { it.end > cutAbs }.map { p -> p.end to p.lang?.takeIf { p.from >= cutAbs } }
         close(card, at, reason, restEnd = at)
-        lastLang = card.lang ?: lastLang
+        handoff.ended(card.lang)
         buffer.take(at)
         bufferStart += at
         speechStart = (speechStart - at).coerceAtLeast(0)
@@ -522,6 +521,7 @@ class SpeechSegmenter(
                     finishIfReady(card)
                 }
             } else scores(card, rest.from, rest.end, RecognitionPriority.PHRASE_LANGUAGE, PURPOSE_REST) { scores, recognition ->
+                // 閉じた後の判定は区切らせず、カードの話し手を決めるだけなので、実行するものは無い（[SpeakerTrack.close]）
                 card.track.phrase(rest.from, rest.end, SpeakerJudge.decide(scores, languages, SpeakerJudge.PHRASE))
                 rest.lang = card.lang ?: fallbackLang(card)
                 if (recognition != null) {
@@ -571,7 +571,7 @@ class SpeechSegmenter(
         }
         if (utterance != null) retain(card.id, closing.audio)
         // 話し終わりで閉じたカードの話し手は、次に話し始めたカードの「前の話し手」
-        if (open == null) lastLang = card.lang ?: lastLang
+        if (open == null) handoff.ended(card.lang)
         events.finish(card.id, SpeechEvent.CardFinished(card.id, utterance))
     }
 
@@ -683,9 +683,6 @@ class SpeechSegmenter(
 
         /** 区切るときに、文として書き起こしていない残りを書き起こす最短の長さ（短い「はい」を落とさない）。 */
         private const val MIN_REST_SAMPLES = SAMPLE_RATE / 4
-
-        /** 話し始めからこの長さ話してもカードの言語が決まらなければ、前の話し手の言語を仮に使う。 */
-        private const val CARD_LANG_MAX_SAMPLES = SAMPLE_RATE * 5
 
         /** 話している最中の区間に使う、直近の音声の長さ。 */
         private const val LANG_WINDOW_SAMPLES = SAMPLE_RATE * 3 / 2
