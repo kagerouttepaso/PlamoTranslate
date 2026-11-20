@@ -1,5 +1,8 @@
 package app.plamotranslate
 
+import kotlinx.coroutines.flow.first
+import app.plamotranslate.translation.Translations
+import app.plamotranslate.pipeline.translation.ModelState
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -72,7 +75,8 @@ class BenchActivity : ComponentActivity() {
             say("ベンチ: 画像がありません: ${input.path}")
             return
         }
-        val (engine, ready) = EngineHolder.awaitEngine(this) ?: run {
+        EngineHolder.ensureLoaded(this)
+        if (EngineHolder.state.first { it !is ModelState.Loading } !is ModelState.Ready) {
             say("ベンチ: 翻訳モデルを読めません")
             return
         }
@@ -109,7 +113,7 @@ class BenchActivity : ComponentActivity() {
             val t1 = SystemClock.uptimeMillis()
             // 訳す対象が無い画像（日本語だけ・空の画面）ではストリームを開かない。空の依頼は何も流さないので、確定を待つと止まる
             if (targets.isNotEmpty()) coroutineScope {
-                val stream = TranslationStream(this, { TranslationStream.Backend(engine, ready.model.origin) }, TranslationStream.Options(source, SCREEN_TARGET))
+                val stream = Translations.open(this, this@BenchActivity, TranslationStream.Options(source, SCREEN_TARGET))
                 try {
                     stream.submit(targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })
                     val done = HashSet<Long>()
