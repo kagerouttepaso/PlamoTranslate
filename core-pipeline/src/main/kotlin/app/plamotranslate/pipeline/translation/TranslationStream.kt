@@ -106,6 +106,9 @@ class TranslationStream(
 
     /** 今の実行の部品（[work] が実行のたびに入れ替える）。 */
     private var origin = ModelOrigin("", 0)
+
+    /** 訳し始めたときのモデル（[Stats.model]）。まだ訳し始めていなければ null。 */
+    private var translatedWith: ModelOrigin? = null
     private var persistent: PersistentCache? = null
 
     private var piecesTranslated = 0
@@ -165,7 +168,7 @@ class TranslationStream(
         out.close()
     }
 
-    val stats: Stats get() = synchronized(lock) { Stats(piecesTranslated, memoryHits, storedHits, retried, stopped, origin) }
+    val stats: Stats get() = synchronized(lock) { Stats(piecesTranslated, memoryHits, storedHits, retried, stopped, translatedWith) }
 
     private fun emit(update: SegmentUpdate) {
         out.trySend(update)
@@ -194,6 +197,7 @@ class TranslationStream(
                 val lookup = synchronized(lock) {
                     core = coreFor(b.engine.parallel)
                     origin = b.origin
+                    translatedWith = b.origin
                     persistent = b.persistent
                     gen = generation
                     drainInbox()

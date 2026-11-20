@@ -1,6 +1,5 @@
 package app.plamotranslate
 
-import kotlinx.coroutines.flow.first
 import app.plamotranslate.translation.Translations
 import app.plamotranslate.pipeline.translation.ModelState
 import android.graphics.Bitmap
@@ -75,8 +74,7 @@ class BenchActivity : ComponentActivity() {
             say("ベンチ: 画像がありません: ${input.path}")
             return
         }
-        EngineHolder.ensureLoaded(this)
-        if (EngineHolder.state.first { it !is ModelState.Loading } !is ModelState.Ready) {
+        if (EngineHolder.awaitSettled(this) !is ModelState.Ready) {
             say("ベンチ: 翻訳モデルを読めません")
             return
         }

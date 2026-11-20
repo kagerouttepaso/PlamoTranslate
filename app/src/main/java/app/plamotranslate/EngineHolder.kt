@@ -50,7 +50,7 @@ object EngineHolder {
     fun select(context: Context, model: TranslationModel) {
         attach(context)
         TranslationPreferences(context.applicationContext).model = model
-        host.select(model)
+        host.select()
     }
 
     /** 同時に訳す数を保存し、今のエンジンにもすぐ効かせる（読み直さない）。 */
@@ -64,6 +64,12 @@ object EngineHolder {
     fun reload(context: Context) {
         attach(context)
         host.reload()
+    }
+
+    /** 読み込みを始めて（まだなら）、読み込みが終わった状態を返す。エンジンは渡さない。 */
+    suspend fun awaitSettled(context: Context): ModelState<TranslationModel> {
+        attach(context)
+        return host.awaitSettled()
     }
 
     /** 読み込みが終わるまで待ってエンジンと状態を返す。失敗・未配置なら null。翻訳のストリームの入口と計測だけが使う。 */

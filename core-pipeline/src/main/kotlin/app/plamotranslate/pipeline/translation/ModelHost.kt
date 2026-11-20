@@ -1,5 +1,6 @@
 package app.plamotranslate.pipeline.translation
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -82,15 +83,18 @@ class ModelHost<M, E : JobEngine>(
         }
     }
 
-    /** モデルを [model] に切り替える（設定は呼ぶ側が先に保存する）。同じモデルなら何もしない。 */
-    fun select(model: M) {
+    /**
+     * 選ばれているモデル（[selected]）に切り替える。呼ぶ側が先に設定を保存する。比べるのも読むのも [selected] の1つで、
+     * 今のモデルと同じなら何もしない。
+     */
+    fun select() {
         synchronized(lock) {
             if (loading) {
                 if (pending == null) pending = Pending.SELECT
                 return
             }
             val current = _state.value
-            if (current is ModelState.Ready && current.model == model) return
+            if (current is ModelState.Ready && current.model == selected()) return
             start(close = engine)
         }
     }
@@ -116,11 +120,16 @@ class ModelHost<M, E : JobEngine>(
         }
     }
 
+    /** 読み込みを始めて（まだなら）、読み込みが終わった状態（使える・ファイルが無い・失敗）を返す。エンジンは渡さない。 */
+    suspend fun awaitSettled(): ModelState<M> {
+        ensureLoaded()
+        return state.first { it !is ModelState.Loading }
+    }
+
     /** 読み込みが終わるまで待ってエンジンと状態を返す。ファイルが無い・失敗なら null。 */
     suspend fun awaitEngine(): Pair<E, ModelState.Ready<M>>? {
-        ensureLoaded()
         while (true) {
-            val ready = state.first { it !is ModelState.Loading } as? ModelState.Ready ?: return null
+            val ready = awaitSettled() as? ModelState.Ready ?: return null
             synchronized(lock) {
                 val e = engine
                 if (e != null && (_state.value as? ModelState.Ready)?.generation == ready.generation) return e to ready
@@ -134,36 +143,41 @@ class ModelHost<M, E : JobEngine>(
         engine = null
         _state.value = ModelState.Loading
         scope.launch {
-            close?.let { loader.close(it) }
+            // 閉じられなくても読み込みへ進む（閉じる失敗で読み込み中のまま止めない）
+            close?.let { runCatching { loader.close(it) } }
             load()
         }
     }
 
+    /** 選ばれているモデルを読み込む。どこで失敗しても、失敗の状態で読み込みを終える（読み込み中のまま止めない）。 */
     private suspend fun load() {
-        val model = selected()
-        loader.missing(model)?.let { path ->
-            finish(model, ModelState.Missing(path), null)
-            return
-        }
-        val count = parallel()
-        val start = System.nanoTime()
-        val loaded = runCatching { loader.load(model, count) }
-        val e = loaded.getOrNull()
-        val next = if (e != null) {
-            ModelState.Ready(model, ++generation, count, loader.usesGpu(e), (System.nanoTime() - start) / 1_000_000)
-        } else {
-            val error = loaded.exceptionOrNull()
-            ModelState.Failed(error?.message ?: error.toString())
+        var model: M? = null
+        var e: E? = null
+        val next = try {
+            val m = selected().also { model = it }
+            val path = loader.missing(m)
+            if (path != null) {
+                ModelState.Missing(path)
+            } else {
+                val count = parallel()
+                val start = System.nanoTime()
+                val loaded = loader.load(m, count).also { e = it }
+                ModelState.Ready(m, ++generation, count, loader.usesGpu(loaded), (System.nanoTime() - start) / 1_000_000)
+            }
+        } catch (ex: CancellationException) {
+            throw ex
+        } catch (ex: Exception) {
+            ModelState.Failed(ex.message ?: ex.toString())
         }
         finish(model, next, e)
     }
 
-    /** [model] の読み込みを終える。読み込み中に頼まれたことがあれば、続けて読み直す。 */
-    private fun finish(model: M, next: ModelState<M>, loaded: E?) {
+    /** [model] の読み込みを終える（モデルを決める前に失敗したら null）。読み込み中に頼まれたことがあれば、続けて読み直す。 */
+    private fun finish(model: M?, next: ModelState<M>, loaded: E?) {
         synchronized(lock) {
             val again = when (pending) {
                 Pending.RELOAD -> true
-                Pending.SELECT -> selected() != model
+                Pending.SELECT -> runCatching { selected() }.getOrNull() != model
                 null -> false
             }
             pending = null

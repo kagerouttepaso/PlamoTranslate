@@ -57,7 +57,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 
@@ -332,7 +331,7 @@ class ScreenTranslateService : Service() {
         overlay?.show(targets.map { it.slot }, "${targets.size}件を翻訳中…")
         val source = frame.choice.source
         scope.launch(w.job) {
-            if (modelReady() == null) {
+            if (EngineHolder.awaitSettled(this@ScreenTranslateService) !is ModelState.Ready) {
                 dispatch(SessionEvent.TranslationFailed(session, "翻訳モデルを読めません。アプリを開いて確認してください"))
                 return@launch
             }
@@ -559,12 +558,6 @@ class ScreenTranslateService : Service() {
         })
     }
 
-    /** 翻訳モデルの読み込みが終わるまで待って、使える状態を返す（エンジンは受け取らない）。ファイルが無い・失敗なら null。 */
-    private suspend fun modelReady(): ModelState.Ready<TranslationModel>? {
-        EngineHolder.ensureLoaded(this)
-        return EngineHolder.state.first { it !is ModelState.Loading } as? ModelState.Ready
-    }
-
     /** 翻訳モデルを切り替え、読み込みの進み具合をステータス表示に出す。訳している途中なら取り消す（古いエンジンは閉じられる）。 */
     private fun switchModel(model: TranslationModel) {
         dispatch(SessionEvent.ModelChanged)
@@ -572,7 +565,7 @@ class ScreenTranslateService : Service() {
         modelJob?.cancel()
         modelJob = scope.launch {
             overlay?.showStatus("${model.label}を読み込んでいます…")
-            val ready = modelReady()
+            val ready = EngineHolder.awaitSettled(this@ScreenTranslateService) as? ModelState.Ready
             overlay?.showStatus(if (ready != null) "翻訳モデルを${ready.model.label}にしました" else "翻訳モデルを読めませんでした")
         }
     }

@@ -1,6 +1,7 @@
 package app.plamotranslate.pipeline.translation
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -21,6 +22,10 @@ class ModelHostTest {
     /** 読み込みは [gate] が開くまで終わらない（開けなければその場で終わる）。 */
     private class FakeLoader : EngineLoader<String, FakeEngine> {
         val loads = mutableListOf<String>()
+
+        /** 閉じる・読むを起きた順に（「close:small」「load:large」）。 */
+        val log = mutableListOf<String>()
+        var closeFails = false
         val engines = mutableListOf<FakeEngine>()
         var gate: CompletableDeferred<Unit>? = null
         val missingModels = mutableSetOf<String>()
@@ -30,6 +35,7 @@ class ModelHostTest {
 
         override suspend fun load(model: String, parallel: Int): FakeEngine {
             loads += model
+            log += "load:$model"
             gate?.await()
             if (model in failingModels) error("読めない")
             return FakeEngine(model).also { it.parallel = parallel; engines += it }
@@ -41,6 +47,8 @@ class ModelHostTest {
         }
 
         override suspend fun close(engine: FakeEngine) {
+            log += "close:${engine.model}"
+            if (closeFails) error("閉じられない")
             engine.closed = true
         }
     }
@@ -60,12 +68,12 @@ class ModelHostTest {
         runCurrent()
         assertEquals("small", host.ready().model)
 
-        host.select("small")
+        host.select()
         runCurrent()
         assertEquals(listOf("small"), loader.loads)
 
         selected = "large"
-        host.select("large")
+        host.select()
         assertEquals(ModelState.Loading, host.state.value)
         runCurrent()
         assertEquals("large", host.ready().model)
@@ -80,7 +88,7 @@ class ModelHostTest {
         host.ensureLoaded()
         runCurrent()
         selected = "large"
-        host.select("large")
+        host.select()
         loader.gate!!.complete(Unit)
         runCurrent()
         assertEquals(listOf("small", "large"), loader.loads)
@@ -137,5 +145,71 @@ class ModelHostTest {
         val (engine, ready) = host.awaitEngine()!!
         assertEquals("small", engine.model)
         assertEquals(1L, ready.generation)
+    }
+
+    @Test
+    fun `切り替えは前のエンジンを閉じてから次を読む`() = runTest {
+        val host = host()
+        host.ensureLoaded()
+        runCurrent()
+        selected = "large"
+        host.select()
+        runCurrent()
+        assertEquals(listOf("load:small", "close:small", "load:large"), loader.log)
+    }
+
+    @Test
+    fun `読み込み中に別のモデルを選んでから元に戻したら読み直さない`() = runTest {
+        val host = host()
+        loader.gate = CompletableDeferred()
+        host.ensureLoaded()
+        runCurrent()
+        selected = "large"
+        host.select()
+        selected = "small"
+        host.select()
+        loader.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(listOf("small"), loader.loads)
+        assertEquals("small", host.ready().model)
+    }
+
+    @Test
+    fun `ファイルが無い・失敗のときに選べば読み込む`() = runTest {
+        val host = host()
+        loader.missingModels += "small"
+        host.ensureLoaded()
+        runCurrent()
+        assertTrue(host.state.value is ModelState.Missing)
+        selected = "large"
+        host.select()
+        runCurrent()
+        assertEquals("large", host.ready().model)
+    }
+
+    @Test
+    fun `前のエンジンを閉じられなくても読み込み中のまま止めない`() = runTest {
+        val host = host()
+        host.ensureLoaded()
+        runCurrent()
+        loader.closeFails = true
+        host.reload()
+        runCurrent()
+        assertEquals(2L, host.ready().generation)
+    }
+
+    @Test
+    fun `読み直しの途中で待てば新しい世代のエンジンを返す`() = runTest {
+        val host = host()
+        host.ensureLoaded()
+        runCurrent()
+        loader.gate = CompletableDeferred()
+        host.reload()
+        val waiting = async { host.awaitEngine() }
+        runCurrent()
+        loader.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(2L, waiting.await()!!.second.generation)
+        assertTrue(waiting.await()!!.first !== loader.engines[0])
     }
 }
