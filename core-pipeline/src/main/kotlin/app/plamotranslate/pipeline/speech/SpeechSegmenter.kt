@@ -369,7 +369,7 @@ class SpeechSegmenter(
     }
 
     /** 書き起こした（頼んだ）文の終わり（ためた音声の中の位置）。ここから後ろが、まだ書き起こしていない音声。 */
-    private fun stitchedEnd(card: Card): Int = card.text.phrases.lastOrNull()?.let { rel(it.end) } ?: rel(card.start).coerceAtLeast(0)
+    private fun stitchedEnd(card: Card): Int = rel(card.text.stitchedEnd).coerceAtLeast(0)
 
     /**
      * 話している最中の区間のスコアで、カードの言語を決め、話し手の交代を監視する。カードの言語がまだ無ければ、話し始めからの音声
@@ -385,7 +385,7 @@ class SpeechSegmenter(
         val fromAbs = abs(from)
         val toAbs = abs(buffer.size)
         card.watchPending = true
-        scores(card, fromAbs, toAbs, RecognitionPriority.LANGUAGE, PURPOSE_WATCH) { scores, _ ->
+        scores(card, fromAbs, toAbs, RecognitionPriority.LANGUAGE, PURPOSE_WATCH, paced = true) { scores, _ ->
             card.watchPending = false
             if (card === open) follow(card, card.track.window(fromAbs, toAbs, SpeakerJudge.decide(scores, languages, SpeakerJudge.WINDOW)))
             card.afterWatch?.let {
@@ -396,7 +396,7 @@ class SpeechSegmenter(
     }
 
     /**
-     * 話し手の時系列の判定を実行する（判定を実行するのはここだけ）。文の頭で区切る判定（[SpeakerTrack.Verdict.Cut]）は
+     * 話し手の時系列の判定を実行する（閉じたカードの残りの判定のほかは、ここだけで実行する）。文の頭で区切る判定（[SpeakerTrack.Verdict.Cut]）は
      * 文の全体の判定（[phrase] の文）からだけ来る。決めた話し手を文に持たせて次のカードへ渡す（同じ音声をもう一度判定しない）。
      * 区切ったら true（文は次のカードで書き起こす）。
      */
@@ -514,27 +514,20 @@ class SpeechSegmenter(
         val restTo = abs(restEnd).coerceAtMost(end)
         val rest = if (restTo - from >= MIN_REST_SAMPLES) Phrase(from, restTo, card.lang, capture(rel(from), rel(restTo))) else null
         if (rest != null) {
+            fun done(r: Recognition) {
+                rest.recognition = r
+                noteTranscript(card, rest, r)
+                finishIfReady(card)
+            }
             if (rest.lang != null) {
-                transcribe(card, rest, RecognitionPriority.FINAL, "確定の残り", rest.lang) { r ->
-                    rest.recognition = r
-                    noteTranscript(card, rest, r)
-                    finishIfReady(card)
-                }
+                transcribe(card, rest, RecognitionPriority.FINAL, "確定の残り", rest.lang) { done(it) }
             } else scores(card, rest.from, rest.end, RecognitionPriority.PHRASE_LANGUAGE, PURPOSE_REST) { scores, recognition ->
-                // 閉じた後の判定は区切らせず、カードの話し手を決めるだけなので、実行するものは無い（[SpeakerTrack.close]）
+                // 閉じた後の判定は区切らせない（[SpeakerTrack.close]）。カードの言語を決める判定（Assign）は返るが、閉じたカードには
+                // 途中結果を出さないので実行しない（[follow] を通すと、出さない言語の変化を記録に書く）
                 card.track.phrase(rest.from, rest.end, SpeakerJudge.decide(scores, languages, SpeakerJudge.PHRASE))
                 rest.lang = card.lang ?: fallbackLang(card)
-                if (recognition != null) {
-                    rest.recognition = recognition
-                    noteTranscript(card, rest, recognition)
-                    finishIfReady(card)
-                    return@scores
-                }
-                transcribe(card, rest, RecognitionPriority.FINAL, "確定の残り", rest.lang) { r ->
-                    rest.recognition = r
-                    noteTranscript(card, rest, r)
-                    finishIfReady(card)
-                }
+                if (recognition != null) done(recognition)
+                else transcribe(card, rest, RecognitionPriority.FINAL, "確定の残り", rest.lang) { done(it) }
             }
         }
         card.text.close(rest)
@@ -589,7 +582,7 @@ class SpeechSegmenter(
         val fromAbs = abs(from)
         val phrase = Phrase(fromAbs, abs(buffer.size), lang)
         card.partialInFlight = true
-        transcribe(card, phrase, RecognitionPriority.PARTIAL, "途中", lang) { r ->
+        transcribe(card, phrase, RecognitionPriority.PARTIAL, "途中", lang, paced = true) { r ->
             card.partialInFlight = false
             if (card !== open || card.lang != lang) return@transcribe
             noteTranscript(card, phrase, r)
@@ -636,9 +629,17 @@ class SpeechSegmenter(
      * [phrase] の音声を [language] として書き起こしてもらう（識別を省く）。null なら識別してもらい、識別できなければ
      * 前の話し手の言語として書き起こす。
      */
-    private fun transcribe(card: Card, phrase: Phrase, priority: RecognitionPriority, purpose: String, language: String?, then: (Recognition) -> Unit) {
+    private fun transcribe(
+        card: Card,
+        phrase: Phrase,
+        priority: RecognitionPriority,
+        purpose: String,
+        language: String?,
+        paced: Boolean = false,
+        then: (Recognition) -> Unit,
+    ) {
         val samples = phrase.audio ?: capture(rel(phrase.from), rel(phrase.end))
-        requests.transcribe(card.id, samples, phrase.end, priority, purpose, languages, language, fallbackLang(card)) { r ->
+        requests.transcribe(card.id, samples, phrase.end, priority, purpose, languages, language, fallbackLang(card), paced) { r ->
             trace { "書き起こし（$purpose）${at(phrase.from)}〜${at(phrase.end)} 言語の指定 $language: [${r.lang}] ${r.text}" }
             then(r)
         }
@@ -660,6 +661,7 @@ class SpeechSegmenter(
         to: Long,
         priority: RecognitionPriority,
         purpose: String,
+        paced: Boolean = false,
         then: (Map<String, Float>?, Recognition?) -> Unit,
     ) {
         val start = rel(from).coerceAtLeast(0)
@@ -668,7 +670,7 @@ class SpeechSegmenter(
             then(null, null)
             return
         }
-        requests.scores(card.id, buffer.slice(start, end), to, priority, purpose, languages) { scored, recognition ->
+        requests.scores(card.id, buffer.slice(start, end), to, priority, purpose, languages, paced) { scored, recognition ->
             trace { "スコア（$purpose）${at(from)}〜${at(to)}: ${scored?.scores?.entries?.sortedByDescending { it.value }?.take(3)?.joinToString { "%s=%.2f".format(it.key, it.value) }}" }
             then(scored?.scores, recognition)
         }

@@ -54,8 +54,8 @@ internal class RecognitionRequests(
 
     /**
      * カード [card] の [samples]（聞き始めから [end] で終わる音声）を [language] として書き起こしてもらう（識別を省く）。
-     * null なら識別してもらい、識別できなければ [fallback] として書き起こす。途中結果（[RecognitionPriority.PARTIAL]）は、
-     * 結果が届いたら、かかった時間から次の途中結果までの間隔を決める。
+     * null なら識別してもらい、識別できなければ [fallback] として書き起こす。[paced] なら（途中結果）、結果が届いたら、
+     * かかった時間から次の途中結果までの間隔を決める。
      */
     fun transcribe(
         card: Long,
@@ -66,11 +66,12 @@ internal class RecognitionRequests(
         languages: SpeechLanguages,
         language: String?,
         fallback: String?,
+        paced: Boolean = false,
         then: (Recognition) -> Unit,
     ) {
         val submittedAt = clock()
         job({ id -> RecognitionJob.Transcribe(id, card, priority, samples, end, purpose, languages, language, fallback) }) { out ->
-            if (priority == RecognitionPriority.PARTIAL) {
+            if (paced) {
                 partialInterval = maxOf(MIN_PARTIAL_INTERVAL, costSamples(submittedAt) * if (heavy) HEAVY_PARTIAL_COST_RATIO else PARTIAL_COST_RATIO)
             }
             then(TranscriptCleanup.clean((out as? RecognitionOutput.Transcribed)?.recognition ?: Recognition("", null)))
@@ -79,8 +80,7 @@ internal class RecognitionRequests(
 
     /**
      * [samples]（聞き始めから [end] で終わる音声）の、会話の言語ごとのスコアを出してもらう。書き起こしてスコアを出した認識器は、
-     * その書き起こし（後処理の後）も返す。話し中の区間（[RecognitionPriority.LANGUAGE]）は、結果が届いたら、かかった時間から
-     * 次の区間までの間隔を決める。
+     * その書き起こし（後処理の後）も返す。[paced] なら（話し中の区間）、結果が届いたら、かかった時間から次の区間までの間隔を決める。
      */
     fun scores(
         card: Long,
@@ -89,11 +89,12 @@ internal class RecognitionRequests(
         priority: RecognitionPriority,
         purpose: String,
         languages: SpeechLanguages,
+        paced: Boolean = false,
         then: (RecognitionOutput.Scored?, Recognition?) -> Unit,
     ) {
         val submittedAt = clock()
         job({ id -> RecognitionJob.Language(id, card, languageLane, priority, samples, end, purpose, languages) }) { out ->
-            if (priority == RecognitionPriority.LANGUAGE) {
+            if (paced) {
                 watchInterval = maxOf(WATCH_INTERVAL_SAMPLES, costSamples(submittedAt) * WATCH_COST_RATIO)
             }
             val scored = out as? RecognitionOutput.Scored
