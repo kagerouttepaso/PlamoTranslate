@@ -97,6 +97,9 @@ class SpeechSegmenterTest {
 
         /** 頼まれた言語の判定の目的（`直近` など）。 */
         val languagePurposes = mutableListOf<String>()
+
+        /** 頼まれたジョブ（頼んだ順）。 */
+        val submitted = mutableListOf<RecognitionJob>()
         private val queue = RecognitionQueue()
         private val runner = RecognitionRunner(recognizer)
         private class Pending(val due: Int, val lane: RecognitionLane, val id: Long, val output: RecognitionOutput)
@@ -111,6 +114,7 @@ class SpeechSegmenterTest {
             emit = { events += it },
             submit = {
                 if (it is RecognitionJob.Language) languagePurposes += it.purpose
+                submitted += it
                 queue.submit(it)
             },
             trace = {
@@ -557,6 +561,15 @@ class SpeechSegmenterTest {
         val s = Harness(asr, profile, heavy = true, languages = SpeechLanguages(setOf("ja", "ko")), languageLatencyChunks = 12)
         val cards = finals(s.feed(Sound.KO to 3.0, Sound.SILENCE to 1.0, Sound.JA to 1.8, Sound.SILENCE to 4.0))
         assertEquals(listOf("ko", "ja"), cards.map { it.lang })
+    }
+
+    @Test
+    fun 文の頭で区切ったとき移した文を途中結果として書き起こさない() {
+        // 文の判定が遅れて届き、文を次のカードへ移す。移した文は文として書き起こすので、途中結果で同じ音声を書き起こさない
+        val s = Harness(HeavyRecognizer(), profile, heavy = true, languages = SpeechLanguages(setOf("ja", "ko")), languageLatencyChunks = 12)
+        s.feed(Sound.KO to 3.0, Sound.SILENCE to 1.0, Sound.JA to 1.8, Sound.SILENCE to 4.0)
+        val next = s.submitted.filterIsInstance<RecognitionJob.Transcribe>().filter { it.card == 1L }
+        assertEquals(RecognitionPriority.PHRASE, next.first().priority)
     }
 
     @Test

@@ -127,8 +127,8 @@ enum class RecognitionLane { TRANSCRIBE, IDENTIFY }
 
 /**
  * ジョブの優先順位（小さいほど先）。確定に要るジョブ（区切った残り・文の書き起こし・文の話し手の判定）を先にし、
- * 話し中の区間の判定、途中結果の順に後回しにする。確定（区切った残り）は、前のカードの文の書き起こしより先に出ることがある
- * （出来事はカードの順に出すので、結果の順は崩れない）。利用者が頼んだ書き起こし直し（[RETRANSCRIBE]）は、確定に要るジョブの
+ * 話し中の区間の判定、途中結果の順に後回しにする。確定に要るジョブどうしは、前のカードのものを先にし、同じカードの中で
+ * この順にする（[RecognitionQueue.take]）。利用者が頼んだ書き起こし直し（[RETRANSCRIBE]）は、確定に要るジョブの
  * 後で、話し中の判定より先にする（利用者が待っている）。
  * 並びは処理の順だけを決める。確定に要るか（[urgent]）と、閉じたカードなら捨てるか（[droppable]）は、それぞれ名前で決める。
  */
@@ -148,7 +148,9 @@ enum class RecognitionPriority(
 
 /**
  * 判定：認識のジョブの待ち行列（ワーカーごと）。次に処理するジョブと、要らなくなったジョブを決める。スレッドに依らない。
- * - 優先順位の高いものから、同じ順位は頼んだ順に出す（文の書き起こしは、つなぐ順に届く）。
+ * - 確定に要るジョブは、前のカードのものから出す。確定はカードの順に出すので、後ろのカードの確定に要るジョブが前のカードの
+ *   ものを追い越すと、前のカードの確定が待たされ、後ろのカードの確定も前のカードを待つ（どちらも早くならない）。
+ * - そのほかは優先順位の高いものから、同じ順位は頼んだ順に出す（文の書き起こしは、つなぐ順に届く）。
  * - 閉じたカードの途中結果と話し中の区間の判定は捨てる（[dropStale]）。確定に要るジョブは捨てない。
  *   捨てたジョブは返し、呼び手は空の結果（[RecognitionRunner.empty]）をセグメンターに渡す。頼んだジョブには、処理しても捨てても
  *   必ず1回だけ結果が返る（結果を待って次を決めるセグメンターが、捨てられたジョブを待ち続けて止まらないようにする）。
@@ -165,7 +167,7 @@ class RecognitionQueue {
 
     /** [lane] の次のジョブを取り出す。無ければ null。 */
     fun take(lane: RecognitionLane): RecognitionJob? {
-        val next = jobs.filter { it.lane == lane }.minByOrNull { it.priority.ordinal } ?: return null
+        val next = jobs.filter { it.lane == lane }.minWithOrNull(ORDER) ?: return null
         jobs.remove(next)
         return next
     }
@@ -184,4 +186,9 @@ class RecognitionQueue {
     fun oldestTranscribeEnd(): Long? = jobs.filter { it.priority.urgent }.minOfOrNull { it.endAt }
 
     fun clear() = jobs.clear()
+
+    private companion object {
+        /** 処理の順。確定に要るジョブが先で、その中は前のカードから。同じ順のものは頼んだ順（[minWithOrNull] は最初のものを返す）。 */
+        val ORDER = compareBy<RecognitionJob>({ !it.priority.urgent }, { if (it.priority.urgent) it.card else 0L }, { it.priority.ordinal })
+    }
 }

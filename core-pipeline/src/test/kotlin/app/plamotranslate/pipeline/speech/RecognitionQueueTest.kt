@@ -25,6 +25,19 @@ class RecognitionQueueTest {
     }
 
     @Test
+    fun 確定に要るジョブは前のカードのものから出す() {
+        // 確定はカードの順に出すので、後ろのカードの確定の残りが前のカードの文を追い越すと、前のカードの確定が待たされる
+        val q = RecognitionQueue()
+        q.submit(transcribe(1, card = 0, RecognitionPriority.PHRASE))
+        q.submit(transcribe(2, card = 1, RecognitionPriority.FINAL))
+        q.submit(transcribe(3, card = 0, RecognitionPriority.FINAL))
+        q.submit(transcribe(4, card = 1, RecognitionPriority.PARTIAL))
+        q.submit(RecognitionJob.Retranscribe(5, utterance = 0, FloatArray(0), "試験", Language.KO))
+        // 前のカードの中は優先順位の順、続いて後ろのカード、書き起こし直し、途中結果
+        assertEquals(listOf(3L, 1L, 2L, 5L, 4L), generateSequence { q.take(RecognitionLane.TRANSCRIBE) }.map { it.id }.toList())
+    }
+
+    @Test
     fun 書き起こし直しは確定に要るジョブに数えない() {
         val q = RecognitionQueue()
         q.submit(RecognitionJob.Retranscribe(1, utterance = 0, FloatArray(0), "試験", Language.KO))

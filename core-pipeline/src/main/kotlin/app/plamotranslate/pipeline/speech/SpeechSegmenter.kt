@@ -522,7 +522,8 @@ class SpeechSegmenter(
     /**
      * 話し続けたまま [at] で区切る。前を確定させ、後ろは次のカードの頭として残す。[lang] は後ろの話し手（分かっていれば）。
      * 区切る位置より後ろで終わった文は、次のカードの文として書き起こし直す（前のカードからは外すので、移さないと言葉が消える）。
-     * 区切る位置から始まる文は、決めた話し手をそのまま使う。
+     * 区切る位置から始まる文は、決めた話し手をそのまま使う。文を移してから次のカードの言語を決める（言語が決まると途中結果を
+     * 頼むので、先に決めると、移す文を含む音声を途中結果として書き起こし、文を足した時点で捨てることになる）。
      */
     private fun cutAt(at: Int, reason: String, lang: String? = null, sure: Boolean = false) {
         val card = open ?: return
@@ -536,8 +537,8 @@ class SpeechSegmenter(
         lastPhraseEnd = if (lastPhraseEnd > at) lastPhraseEnd - at else -1
         resetCardState()
         val next = openCard()
-        if (lang != null) setCardLang(next, lang, sure)
         moved.forEach { (end, known) -> phraseEnded(next, rel(end), known) }
+        if (lang != null) setCardLang(next, lang, sure)
     }
 
     /**
