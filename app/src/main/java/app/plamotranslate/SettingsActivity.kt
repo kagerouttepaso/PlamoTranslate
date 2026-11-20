@@ -1,10 +1,5 @@
 package app.plamotranslate
 
-import kotlinx.coroutines.launch
-import androidx.lifecycle.repeatOnLifecycle
-import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.Lifecycle
-import android.widget.Toast
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -60,18 +55,8 @@ class SettingsActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent { AppTheme { SettingsScreen(onBack = ::finish) } }
-        // 読み上げの失敗は、画面にいる間だけ知らせる
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                ReadAloud.failures.collect { Toast.makeText(this@SettingsActivity, it, Toast.LENGTH_LONG).show() }
-            }
-        }
-    }
-
-    override fun onStop() {
-        super.onStop()
-        // 試し聞きを、画面を離れても鳴らし続けない。読み上げのモデルも手放す
-        ReadAloud.release()
+        // 試し聞きの失敗は画面にいる間だけ出す。画面を離れたら鳴らし続けず、読み上げのモデルも手放す
+        ReadAloud.attach(this)
     }
 }
 
