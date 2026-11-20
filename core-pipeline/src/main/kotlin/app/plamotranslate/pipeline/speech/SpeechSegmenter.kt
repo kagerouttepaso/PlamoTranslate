@@ -1,5 +1,6 @@
 package app.plamotranslate.pipeline.speech
 
+import app.plamotranslate.pipeline.speech.CardTranscript.Phrase
 import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
 
 /**
@@ -43,7 +44,8 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  * 確定を出すカードの音声は [retain] に渡す（書き起こし直しのための取り置きは [UtteranceRetention] が持つ）。
  *
  * 判断は部品に分ける：話し手は [SpeakerJudge]、区切る位置は [CutPoint]、認識した文字の聞き違いの判定は [TranscriptCleanup]、
- * ジョブの順番は [RecognitionQueue]、確定を出す順番は [CardEvents]、ジョブの出し方は [RecognitionRequests]。状態を持つので、すべての呼び出しは1本のスレッドから行う（[SpeechPipeline]）。
+ * ジョブの順番は [RecognitionQueue]、確定を出す順番は [CardEvents]、ジョブの出し方は [RecognitionRequests]、
+ * 文の書き起こしをつなぐのは [CardTranscript]。状態を持つので、すべての呼び出しは1本のスレッドから行う（[SpeechPipeline]）。
  * [trace] はセグメンターの経過を書く口（話した言葉を含むので、渡す側が詳しい記録を残すとき（デバッグ版の既定、正式版は
  * 詳細設定で選ぶ）だけ書く）。
  */
@@ -117,27 +119,19 @@ class SpeechSegmenter(
     private var lastPartial: Recognition? = null
     private var lastPartialStart = 0L
 
-    /**
-     * 文。[from]〜[end] は聞き始めからの位置。[lang] は話し手の言語（決めるまで null）、[recognition] は書き起こし（届くまで null）。
-     * [audio] は文を作った時点の音声の写し。話し手を決めてから書き起こすまでに、ためた音声が区切られても書き起こせるようにする。
-     */
-    private class Phrase(val from: Long, val end: Long, var lang: String? = null, val audio: FloatArray? = null) {
-        var recognition: Recognition? = null
-    }
-
-    /** 区切ると決めたカード。[parts] の書き起こしがすべて届いたら確定を出す。[audio] はカードの音声（[retain] に渡す）。 */
+    /** 区切ると決めたカード。書き起こしがすべて届いたら確定を出す（[CardTranscript.final]）。[audio] はカードの音声（[retain] に渡す）。 */
     private class Closing(
         val start: Long,
         val end: Long,
         val reason: String,
         val startedAt: Long,
-        val parts: List<Phrase>,
         val audio: FloatArray,
     )
 
     /** カード。[start] は聞き始めからの位置。 */
     private class Card(val id: Long, val start: Long, minTurn: Long) {
-        val phrases = mutableListOf<Phrase>()
+        /** 文の書き起こしと途中結果。 */
+        val text = CardTranscript(start)
         var closing: Closing? = null
 
         /** 話し手の時系列。カードの話し手と、話し手が代わった位置は、ここだけが決める。 */
@@ -146,12 +140,6 @@ class SpeechSegmenter(
         /** 話し手の言語（[SpeakerJudge] の組）。決まるまで null。 */
         val lang: String? get() = track.lang
 
-        /** まだ終わっていない文の途中結果と、それを書き起こした音声の始まり。 */
-        var tail: Recognition? = null
-        var tailFrom = 0L
-
-        /** 直前に出した途中結果の文字。 */
-        var lastText = ""
         var partialInFlight = false
         var watchPending = false
         var seamPending = false
@@ -331,15 +319,15 @@ class SpeechSegmenter(
         val from = stitchedEnd(card)
         if (end - from < MIN_PARTIAL_SAMPLES) return
         val phrase = Phrase(abs(from), abs(end), lang, capture(from, end))
-        card.phrases += phrase
+        card.text.add(phrase)
         if (lang != null) {
             transcribePhrase(card, phrase, null)
             return
         }
         scores(card, phrase.from, phrase.end, RecognitionPriority.PHRASE_LANGUAGE, PURPOSE_PHRASE) { scores, recognition ->
-            if (phrase !in card.phrases) return@scores
+            if (phrase !in card.text) return@scores
             val judge = {
-                if (phrase in card.phrases) judgePhrase(card, phrase, SpeakerJudge.decide(scores, languages, SpeakerJudge.PHRASE), recognition)
+                if (phrase in card.text) judgePhrase(card, phrase, SpeakerJudge.decide(scores, languages, SpeakerJudge.PHRASE), recognition)
             }
             val waiting = card.afterWatch
             when {
@@ -390,7 +378,7 @@ class SpeechSegmenter(
     }
 
     /** 書き起こした（頼んだ）文の終わり（ためた音声の中の位置）。ここから後ろが、まだ書き起こしていない音声。 */
-    private fun stitchedEnd(card: Card): Int = card.phrases.lastOrNull()?.let { rel(it.end) } ?: rel(card.start).coerceAtLeast(0)
+    private fun stitchedEnd(card: Card): Int = card.text.phrases.lastOrNull()?.let { rel(it.end) } ?: rel(card.start).coerceAtLeast(0)
 
     /**
      * 話している最中の区間のスコアで、カードの言語を決め、話し手の交代を監視する。カードの言語がまだ無ければ、話し始めからの音声
@@ -438,8 +426,8 @@ class SpeechSegmenter(
         trace { "カードの言語 $lang（${if (card.track.sure) "確か" else "仮"}）" }
         if (card !== open) return
         // 仮の言語で書き起こした途中結果は古いので、決めた言語で書き起こし直す
-        card.tail = null
-        if (card.lastText.isEmpty()) emit(SpeechEvent.CardText(card.id, "", card.track.label()))
+        card.text.dropPartial()
+        if (card.text.shown.isEmpty()) emit(SpeechEvent.CardText(card.id, "", card.track.label()))
         sinceLastPartial = 0
         requestPartial(card)
     }
@@ -498,7 +486,7 @@ class SpeechSegmenter(
     private fun cutAt(at: Int, reason: String, lang: String? = null, sure: Boolean = false) {
         val card = open ?: return
         val cutAbs = abs(at)
-        val moved = card.phrases.filter { it.end > cutAbs }.map { p -> p.end to p.lang?.takeIf { p.from >= cutAbs } }
+        val moved = card.text.phrases.filter { it.end > cutAbs }.map { p -> p.end to p.lang?.takeIf { p.from >= cutAbs } }
         close(card, at, reason, restEnd = at)
         lastLang = card.lang ?: lastLang
         buffer.take(at)
@@ -522,13 +510,11 @@ class SpeechSegmenter(
         val start = card.start
         val end = abs(at)
         card.track.close()
-        card.phrases.removeAll { it.end > end }
-        val parts = card.phrases.toMutableList()
-        val from = parts.lastOrNull()?.end ?: start
+        card.text.cut(end)
+        val from = card.text.stitchedEnd
         val restTo = abs(restEnd).coerceAtMost(end)
-        if (restTo - from >= MIN_REST_SAMPLES) {
-            val rest = Phrase(from, restTo, card.lang, capture(rel(from), rel(restTo)))
-            parts += rest
+        val rest = if (restTo - from >= MIN_REST_SAMPLES) Phrase(from, restTo, card.lang, capture(rel(from), rel(restTo))) else null
+        if (rest != null) {
             if (rest.lang != null) {
                 transcribe(card, rest, RecognitionPriority.FINAL, "確定の残り", rest.lang) { r ->
                     rest.recognition = r
@@ -551,7 +537,8 @@ class SpeechSegmenter(
                 }
             }
         }
-        card.closing = Closing(start, end, reason, clock(), parts, capture(rel(start).coerceAtLeast(0), at))
+        card.text.close(rest)
+        card.closing = Closing(start, end, reason, clock(), capture(rel(start).coerceAtLeast(0), at))
         if (open === card) open = null
         trace { "区切ると決めた（$reason）${at(start)}〜${at(end)}" }
         emit(SpeechEvent.CardClosed(card.id))
@@ -565,13 +552,13 @@ class SpeechSegmenter(
      */
     private fun finishIfReady(card: Card) {
         val closing = card.closing ?: return
-        if (events.finished(card.id) || closing.parts.any { it.recognition == null }) return
-        val r = TranscriptJoin.stitch(closing.parts.mapNotNull { it.recognition })
+        if (events.finished(card.id)) return
+        val r = card.text.final() ?: return
         val label = card.track.label(closing.end)
         val lang = label ?: r.lang
         val waitedMs = (clock() - closing.startedAt) / 1_000_000
         if (label != card.lang) trace { "カードの表示の言語 $label（書き起こしの言語。区間と文の全体では ${card.lang}）" }
-        trace { "確定（${closing.reason}）${at(closing.start)}〜${at(closing.end)}: [$lang] ${r.text} ／ 直前の途中 ${card.lastText}（区切ってから${waitedMs}ms）" }
+        trace { "確定（${closing.reason}）${at(closing.start)}〜${at(closing.end)}: [$lang] ${r.text} ／ 直前の途中 ${card.text.shown}（区切ってから${waitedMs}ms）" }
         val utterance = r.text.takeIf { it.isNotEmpty() }?.let { text ->
             Utterance(
                 id = card.id,
@@ -608,38 +595,18 @@ class SpeechSegmenter(
             noteTranscript(card, phrase, r)
             lastPartial = r
             lastPartialStart = fromAbs
-            card.tail = r
-            card.tailFrom = fromAbs
+            card.text.partial(fromAbs, r)
             showStitched(card)
         }
     }
 
-    /** 書き起こした文（届いた分だけ、頭から続くもの）と、まだ終わっていない文の途中結果をつないで出す。 */
-    private fun showStitched(card: Card) {
-        val parts = mutableListOf<Recognition>()
-        var complete = true
-        for (p in card.phrases) {
-            val r = p.recognition
-            if (r == null) {
-                complete = false
-                break
-            }
-            parts += r
-        }
-        // 途中結果は、最後の文の後ろを書き起こしたものだけをつなぐ（文が増えたら古い）
-        val tail = card.tail
-        if (complete && tail != null && card.tailFrom == (card.phrases.lastOrNull()?.end ?: card.start)) parts += tail
-        if (parts.isEmpty()) return
-        showPartial(card, TranscriptJoin.stitch(parts))
-    }
-
     /**
-     * 途中結果を知らせる。同じ文字を続けて出さない（話し終わってから区切るまでの無音の間は同じ文字が続く）。
-     * 言語はカードの表示の言語（[SpeakerTrack.label]）。
+     * 書き起こした文と途中結果をつないで（[CardTranscript.current]）知らせる。同じ文字を続けて出さない（話し終わってから
+     * 区切るまでの無音の間は同じ文字が続く）。言語はカードの表示の言語（[SpeakerTrack.label]）。
      */
-    private fun showPartial(card: Card, r: Recognition) {
-        if (r.text.isEmpty() || r.text == card.lastText) return
-        card.lastText = r.text
+    private fun showStitched(card: Card) {
+        val r = card.text.current() ?: return
+        if (!card.text.show(r.text)) return
         emit(SpeechEvent.CardText(card.id, r.text, card.track.label() ?: r.lang))
     }
 
@@ -660,7 +627,7 @@ class SpeechSegmenter(
     private fun cutBreaks(card: Card): List<SpeechBreak> {
         val offset = rel(lastPartialStart)
         val partialBreaks = lastPartial?.breaks.orEmpty().map { it.copy(at = it.at + offset) }
-        return card.phrases.map { SpeechBreak(rel(it.end), sentence = true) } + partialBreaks
+        return card.text.phrases.map { SpeechBreak(rel(it.end), sentence = true) } + partialBreaks
     }
 
     // ---- ジョブと出来事 ----
