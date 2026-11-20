@@ -32,6 +32,7 @@ import app.plamotranslate.overlay.toBox
 import app.plamotranslate.pipeline.screen.SceneProfile
 import app.plamotranslate.pipeline.screen.ScreenChange
 import app.plamotranslate.pipeline.screen.ScreenSession
+import app.plamotranslate.pipeline.screen.ScreenSessionLoop
 import app.plamotranslate.pipeline.screen.ScreenSession.Effect
 import app.plamotranslate.pipeline.screen.ScreenSession.Phase
 import app.plamotranslate.pipeline.screen.ScreenSession.SessionEvent
@@ -88,7 +89,9 @@ class ScreenTranslateService : Service() {
     private var orientation = Configuration.ORIENTATION_UNDEFINED
 
     /** 画面翻訳の状態（中核の状態遷移が決める）。 */
-    private var state = ScreenSession.initial(ScreenSession.Trigger.TAP)
+    /** 状態遷移の入口（出来事を順に渡す。作業の中で出た出来事は、今の作業を終えてから渡す）。 */
+    private val loop = ScreenSessionLoop(ScreenSession.Trigger.TAP, ::perform)
+    private val state: ScreenSession.State get() = loop.state
 
     /** 場面の設定と、それに合わせた判定器。設定を変えたら作り直す（[applyProfile]）。 */
     private var profile = SceneProfile.NORMAL
@@ -169,8 +172,7 @@ class ScreenTranslateService : Service() {
         }
         EngineHolder.ensureLoaded(this)
         applyProfile()
-        state = ScreenSession.initial(preferences.trigger.toTrigger())
-        if (state.phase == Phase.Watching) startJudge.reset(SystemClock.uptimeMillis())
+        loop.start(preferences.trigger.toTrigger())
         scope.launch { watch() }
         scope.launch { watchAccessibility() }
         registerDebugReceiver()
@@ -180,11 +182,7 @@ class ScreenTranslateService : Service() {
 
     // ---- 制御：出来事を状態遷移へ渡し、返った作業を行う ----
 
-    private fun dispatch(event: SessionEvent) {
-        val (next, effects) = ScreenSession.reduce(state, event)
-        state = next
-        effects.forEach(::perform)
-    }
+    private fun dispatch(event: SessionEvent) = loop.dispatch(event)
 
     private fun perform(effect: Effect) {
         when (effect) {
@@ -195,19 +193,29 @@ class ScreenTranslateService : Service() {
                 overlay?.showStatus(page.error ?: "訳す文字が見つかりませんでした（文字認識 ${page.ocrMillis}ms）")
             }
             is Effect.Translate -> translate(effect.session)
-            is Effect.Finished -> workOf(effect.session)?.let(::finished)
+            is Effect.Finished -> workOf(effect.session)?.let {
+                finished(it)
+                it.run?.close()
+            }
             is Effect.CaptureFailed -> overlay?.showStatus("画面を撮影できませんでした")
-            is Effect.BoxesFailed -> overlay?.showStatus("訳の枠を出せませんでした。重ね表示の許可を確かめてください")
-            is Effect.Failed -> overlay?.showStatus("翻訳に失敗しました: ${effect.message}")
+            is Effect.BoxesFailed -> {
+                val message = "訳の枠を出せませんでした"
+                if (overlay?.showStatus(message) != true) Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+            }
+            is Effect.Failed -> {
+                overlay?.showStatus("翻訳に失敗しました: ${effect.message}")
+                workOf(effect.session)?.run?.close()
+            }
             is Effect.Peek -> peek(effect.session)
-            is Effect.ShowBoxes -> if (workOf(effect.session) != null) overlay?.setBoxesVisible(true)
+            is Effect.ShowBoxes -> overlay?.setBoxesVisible(true)
             is Effect.Cancel -> {
-                Logs.i("画面翻訳: ${effect.reason}ので取り消した")
+                Logs.i("画面翻訳: ${effect.reason}ので${if (effect.working) "取り消した" else "訳を消した"}")
                 cancel(effect.session)
             }
             Effect.ClearOverlay -> overlay?.clear()
             Effect.EndValidity -> validity.end()
             Effect.ResetStart -> startJudge.reset(SystemClock.uptimeMillis())
+            Effect.EndStart -> startJudge.end()
             is Effect.ButtonActive -> button?.setActive(effect.active)
             is Effect.Notice -> Toast.makeText(this, effect.text, Toast.LENGTH_SHORT).show()
         }
@@ -328,14 +336,15 @@ class ScreenTranslateService : Service() {
                 dispatch(SessionEvent.TranslationFailed(session, "翻訳モデルを読めません。アプリを開いて確認してください"))
                 return@launch
             }
-            val run = TranslationRun(ready.model.label, SystemClock.uptimeMillis()).also(w::translating)
-            // 1回の翻訳ごとに翻訳のストリームを開き、終わったら閉じる（docs/設計/翻訳コア.md「翻訳の契約」）。
+            // 1回の翻訳ごとに翻訳のストリームを開き、訳し終えた・失敗したら状態遷移の作業（Finished・Failed）で閉じる
+            // （docs/設計/翻訳コア.md「翻訳の契約」）。閉じると購読が終わる。取り消したら作業ごと止まる。
             // メモリのキャッシュはサービスが持って翻訳どうしで共有し、永続キャッシュ（端末のデータベース）で次に始めたときも使う
             val persistent = SqlitePersistentCache.get(this@ScreenTranslateService)
             val stream = Translations.open(this, this@ScreenTranslateService, TranslationStream.Options(source, SCREEN_TARGET), memoryCache, persistent)
+            val run = TranslationRun(ready.model.label, SystemClock.uptimeMillis(), stream).also(w::translating)
             try {
                 stream.submit(targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })
-                stream.updates.transformWhile { u ->
+                stream.updates.collect { u ->
                     when (u) {
                         is SegmentUpdate.Partial -> overlay?.setTranslation(u.id.toInt(), u.text)
                         is SegmentUpdate.Final -> {
@@ -346,13 +355,9 @@ class ScreenTranslateService : Service() {
                         }
                         is SegmentUpdate.Failed -> dispatch(SessionEvent.TranslationFailed(session, u.message))
                     }
-                    emit(u)
-                    // 全部確定した・失敗した・取り消した：状態遷移がこのセッションの翻訳を終えたら読むのをやめる
-                    state.phase.let { it is Phase.Translating && it.session == session }
-                }.collect { }
+                }
             } finally {
-                run.stats = stream.stats
-                stream.close()
+                run.close()
             }
         }
     }
@@ -381,40 +386,53 @@ class ScreenTranslateService : Service() {
      * やめれば、作業ごと取り消される（[Effect.Cancel]）。
      */
     private fun peek(session: Int) {
-        val w = workOf(session) ?: return
+        // のぞきの作業は、取り消されたとき（セッションごと止まる）のほかは、必ず Peeked を返す（返らないと、状態遷移は
+        // のぞいている間のまま次ののぞきを始めない）
+        val w = workOf(session) ?: return dispatch(SessionEvent.Peeked(session, invalid = null))
         val frames = profile.validity.peekFrames
         val interval = profile.validity.peekIntervalMs
         scope.launch(w.job) {
-            delay(PEEK_DELAY_MS)
-            val capturer = capturer
-            val overlay = overlay
-            val boxes = overlay?.boxBounds.orEmpty()
-            if (capturer == null || overlay == null || boxes.isEmpty()) return@launch dispatch(SessionEvent.Peeked(session, invalid = null))
-            hiding = true
-            val thumbs = mutableListOf<Thumb>()
-            try {
-                val hiddenAt = SystemClock.uptimeMillis()
-                overlay.setBoxesVisible(false)
-                delay(HIDE_SETTLE_MS)
-                // 枠を隠した後の画面を撮る。枚数と間隔は場面の設定（動く画面は3枚の中央値で背景の動きを消す）
-                var after = hiddenAt + 16
-                val deadline = SystemClock.uptimeMillis() + PEEK_TIMEOUT_MS
-                while (thumbs.size < frames && SystemClock.uptimeMillis() < deadline) {
-                    capturer.latestThumb(after)?.let { (t, at) ->
-                        thumbs += t
-                        after = at + interval
-                    }
-                    delay(16)
-                }
-            } finally {
-                hiding = false
+            val invalid = try {
+                delay(PEEK_DELAY_MS)
+                peekUnderBoxes(frames, interval)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                Logs.w("自動翻訳: 訳の枠の下をのぞけませんでした", e)
+                null
             }
-            val verdict = if (thumbs.isEmpty()) Validity.Valid else {
-                validity.peek(if (thumbs.size >= 3) ScreenChange.median(thumbs) else thumbs.last(), boxes.map { it.toBox() })
-            }
-            Logs.i("自動翻訳: 触れたので訳の枠の下を見た（$verdict）")
-            dispatch(SessionEvent.Peeked(session, (verdict as? Validity.Invalid)?.let { "${it.reason}（${"%.2f".format(it.amount)}）" }))
+            dispatch(SessionEvent.Peeked(session, invalid))
         }
+    }
+
+    /** 訳の枠を隠して枠の下を撮り、判定Bで原文が変わったかを見る。変わっていれば理由、変わっていないか見られなければ null。 */
+    private suspend fun peekUnderBoxes(frames: Int, interval: Long): String? {
+        val capturer = capturer ?: return null
+        val overlay = overlay ?: return null
+        val boxes = overlay.boxBounds.takeIf { it.isNotEmpty() } ?: return null
+        hiding = true
+        val thumbs = mutableListOf<Thumb>()
+        try {
+            val hiddenAt = SystemClock.uptimeMillis()
+            overlay.setBoxesVisible(false)
+            delay(HIDE_SETTLE_MS)
+            // 枠を隠した後の画面を撮る。枚数と間隔は場面の設定（動く画面は3枚の中央値で背景の動きを消す）
+            var after = hiddenAt + 16
+            val deadline = SystemClock.uptimeMillis() + PEEK_TIMEOUT_MS
+            while (thumbs.size < frames && SystemClock.uptimeMillis() < deadline) {
+                capturer.latestThumb(after)?.let { (t, at) ->
+                    thumbs += t
+                    after = at + interval
+                }
+                delay(16)
+            }
+        } finally {
+            hiding = false
+        }
+        val verdict = if (thumbs.isEmpty()) Validity.Valid else {
+            validity.peek(if (thumbs.size >= 3) ScreenChange.median(thumbs) else thumbs.last(), boxes.map { it.toBox() })
+        }
+        Logs.i("自動翻訳: 触れたので訳の枠の下を見た（$verdict）")
+        return (verdict as? Validity.Invalid)?.label
     }
 
     // ---- 監視：届いた画面を判定器へ ----
@@ -428,14 +446,15 @@ class ScreenTranslateService : Service() {
         while (true) {
             delay(AUTO_POLL_MS)
             val capturer = capturer ?: return
-            // 撮る・のぞくために自分の表示を隠している間と、メニューを選んでいる間は判定しない
-            if (hiding || state.menuOpen) continue
+            // 撮る・のぞくために自分の表示を隠している間は判定しない（隠した画面は、比べる基準と違う）
+            if (hiding) continue
             val sample = capturer.latestThumb(lastAt)
             val now = SystemClock.uptimeMillis()
             if (sample != null) lastAt = sample.second
             val thumb = sample?.first
             when {
-                state.phase == Phase.Watching -> {
+                // 判定Aは状態遷移の作業（ResetStart・EndStart）で待っている間だけ、判定Bは BeginValidity・EndValidity の間だけ動く
+                startJudge.active -> {
                     val own = thumb?.let { t -> ScreenChange.mask(t, listOfNotNull(button?.bounds?.toBox())) }
                     if (startJudge.feed(thumb, now, own)) dispatch(SessionEvent.Settled)
                 }
@@ -443,7 +462,7 @@ class ScreenTranslateService : Service() {
                     val own = overlay?.occupiedRects().orEmpty().map { it.toBox() } + listOfNotNull(button?.bounds?.toBox())
                     val boxes = overlay?.boxBounds.orEmpty().map { it.toBox() }
                     val verdict = validity.feed(thumb, boxes, own, watchOutside = state.watchOutside)
-                    if (verdict is Validity.Invalid) dispatch(SessionEvent.Invalidated("${verdict.reason}（${"%.2f".format(verdict.amount)}）"))
+                    if (verdict is Validity.Invalid) dispatch(SessionEvent.Invalidated(verdict.label))
                 }
             }
         }

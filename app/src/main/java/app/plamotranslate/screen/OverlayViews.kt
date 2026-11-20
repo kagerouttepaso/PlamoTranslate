@@ -288,9 +288,9 @@ class TranslationOverlay(private val context: Context, private val windowManager
         }
     }
 
-    /** 画面上部の中央に、件数・所要時間などを小さく出す。訳以外に触れたら全体を消すのにも使う。 */
+    /** 画面上部の中央に、件数・所要時間などを小さく出す。訳以外に触れたら全体を消すのにも使う。出せなければ false。 */
     @SuppressLint("ClickableViewAccessibility")
-    fun showStatus(text: String) {
+    fun showStatus(text: String): Boolean {
         val palette = OverlayPalette.current(context)
         val view = statusView ?: TextView(context).apply {
             setTextColor(palette.onSurface)
@@ -316,10 +316,14 @@ class TranslationOverlay(private val context: Context, private val windowManager
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 y = context.dp(4)
             }
-            windowManager.addView(this, params)
+            // 置けなければ（重ね表示の許可が無いときなど）出さない。呼ぶ側が別の手段で知らせる
+            if (runCatching { windowManager.addView(this, params) }.onFailure { Logs.w("画面翻訳: ステータス表示を置けませんでした", it) }.isFailure) {
+                return false
+            }
             statusView = this
         }
         view.text = "$text　（タップで消す）"
+        return true
     }
 
     /** 訳の枠とステータス表示を消し、枠のウィンドウも外す。 */

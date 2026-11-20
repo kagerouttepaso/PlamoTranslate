@@ -38,7 +38,7 @@ class ScreenSessionTest {
         )
         assertEquals(Phase.Showing(1), s.phase)
         assertEquals(
-            listOf(Effect.Capture(1), Effect.BeginValidity(1), Effect.Recognize(1), Effect.Translate(1), Effect.Finished(1)),
+            listOf(Effect.EndStart, Effect.Capture(1), Effect.BeginValidity(1), Effect.Recognize(1), Effect.Translate(1), Effect.Finished(1)),
             effects,
         )
     }
@@ -48,7 +48,7 @@ class ScreenSessionTest {
         // 2026-11-12の不具合：Discordで訳し始めと同時に戻ったのに、訳し終わった前の画面の訳がチャンネル一覧の上に出た
         val (s, effects) = run(translatingAuto(), SessionEvent.Invalidated("画面が切り替わった"))
         assertEquals(Phase.Watching, s.phase)
-        assertEquals(listOf(Effect.Cancel(1, ""), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), effects.anyReason())
+        assertEquals(listOf(Effect.Cancel(1, "", false), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), effects.anyReason())
     }
 
     @Test
@@ -70,7 +70,7 @@ class ScreenSessionTest {
         )
         for (e in events) {
             val (_, effects) = run(translatingAuto(), e)
-            assertEquals("$e", listOf(Effect.Cancel(1, ""), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), effects.anyReason())
+            assertEquals("$e", listOf(Effect.Cancel(1, "", false), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), effects.anyReason())
         }
     }
 
@@ -90,7 +90,7 @@ class ScreenSessionTest {
         val showing = run(s1, SessionEvent.Captured(1, true), SessionEvent.Recognized(1, 1), SessionEvent.SegmentDone(1)).first
         val (s2, e2) = run(showing, SessionEvent.ButtonTapped)
         assertEquals(Phase.Idle, s2.phase)
-        assertEquals(listOf(Effect.Cancel(1, ""), Effect.ClearOverlay, Effect.EndValidity), e2.anyReason())
+        assertEquals(listOf(Effect.Cancel(1, "", false), Effect.ClearOverlay, Effect.EndValidity), e2.anyReason())
     }
 
     @Test
@@ -112,7 +112,7 @@ class ScreenSessionTest {
         assertTrue(effects.none { it is Effect.Capture })
         val (s2, e2) = run(s, SessionEvent.MenuClosed, SessionEvent.Settled)
         assertEquals(Phase.Capturing(1), s2.phase)
-        assertEquals(listOf(Effect.ResetStart, Effect.Capture(1)), e2)
+        assertEquals(listOf(Effect.ResetStart, Effect.EndStart, Effect.Capture(1)), e2)
     }
 
     @Test
@@ -123,7 +123,7 @@ class ScreenSessionTest {
         assertTrue(effects.none { it is Effect.Capture })
         val (s2, e2) = run(s, SessionEvent.MenuClosed, SessionEvent.Settled)
         assertEquals(Phase.Capturing(1), s2.phase)
-        assertEquals(listOf(Effect.ResetStart, Effect.Capture(1)), e2)
+        assertEquals(listOf(Effect.ResetStart, Effect.EndStart, Effect.Capture(1)), e2)
     }
 
     @Test
@@ -153,12 +153,12 @@ class ScreenSessionTest {
         // 2026-11-12、作者の要望「訳している途中に画面を操作したら全処理をキャンセル」
         val (autoState, autoEffects) = run(translatingAuto(), SessionEvent.OutsideTouched)
         assertEquals(Phase.Watching, autoState.phase)
-        assertEquals(listOf(Effect.Cancel(1, ""), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), autoEffects.anyReason())
+        assertEquals(listOf(Effect.Cancel(1, "", false), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), autoEffects.anyReason())
 
         val tapWorking = run(tap, SessionEvent.ButtonTapped, SessionEvent.Captured(1, true)).first
         val (tapState, tapEffects) = run(tapWorking, SessionEvent.OutsideTouched)
         assertEquals(Phase.Idle, tapState.phase)
-        assertEquals(listOf(Effect.Cancel(1, ""), Effect.ClearOverlay, Effect.EndValidity), tapEffects.anyReason())
+        assertEquals(listOf(Effect.Cancel(1, "", false), Effect.ClearOverlay, Effect.EndValidity), tapEffects.anyReason())
     }
 
     @Test
@@ -166,7 +166,7 @@ class ScreenSessionTest {
         val showing = run(translatingAuto(), SessionEvent.SegmentDone(1), SessionEvent.SegmentDone(1)).first
         val (opened, openEffects) = run(showing, SessionEvent.MenuOpened)
         assertTrue(opened.menuOpen)
-        assertEquals(listOf(Effect.Cancel(1, ""), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), openEffects.anyReason())
+        assertEquals(listOf(Effect.Cancel(1, "", false), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), openEffects.anyReason())
         val (closed, closeEffects) = run(opened, SessionEvent.MenuClosed)
         assertEquals(false, closed.menuOpen)
         assertEquals(listOf(Effect.ResetStart), closeEffects)
@@ -179,7 +179,7 @@ class ScreenSessionTest {
     fun 始め方を変えると訳を消して新しい始め方で待つ() {
         val (toTap, effects) = run(translatingAuto(), SessionEvent.TriggerChanged(Trigger.TAP))
         assertEquals(Phase.Idle, toTap.phase)
-        assertEquals(listOf(Effect.Cancel(1, ""), Effect.ClearOverlay, Effect.EndValidity, Effect.ButtonActive(true)), effects.anyReason())
+        assertEquals(listOf(Effect.Cancel(1, "", false), Effect.ClearOverlay, Effect.EndValidity, Effect.ButtonActive(true)), effects.anyReason())
         val (toAuto, autoEffects) = run(tap, SessionEvent.TriggerChanged(Trigger.AUTO))
         assertEquals(Phase.Watching, toAuto.phase)
         assertTrue(autoEffects.contains(Effect.ResetStart))
@@ -195,12 +195,12 @@ class ScreenSessionTest {
     }
 
     /** 取り消しの理由は記録のためのもので、後片付けの作業は同じ。比べるときは理由を外す。 */
-    private fun List<Effect>.anyReason() = map { if (it is Effect.Cancel) it.copy(reason = "") else it }
+    private fun List<Effect>.anyReason() = map { if (it is Effect.Cancel) it.copy(reason = "", working = false) else it }
 
     @Test
     fun 取り消しの作業は取り消した理由を持つ() {
         val (_, effects) = run(translatingAuto(), SessionEvent.Invalidated("スクロールした"))
-        assertEquals(Effect.Cancel(1, "スクロールした"), effects.first())
+        assertEquals(Effect.Cancel(1, "スクロールした", true), effects.first())
     }
 
     @Test
@@ -220,7 +220,7 @@ class ScreenSessionTest {
         val showing = run(translatingAuto(), SessionEvent.SegmentDone(1), SessionEvent.SegmentDone(1), SessionEvent.OutsideTouched).first
         val (s, effects) = run(showing, SessionEvent.Peeked(1, invalid = "訳の枠の下が変わった"))
         assertEquals(Phase.Watching, s.phase)
-        assertEquals(Effect.Cancel(1, "訳の枠の下が変わった"), effects.first())
+        assertEquals(Effect.Cancel(1, "訳の枠の下が変わった", false), effects.first())
     }
 
     @Test
@@ -241,10 +241,54 @@ class ScreenSessionTest {
     fun 訳の枠を置けなければ取り消して知らせる() {
         val (s, effects) = run(translatingAuto(), SessionEvent.BoxesUnplaced(1))
         assertEquals(Phase.Watching, s.phase)
-        assertEquals(Effect.Cancel(1, "訳の枠を置けなかった"), effects.first())
+        assertEquals(Effect.Cancel(1, "訳の枠を置けなかった", true), effects.first())
         assertEquals(Effect.BoxesFailed(1), effects.last())
         assertTrue(effects.none { it is Effect.Finished })
         // 取り消した後に届いた出来事は捨てる
         assertEquals(emptyList<Effect>(), run(s, SessionEvent.BoxesUnplaced(1)).second)
+    }
+
+    @Test
+    fun セッションが無いときの無効の出来事は何もしない() {
+        // ユーザー補助のイベントはいつも届くので、待ちのたびに判定Aを始め直さないこと
+        assertEquals(emptyList<Effect>(), run(auto, SessionEvent.Invalidated("スクロールした")).second)
+        assertEquals(emptyList<Effect>(), run(tap, SessionEvent.Invalidated("スクロールした")).second)
+    }
+
+    @Test
+    fun のぞいていないときや古いセッションののぞきの結果と枠を置けなかった出来事は捨てる() {
+        val showing = run(translatingAuto(), SessionEvent.SegmentDone(1), SessionEvent.SegmentDone(1)).first
+        assertEquals(emptyList<Effect>(), run(showing, SessionEvent.Peeked(1, invalid = "x")).second)
+        val peeking = run(showing, SessionEvent.OutsideTouched).first
+        assertEquals(emptyList<Effect>(), run(peeking, SessionEvent.Peeked(0, invalid = "x")).second)
+        assertEquals(emptyList<Effect>(), run(showing, SessionEvent.BoxesUnplaced(1)).second)
+    }
+
+    @Test
+    fun 待ちから撮り始めるときと自動をやめたときは判定Aをやめる() {
+        assertEquals(listOf(Effect.EndStart, Effect.Capture(1)), run(auto, SessionEvent.Settled).second)
+        assertTrue(run(auto, SessionEvent.ButtonTapped).second.contains(Effect.EndStart))
+        assertEquals(listOf(Effect.Capture(1)), run(tap, SessionEvent.ButtonTapped).second)
+        assertEquals(listOf(Effect.ResetStart), ScreenSession.start(Trigger.AUTO).second)
+        assertEquals(emptyList<Effect>(), ScreenSession.start(Trigger.TAP).second)
+    }
+
+    @Test
+    fun 作業の中で出た出来事は今の作業を終えてから状態遷移へ渡す() {
+        val performed = mutableListOf<Effect>()
+        lateinit var loop: ScreenSessionLoop
+        loop = ScreenSessionLoop(Trigger.AUTO) { effect ->
+            performed += effect
+            // 撮る前に判定Aをやめた作業の中で、撮れなかったことが同期で届く（撮影の部品が無いときなど）
+            if (effect == Effect.EndStart) loop.dispatch(SessionEvent.Captured(1, ok = false))
+        }
+        loop.start(Trigger.AUTO)
+        loop.dispatch(SessionEvent.Settled)
+        // 撮る作業は、撮れなかったことの後片付けより前に行う（後片付けの後に取り消したセッションを撮らない）
+        val capture = performed.indexOf(Effect.Capture(1))
+        val cancel = performed.indexOfFirst { it is Effect.Cancel }
+        assertTrue("$performed", capture in 0 until cancel)
+        assertEquals(Phase.Watching, loop.state.phase)
+        assertTrue(performed.last() is Effect.CaptureFailed)
     }
 }

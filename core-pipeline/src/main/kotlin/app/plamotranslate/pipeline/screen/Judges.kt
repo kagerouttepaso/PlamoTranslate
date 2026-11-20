@@ -10,12 +10,22 @@ class StartJudge(private val p: StartParams) {
     private var stableSince = 0L
     private var since = 0L
 
+    /** 待っているか（[reset] から [end] まで）。待っている間だけ、届いた画面を [feed] へ渡す。 */
+    var active = false
+        private set
+
     /** 待ちを始める。 */
     fun reset(now: Long) {
+        active = true
         recent.clear()
         previous = null
         stableSince = now
         since = now
+    }
+
+    /** 待ちをやめる（撮り始めたとき、自動で訳すのをやめたとき）。 */
+    fun end() {
+        active = false
     }
 
     /**
@@ -43,7 +53,10 @@ sealed interface Validity {
     data object Valid : Validity
 
     /** 無効になった。[reason] は理由（ログ用）、[amount] は変わったセルの割合。 */
-    data class Invalid(val reason: String, val amount: Float) : Validity
+    data class Invalid(val reason: String, val amount: Float) : Validity {
+        /** 記録と取り消しの理由に書く文（「画面が切り替わった（0.74）」）。 */
+        val label: String get() = "$reason（${"%.2f".format(amount)}）"
+    }
 }
 
 /**

@@ -85,8 +85,14 @@ internal class PageLayout(
 }
 
 /** 訳す工程の結果。[stats] はストリームを閉じるまで増える。 */
-internal class TranslationRun(val model: String, val startedAt: Long) {
+internal class TranslationRun(val model: String, val startedAt: Long, private val stream: TranslationStream) {
     var stats: TranslationStream.Stats? = null
+
+    /** 翻訳のストリームを閉じる（訳し終えた・失敗した）。閉じると流し込む工程の購読が終わる。 */
+    fun close() {
+        stats = stream.stats
+        stream.close()
+    }
 }
 
 /**

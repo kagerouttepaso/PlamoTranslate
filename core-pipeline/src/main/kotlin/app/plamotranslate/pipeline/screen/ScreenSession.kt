@@ -60,6 +60,10 @@ object ScreenSession {
     fun initial(trigger: Trigger): State =
         State(trigger, autoOn = trigger == Trigger.AUTO, phase = if (trigger == Trigger.AUTO) Phase.Watching else Phase.Idle)
 
+    /** 始めるときの状態と作業（自動で訳すなら判定Aの待ちに入る）。 */
+    fun start(trigger: Trigger): Pair<State, List<Effect>> =
+        initial(trigger).let { it to if (it.phase == Phase.Watching) listOf(Effect.ResetStart) else emptyList() }
+
     /** 起きたこと。 */
     sealed interface SessionEvent {
         /** フローティングボタンのタップ。 */
@@ -130,13 +134,19 @@ object ScreenSession {
         /** のぞいて変わっていなかったので、隠した訳の枠を戻す。 */
         data class ShowBoxes(val session: Int) : Effect
 
-        /** 撮影・文字認識・翻訳・のぞきを取り消す。[reason] は取り消した理由（記録に書く）。 */
-        data class Cancel(val session: Int, val reason: String) : Effect
+        /**
+         * 撮影・文字認識・翻訳・のぞきを取り消し、セッションの材料を捨てる。[reason] は理由（記録に書く）。[working] は
+         * 撮ってから訳し終わるまでの途中だったか（途中なら「取り消した」、訳を出していたなら「訳を消した」と記録する）。
+         */
+        data class Cancel(val session: Int, val reason: String, val working: Boolean) : Effect
         data object ClearOverlay : Effect
         data object EndValidity : Effect
 
         /** 判定Aを最初から（待ちに入る）。 */
         data object ResetStart : Effect
+
+        /** 判定Aをやめる（撮り始めたとき、自動で訳すのをやめたとき）。 */
+        data object EndStart : Effect
 
         /** フローティングボタンの見た目（自動で訳すのを止めているときは薄く）。 */
         data class ButtonActive(val active: Boolean) : Effect
@@ -238,18 +248,19 @@ object ScreenSession {
     /** 後片付けをして待ちに戻る（取り消しはすべてここを通る）。[reason] は取り消した理由。 */
     private fun rest(state: State, reason: String): Pair<State, List<Effect>> {
         val effects = mutableListOf<Effect>()
-        state.session?.let { effects += Effect.Cancel(it, reason) }
+        state.session?.let { effects += Effect.Cancel(it, reason, state.working) }
         effects += Effect.ClearOverlay
         effects += Effect.EndValidity
         val watching = state.trigger == Trigger.AUTO && state.autoOn
-        if (watching) effects += Effect.ResetStart
+        if (watching) effects += Effect.ResetStart else if (state.phase == Phase.Watching) effects += Effect.EndStart
         return state.copy(phase = if (watching) Phase.Watching else Phase.Idle) to effects
     }
 
     /** 新しいセッションで撮り始める。 */
     private fun capture(state: State): Pair<State, List<Effect>> {
         val s = state.nextSession
-        return state.copy(phase = Phase.Capturing(s), nextSession = s + 1) to listOf(Effect.Capture(s))
+        val effects = if (state.phase == Phase.Watching) listOf(Effect.EndStart, Effect.Capture(s)) else listOf(Effect.Capture(s))
+        return state.copy(phase = Phase.Capturing(s), nextSession = s + 1) to effects
     }
 
     /** 今が [P] のセッション [session] なら [block] を、そうでなければ何もしない（遅れて届いた古いセッションの結果を捨てる）。 */
@@ -263,4 +274,48 @@ object ScreenSession {
     }
 
     private fun Pair<State, List<Effect>>.plus(vararg more: Effect): Pair<State, List<Effect>> = first to second + more
+}
+
+/**
+ * 出来事を順に [ScreenSession.reduce] へ渡し、返った作業を [perform] で行う。作業を行っている間に届いた出来事（作業の中から
+ * 同期で出たものを含む）は、今の出来事の作業をすべて行ってから順に渡す。作業の途中で状態遷移へ入り直すと、外側の残りの作業が
+ * 内側の後片付けの後に走るため（取り消したセッションの作業が走る）。メインスレッドだけで使う。
+ */
+class ScreenSessionLoop(trigger: ScreenSession.Trigger, private val perform: (ScreenSession.Effect) -> Unit) {
+    var state: ScreenSession.State = ScreenSession.initial(trigger)
+        private set
+    private val pending = ArrayDeque<ScreenSession.SessionEvent>()
+    private var running = false
+
+    /** 始め直す（始め方の設定を読み直したとき）。 */
+    fun start(trigger: ScreenSession.Trigger) {
+        val (next, effects) = ScreenSession.start(trigger)
+        state = next
+        run(effects)
+    }
+
+    fun dispatch(event: ScreenSession.SessionEvent) {
+        pending.addLast(event)
+        if (running) return
+        running = true
+        try {
+            while (pending.isNotEmpty()) {
+                val (next, effects) = ScreenSession.reduce(state, pending.removeFirst())
+                state = next
+                effects.forEach(perform)
+            }
+        } finally {
+            running = false
+        }
+    }
+
+    private fun run(effects: List<ScreenSession.Effect>) {
+        running = true
+        try {
+            effects.forEach(perform)
+        } finally {
+            running = false
+        }
+        if (pending.isNotEmpty()) dispatch(pending.removeFirst())
+    }
 }
