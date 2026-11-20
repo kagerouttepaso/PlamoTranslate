@@ -149,6 +149,7 @@ class ScreenTranslateService : Service() {
         val wm = getSystemService(WindowManager::class.java)
         overlay = TranslationOverlay(this, wm).also {
             it.onStatusTap = { dispatch(SessionEvent.StatusTapped) }
+            it.onBoxesUnplaced = { work?.let { w -> dispatch(SessionEvent.BoxesUnplaced(w.session)) } }
             it.opaqueWithAccessibility = { preferences.opaqueOverlay }
         }
         // ユーザー補助がつながっていれば、ほかのアプリ・画面への切り替わりをイベントにする（docs/資料/端末の能力.md「問い1」）
@@ -196,6 +197,7 @@ class ScreenTranslateService : Service() {
             is Effect.Translate -> translate(effect.session)
             is Effect.Finished -> workOf(effect.session)?.let(::finished)
             is Effect.CaptureFailed -> overlay?.showStatus("画面を撮影できませんでした")
+            is Effect.BoxesFailed -> overlay?.showStatus("訳の枠を出せませんでした。重ね表示の許可を確かめてください")
             is Effect.Failed -> overlay?.showStatus("翻訳に失敗しました: ${effect.message}")
             is Effect.Peek -> peek(effect.session)
             is Effect.ShowBoxes -> if (workOf(effect.session) != null) overlay?.setBoxesVisible(true)

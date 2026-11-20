@@ -73,6 +73,9 @@ object ScreenSession {
 
         /** 1件の訳が確定した。 */
         data class SegmentDone(val session: Int) : SessionEvent
+
+        /** 訳の枠を並べるウィンドウを置けなかった（重ね表示の許可を途中で外したときなど）。 */
+        data class BoxesUnplaced(val session: Int) : SessionEvent
         data class TranslationFailed(val session: Int, val message: String) : SessionEvent
 
         /** 判定B・イベント：訳している・出している訳が無効になった。 */
@@ -114,6 +117,9 @@ object ScreenSession {
 
         /** 画面を撮影できなかったと知らせる。 */
         data class CaptureFailed(val session: Int) : Effect
+
+        /** 訳の枠を出せなかったと知らせる。 */
+        data class BoxesFailed(val session: Int) : Effect
 
         /** 翻訳に失敗したと知らせる。 */
         data class Failed(val session: Int, val message: String) : Effect
@@ -180,6 +186,11 @@ object ScreenSession {
             } else {
                 state.copy(phase = p.copy(done = done)) to emptyList()
             }
+        }
+
+        // 枠を出せなければ訳しても見せられないので、取り消して知らせる（件数と時間を出して終えたように見せない）
+        is SessionEvent.BoxesUnplaced -> ifPhase<Phase.Translating>(state, event.session) {
+            rest(state, "訳の枠を置けなかった").plus(Effect.BoxesFailed(event.session))
         }
 
         is SessionEvent.TranslationFailed -> ifPhase<Phase.Translating>(state, event.session) {

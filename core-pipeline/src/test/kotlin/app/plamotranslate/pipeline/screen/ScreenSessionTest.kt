@@ -236,4 +236,15 @@ class ScreenSessionTest {
         assertTrue(auto.watchOutside)
         assertEquals(false, tap.watchOutside)
     }
+
+    @Test
+    fun 訳の枠を置けなければ取り消して知らせる() {
+        val (s, effects) = run(translatingAuto(), SessionEvent.BoxesUnplaced(1))
+        assertEquals(Phase.Watching, s.phase)
+        assertEquals(Effect.Cancel(1, "訳の枠を置けなかった"), effects.first())
+        assertEquals(Effect.BoxesFailed(1), effects.last())
+        assertTrue(effects.none { it is Effect.Finished })
+        // 取り消した後に届いた出来事は捨てる
+        assertEquals(emptyList<Effect>(), run(s, SessionEvent.BoxesUnplaced(1)).second)
+    }
 }

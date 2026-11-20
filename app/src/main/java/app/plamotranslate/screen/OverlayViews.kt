@@ -185,6 +185,9 @@ class TranslationOverlay(private val context: Context, private val windowManager
     /** ステータス表示をタップしたとき（訳している途中なら取り消してから消すため、サービスが受ける）。無ければ消すだけ。 */
     var onStatusTap: (() -> Unit)? = null
 
+    /** 訳の枠を並べるウィンドウを置けなかった（重ね表示の許可を途中で外したときなど）。枠は1つも出ていない。 */
+    var onBoxesUnplaced: (() -> Unit)? = null
+
     /** 訳の枠の範囲（画面の座標）。 */
     val boxBounds: List<Rect> get() = boxRects.toList()
 
@@ -211,6 +214,11 @@ class TranslationOverlay(private val context: Context, private val windowManager
         val type = if (a11y != null) WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY else WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         val rects = slots.map { OverlayStyle.boxRect(context, it) }
         val layer = placeLayer(rects, host, viewContext, type, alpha = if (a11y != null) 1f else passThroughAlpha)
+        if (layer == null && rects.isNotEmpty()) {
+            // 置けなかったことをコールバックで伝えて終える（受けた側が取り消して上部に出すので、「翻訳中」は出さない）
+            onBoxesUnplaced?.invoke()
+            return
+        }
         if (layer != null) {
             val origin = layer.second
             for ((slot, rect) in slots.zip(rects)) {
