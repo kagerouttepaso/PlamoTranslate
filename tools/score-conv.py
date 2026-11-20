@@ -5,9 +5,8 @@
 
 - 正解：1行が1つの単位（カードにしてよい単位）。「話した人<TAB>文」。# で始まる行と「（?）」は無視する。
   単位の中の句点・疑問符は文の終わりとして扱う（単位の中で文の終わりで切るのは許す）。
-- ログ：カードを確定した行「確定（理由）始め秒〜終わり秒: [言語] 文 ／ 直前の途中 …」を読む（`SpeechSegmenter` が書く）。
-  端末の logcat（タグ PlamoTranslate。「詳しい記録を残す」がオンのとき、頭に「会話の認識: 」が付く）と、
-  PC でのリプレイ（`ConversationReplayTest.replay` の結果の「# 区切りの経過」）のどちらでもよい。
+- ログ：カードを確定した行を読む（読み方は `tools/conversation_log.py`）。端末の logcat と、PC でのリプレイ
+  （`ConversationReplayTest.replay` の結果）のどちらでもよい。
 
 カードの文と正解をつないだ文字列どうしを、文字（文字と数字だけ）で並べ、カードの切れ目が正解のどこに当たるかを求める。
 正解に区切りを合わせ込むのが目標ではない。目標は細切れにしないこと：自動の判断（話し手の交代・長い発話）で文の途中を
@@ -24,6 +23,8 @@
 import re
 import sys
 
+from conversation_log import PERSON_REASONS, read_cards
+
 # Windows のコンソールでも日本語が化けないよう、出力を UTF-8 にする
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -34,14 +35,6 @@ MIN_CHARS = 5
 #: 切れ目が正解の切れ目に一致したとみなすずれ（文字）。認識の揺れで数文字ずれるため。
 TOLERANCE = 3
 
-#: 話した人の操作や間による区切りの理由（`SpeechSegmenter` の close・cutAt に渡す理由）。これ以外は自動の判断。
-PERSON_REASONS = ("話し終わり", "手で区切り", "停止")
-#: カードを確定した行。書くのは `SpeechSegmenter.finishIfReady` の trace で、この正規表現が行の形の正本。
-#: Kotlin の単体試験（`SpeechSegmenterTest` の「確定の行は採点の道具が読める形で書く」）がこの行を読んで実際の行に当て、
-#: 形が食い違えば落ちる。Java の正規表現でもそのまま使えるよう、名前付きの組は使わない（組：理由・始め・終わり・文）。
-#: 理由は1段の括弧を含みうる（「話し手の交代（文：ja→en）」）。
-CARD_CLOSED = r"確定（((?:[^（）]|（[^（）]*）)*)）([\d.]+)秒〜([\d.]+)秒: \[[^\]]*\] (.*?) ／ 直前の途中"
-CUT = re.compile(CARD_CLOSED)
 SENTENCE_END = set("。？?！!")
 CLAUSE_END = set("、，,")
 
@@ -64,19 +57,6 @@ def read_truth(path):
         text = line.split("\t", 1)[-1].replace("（?）", "").replace("(?)", "")
         units.append(text)
     return units
-
-
-def read_cards(path):
-    cards = []
-    for line in open(path, encoding="utf-8", errors="replace"):
-        m = CUT.search(line)
-        if not m:
-            continue
-        reason, start, end, text = m.group(1), float(m.group(2)), float(m.group(3)), m.group(4).strip()
-        if not text:
-            continue
-        cards.append({"reason": reason, "start": start, "end": end, "text": text})
-    return cards
 
 
 def align(s, t):

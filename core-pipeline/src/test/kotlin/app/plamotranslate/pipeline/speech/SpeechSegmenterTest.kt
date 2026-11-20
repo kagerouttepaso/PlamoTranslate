@@ -185,12 +185,13 @@ class SpeechSegmenterTest {
     private fun finals(events: List<SpeechEvent>) = events.filterIsInstance<SpeechEvent.Final>().map { it.utterance }
 
     /**
-     * 採点の道具（`tools/score-conv.py`）は、確定の行を正規表現 `CARD_CLOSED` で読み、理由が `PERSON_REASONS` で始まる区切りを
-     * 話した人によるものとして数える。行の形の正本は道具の側にあり、ここで実際に書く行に当てて、食い違いを止める。
+     * 採点の道具（`tools/score-conv.py`・`tools/score-speaker.py`）は、確定の行を `tools/conversation_log.py` の正規表現
+     * `CARD_CLOSED` で読み、理由が `PERSON_REASONS` で始まる区切りを話した人によるものとして数える。行の形の正本は道具の側にあり、
+     * ここで実際に書く行に当てて、食い違いを止める。
      */
     @Test
     fun 確定の行は採点の道具が読める形で書く() {
-        val tool = listOf(File("../tools/score-conv.py"), File("tools/score-conv.py")).first { it.exists() }.readText()
+        val tool = listOf(File("../tools/conversation_log.py"), File("tools/conversation_log.py")).first { it.exists() }.readText()
         val closed = Regex(Regex("""(?m)^CARD_CLOSED = r"(.*)"$""").find(tool)!!.groupValues[1])
         val personReasons = Regex("""(?m)^PERSON_REASONS = \((.*)\)$""").find(tool)!!.groupValues[1]
             .split(',').map { it.trim().trim('"') }.filter { it.isNotEmpty() }
@@ -202,10 +203,14 @@ class SpeechSegmenterTest {
             s.feed(Sound.KO to 1.5) + s.flush() // 停止
         val cards = finals(events)
         val lines = s.traces.filter { it.startsWith("確定（") }.map { line -> closed.find(line) ?: throw AssertionError("採点の道具が読めない確定の行：$line") }
-            .map { it.groupValues }.filter { it[4].isNotBlank() }
+            .map { it.groupValues }.filter { it[5].isNotBlank() }
 
-        assertEquals(cards.map { it.text }, lines.map { it[4] })
-        cards.zip(lines).forEach { (card, g) -> assertEquals(card.startMs / 1000.0, g[2].toDouble(), 0.01) }
+        assertEquals(cards.map { it.text }, lines.map { it[5] })
+        assertEquals(cards.map { it.lang }, lines.map { it[4] })
+        cards.zip(lines).forEach { (card, g) ->
+            assertEquals(card.startMs / 1000.0, g[2].toDouble(), 0.01)
+            assertEquals((card.startMs + card.durationMs) / 1000.0, g[3].toDouble(), 0.01)
+        }
         val reasons = lines.map { it[1] }
         assertTrue(reasons.toString(), reasons.any { it.startsWith("話し手の交代（") && it.endsWith("）") })
         personReasons.forEach { person -> assertTrue("$person の区切りが出ない：$reasons", reasons.any { it.startsWith(person) }) }

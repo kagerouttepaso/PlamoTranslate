@@ -40,3 +40,6 @@ captures/
 # 個別の診断資料・作業メモは公開しない
 /local-notes/
 /.yomiyasu/
+
+# Python の import が作るキャッシュ（tools/ の採点の道具）
+__pycache__/

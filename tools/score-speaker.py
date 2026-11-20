@@ -5,7 +5,8 @@
 
 - 基準：`ConversationReplayTest.reference` が書く「始まり<TAB>終わり<TAB>言語」（0.25秒ごとの声の言語。声が無ければ `-`）。
   録音の全体を見通した Whisper tiny の判定で、正解そのものではないが、区切りの判断の前と後を同じ基準で比べられる。
-- リプレイの結果：`ConversationReplayTest.replay` が書く「# カード」の行（「始まり-終わり [言語] 文」）。
+- 会話の記録：カードを確定した行を読む（読み方は `tools/conversation_log.py`）。PC のリプレイ（`ConversationReplayTest.replay`
+  の結果）と、端末で録音を流したときの logcat のどちらでもよい。
 
 数えるもの（1枚のカード＝1人の話し手の1言語が守れているか）:
 - 言語の違う声：カードの中の声のうち、基準の言語がカードの言語と違う時間（混ざったカードと、言語を誤ったカード）
@@ -16,13 +17,14 @@
 import re
 import sys
 
+from conversation_log import read_cards
+
 #: 交代とみなす、前後の言語が続く最短の声の長さ（秒）。基準の揺れを交代と数えない。
 MIN_RUN = 1.5
 #: 交代からこれより遅い切れ目は、取りこぼしと数える（秒）。
 MAX_LATE = 3.0
 #: 交代より前に切った切れ目も、この範囲なら同じ交代の切れ目とみなす（秒）。
 MAX_EARLY = 1.0
-CARD = re.compile(r"^\s*([\d.]+)-\s*([\d.]+) \[([^\]]*)\] (.*)$")
 PHANTOM = re.compile(r"(?i)\bsystem\b|システム|시스템")
 
 
@@ -33,18 +35,6 @@ def read_reference(path):
             start, end, lang = line.rstrip("\n").split("\t")
             runs.append((float(start), float(end), lang))
     return runs
-
-
-def read_cards(path):
-    cards = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            if line.startswith("# 区切りの経過"):
-                break
-            m = CARD.match(line)
-            if m:
-                cards.append((float(m.group(1)), float(m.group(2)), m.group(3), m.group(4)))
-    return cards
 
 
 def overlap(a0, a1, b0, b1):
@@ -83,13 +73,13 @@ def score(runs, cards):
     voiced = [(s, e, lang) for s, e, lang in runs if lang != "-"]
     speech = 0.0
     wrong = 0.0
-    for c0, c1, clang, _ in cards:
+    for c0, c1, clang in ((c["start"], c["end"], c["lang"]) for c in cards):
         for s, e, lang in voiced:
             o = overlap(s, e, c0, c1)
             speech += o
             if lang != clang:
                 wrong += o
-    edges = sorted({c[0] for c in cards} | {c[1] for c in cards})
+    edges = sorted({c["start"] for c in cards} | {c["end"] for c in cards})
     found = 0
     delays = []
     missed = []
@@ -106,7 +96,7 @@ def score(runs, cards):
             delays.append(min(near, key=abs))
         else:
             missed.append((at, before, after))
-    phantoms = sum(len(PHANTOM.findall(c[3])) for c in cards)
+    phantoms = sum(len(PHANTOM.findall(c["text"])) for c in cards)
     return {
         "cards": len(cards),
         "speech": speech,
