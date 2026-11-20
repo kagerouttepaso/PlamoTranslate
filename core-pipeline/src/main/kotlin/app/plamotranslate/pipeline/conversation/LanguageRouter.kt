@@ -3,6 +3,8 @@ package app.plamotranslate.pipeline.conversation
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.isChinese
 import app.plamotranslate.llm.sameAs
+import app.plamotranslate.pipeline.speech.ScriptCounts
+import app.plamotranslate.pipeline.speech.ScriptLanguage
 import app.plamotranslate.pipeline.speech.SpeechLanguages
 import app.plamotranslate.pipeline.speech.SpeechModel
 
@@ -103,12 +105,13 @@ class LanguageRouter(
     private fun confusable(language: Language): Boolean =
         (self == Language.JA && language.isChinese) || (self.isChinese && language == Language.JA)
 
-    /** 会話の言語（音声認識が話し手を決める範囲）。相手不明なら自分と探す候補、相手確定なら自分と相手。 */
+    /** 会話の言語。相手不明なら自分と探す候補、相手確定なら自分と相手。 */
+    private val conversation: List<Language>
+        get() = (partner?.let { listOf(it) } ?: candidates) + self
+
+    /** 会話の言語（音声認識が話し手を決める範囲）。 */
     val speechLanguages: SpeechLanguages
-        get() {
-            val partners = partner?.let { listOf(it) } ?: candidates
-            return SpeechLanguages((partners + self).mapTo(HashSet()) { speechGroup(it) }, separateChinese = chinese, primary = speechGroup(self))
-        }
+        get() = SpeechLanguages(conversation.mapTo(HashSet()) { speechGroup(it) }, separateChinese = chinese, primary = speechGroup(self))
 
     /** 確定した発話の方向を決める。自動で相手不明なら、相手の発話の言語を相手にする。 */
     fun route(text: String, langCode: String?): Direction = preview(text, langCode).also {
@@ -117,7 +120,7 @@ class LanguageRouter(
 
     /** 話している最中の途中結果の方向。相手の言語は決めない（判定が揺れやすいため）。 */
     fun preview(text: String, langCode: String?): Direction {
-        val spoken = spokenLanguage(text, langCode, chinese)
+        val spoken = spokenLanguage(text, langCode)
         // 中国語なら、簡体字か繁体字（広東語）かは聞き取った言語に従う
         if (spoken.sameAs(self)) return Direction(if (self.isChinese) spoken else self, partner, mine = true)
         val fixed = mode.fixed
@@ -132,44 +135,43 @@ class LanguageRouter(
     fun chosen(language: Language): Direction =
         if (language.sameAs(self)) Direction(language, partner, mine = true) else Direction(language, self, mine = false)
 
-    companion object {
-        /** 音声認識の言語の組（`LanguageEvidence.group`）での言語。中国語は字体によらず1つの組。 */
-        private fun speechGroup(language: Language): String = if (language.isChinese) "zh" else language.code
-
-
-        /**
-         * 認識器の言語判定を、会話で扱う言語に絞る。
-         * 中国語・広東語の判定は、自分か相手が中国語のとき（[chinese]）だけ中国語とみなす。仮名を含めば日本語の聞き違いとする。
-         * そうでなければ、漢字の多い日本語の聞き違いとして、判定なしと同じく認識した文字の種類で決める（漢字だけなら日本語）。
-         */
-        internal fun spokenLanguage(text: String, langCode: String?, chinese: Boolean = false): Language = when (langCode) {
+    /**
+     * 認識器の言語判定を、会話で扱う言語に絞る。
+     * 中国語・広東語の判定は、自分か相手が中国語のとき（[chinese]）は、中国語の文字で書かれていれば中国語とする。
+     * 中国語の相手でなく、会話に日本語があれば、漢字の多い日本語の聞き違いなので（[app.plamotranslate.pipeline.speech.LanguageEvidence.group]
+     * が日本語の組にまとめるのと同じ）、日本語か中国語の文字で書かれた文は日本語とする。どれでもなければ判定なしと同じく
+     * 文字の種類で当てる（[byScript]）。
+     */
+    internal fun spokenLanguage(text: String, langCode: String?): Language {
+        val counts by lazy { ScriptCounts.of(text) }
+        return when (langCode) {
             "ja" -> Language.JA
             "ko" -> Language.KO
             "en" -> Language.EN
-            "zh" -> if (chinese && !hasKana(text)) Language.ZH else byScript(text)
-            "yue" -> if (chinese && !hasKana(text)) Language.ZH_HANT else byScript(text)
+            "zh", "yue" -> when {
+                chinese && counts.fits("zh") -> if (langCode == "zh") Language.ZH else Language.ZH_HANT
+                Language.JA in conversation && (counts.fits(Language.JA.code) || counts.fits("zh")) -> Language.JA
+                else -> byScript(counts)
+            }
             // 日・韓・英・中の外の言語は、言語の識別（Whisper）か文字の種類で決めた言語をそのまま使う
-            else -> langCode?.let(Language::ofCode) ?: byScript(text)
+            else -> langCode?.let(Language::ofCode) ?: byScript(counts)
         }
+    }
 
-        private fun hasKana(text: String) = text.any { it in '぀'..'ヿ' }
+    /**
+     * 判定の無い文：会話の言語から文字の種類で当てる（[ScriptLanguage.pick]。簡体字と繁体字は同じ言語として1つにまとめ、
+     * 相手の字体を残す）。当てられなければ、話した人を訳す向きの決まり（自分の言語でなければ相手）で決める：文字があって
+     * 自分の言語の文字でない文は相手の発話（相手が分かっていれば）、それ以外（数字だけの文など）は自分の発話。
+     */
+    private fun byScript(counts: ScriptCounts): Language {
+        val languages = conversation.fold(emptyList<Language>()) { kept, l -> if (kept.any { it.sameAs(l) }) kept else kept + l }
+        return ScriptLanguage.pick(counts, languages) { it.code }
+            ?: partner?.takeUnless { counts.isEmpty || counts.fits(self.code) }
+            ?: self
+    }
 
-        private fun byScript(text: String): Language {
-            var hangul = 0
-            var latin = 0
-            var cjk = 0
-            for (c in text) {
-                when {
-                    c in '가'..'힣' || c in '㄰'..'㆏' -> hangul++
-                    c in 'A'..'Z' || c in 'a'..'z' -> latin++
-                    c in '぀'..'ヿ' || c in '一'..'鿿' -> cjk++
-                }
-            }
-            return when {
-                hangul > 0 && hangul >= cjk -> Language.KO
-                latin > cjk -> Language.EN
-                else -> Language.JA
-            }
-        }
+    companion object {
+        /** 音声認識の言語の組（`LanguageEvidence.group`）での言語。中国語は字体によらず1つの組。 */
+        private fun speechGroup(language: Language): String = if (language.isChinese) "zh" else language.code
     }
 }

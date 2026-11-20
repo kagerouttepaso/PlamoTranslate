@@ -33,10 +33,10 @@ class LanguageRouterTest {
 
     @Test
     fun 中国語や判定なしは文字の種類で決める() {
-        assertEquals(Language.JA, LanguageRouter.spokenLanguage("今日は晴れ", "zh"))
-        assertEquals(Language.JA, LanguageRouter.spokenLanguage("天気", "yue"))
-        assertEquals(Language.KO, LanguageRouter.spokenLanguage("안녕하세요", null))
-        assertEquals(Language.EN, LanguageRouter.spokenLanguage("Thank you", null))
+        assertEquals(Language.JA, LanguageRouter().spokenLanguage("今日は晴れ", "zh"))
+        assertEquals(Language.JA, LanguageRouter().spokenLanguage("天気", "yue"))
+        assertEquals(Language.KO, LanguageRouter().spokenLanguage("안녕하세요", null))
+        assertEquals(Language.EN, LanguageRouter().spokenLanguage("Thank you", null))
     }
 
     @Test
@@ -125,5 +125,48 @@ class LanguageRouterTest {
         assertEquals(Language.ZH, r.partner)
         // 自分が日本語なら中国語を探さず、漢字の多い日本語の聞き違いとして扱う
         assertEquals(false, LanguageRouter(PartnerMode.AUTO, Language.JA).chinese)
+    }
+
+    @Test
+    fun 判定なしで当てられなければ自分の言語の文字でない文は相手の発話にする() {
+        val router = LanguageRouter(PartnerMode.KOREAN)
+        assertEquals(Direction(Language.KO, Language.JA, mine = false), router.route("Thank you", null))
+        assertEquals(Direction(Language.KO, Language.JA, mine = false), router.route("Привет как дела", null))
+        // 文字の無い文は決められないので自分の発話
+        assertEquals(Direction(Language.JA, Language.KO, mine = true), router.route("123 456", null))
+    }
+
+    @Test
+    fun 中国語の相手でなければ簡体字で書き起こした中国語の判定も日本語の聞き違いとする() {
+        val router = LanguageRouter(PartnerMode.KOREAN)
+        assertEquals(Direction(Language.JA, Language.KO, mine = true), router.route("我们说话", "zh"))
+        assertEquals(Direction(Language.KO, Language.JA, mine = false), router.route("안녕하세요", "zh"))
+    }
+
+    @Test
+    fun 中国語の相手では判定なしの中国語の文を相手の発話にする() {
+        val router = LanguageRouter(PartnerMode.CHINESE)
+        assertEquals(Direction(Language.ZH, Language.JA, mine = false), router.route("你好嗎", null))
+    }
+
+    @Test
+    fun 判定なしの中国語の文は簡体字と繁体字を1つの言語として当てる() {
+        val router = LanguageRouter(self = Language.KO)
+        assertEquals(Language.ZH, router.route("我们说话", null).source)
+        assertEquals(false, router.route("我们说话", null).mine)
+    }
+
+    @Test
+    fun 中国語の相手でも中国語の文字でない中国語の判定は文字の種類で決める() {
+        val router = LanguageRouter(PartnerMode.CHINESE)
+        assertEquals(Direction(Language.ZH, Language.JA, mine = false), router.route("你好", "zh"))
+        assertEquals(Direction(Language.ZH, Language.JA, mine = false), router.route("안녕하세요", "zh"))
+        assertEquals(Direction(Language.JA, Language.ZH, mine = true), router.route("今日は晴れ", "zh"))
+    }
+
+    @Test
+    fun 会話に日本語が無ければ中国語の判定を日本語の聞き違いとしない() {
+        val router = LanguageRouter(PartnerMode.ENGLISH, self = Language.KO)
+        assertEquals(Direction(Language.EN, Language.KO, mine = false), router.route("東京大学", "zh"))
     }
 }

@@ -82,9 +82,12 @@ class IdentifiedRecognizerTest {
 
     @Test
     fun 日本語では使わない漢字があれば日本語とみなさない() {
-        assertTrue(Script.hasChineseOnlyHan("我们说话"))
-        assertFalse(Script.hasChineseOnlyHan("東京駅で会う"))
+        assertEquals(1, Script.japaneseHan("我们说话"))
+        assertEquals(4, Script.japaneseHan("東京駅で会う"))
         assertNull(ScriptLanguage.guess("我们说话", setOf("ja", "ru")))
+        // 漢字だけの日本語は、日本語と中国語のどちらにも同じだけ合うので決めない
+        assertNull(ScriptLanguage.guess("東京大学", setOf("ja", "zh")))
+        assertEquals("ja", ScriptLanguage.guess("東京大学", setOf("ja", "ko")))
         assertEquals("zh", ScriptLanguage.guess("我们说话", setOf("ja", "zh")))
     }
 }

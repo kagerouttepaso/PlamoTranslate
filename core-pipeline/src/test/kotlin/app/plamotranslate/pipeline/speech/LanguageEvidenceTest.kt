@@ -55,4 +55,16 @@ class LanguageEvidenceTest {
     fun 雑音は根拠にならない() {
         assertNull(of("", null))
     }
+
+    @Test
+    fun ラテン文字の言語の語はラテン文字の語だけを数える() {
+        assertEquals("en", of("Ｈｅｌｌｏ ｗｏｒｌｄ", "en", SpeechLanguages.ANY))
+        assertNull(of("Hello 안녕", "fr", SpeechLanguages.ANY))
+        assertEquals("fr", of("Ça va très bien", "fr", SpeechLanguages.ANY))
+    }
+
+    @Test
+    fun 絵文字は中身の文字に数えない() {
+        assertNull(of("😀응", "ko"))
+    }
 }

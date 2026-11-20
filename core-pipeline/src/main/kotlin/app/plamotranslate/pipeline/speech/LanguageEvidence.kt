@@ -17,9 +17,9 @@ data class SpeechLanguages(val groups: Set<String>? = null, val separateChinese:
  * 根拠になるなら比べるための言語の組を、ならなければ null を返す。[SpeechSegmenter] は、この組が変わったときだけ
  * 話し手が代わったとみなす。根拠にするのは、次をすべて満たすときだけ（作者の会話の録音で、言語の交代での区切り8回のうち
  * 7回が、これを満たさない判定から起きていた。`docs/判断/2026-11-13_会話翻訳の話し手の交代は確かな言語の判定だけで区切る.md`）。
- * - 判定した言語と、認識した文字の種類が合う（韓国語ならハングル、英語なら英字、日本語なら仮名か漢字、中国語なら漢字）。
- *   「ま」を韓国語、「我」を英語と判定したものは、聞き違い。
- * - 中身が1語より多い（英語は2語以上、ほかは3文字以上）。話の間の「Now.」「No.」のような1語の判定は、雑音や言いよどみの聞き違いが多い。
+ * - 判定した言語の文字が、認識した文字の半分以上を占める（韓国語ならハングル、英語なら英字、日本語なら仮名か漢字、
+ *   中国語なら漢字。[ScriptCounts.fits]）。「ま」を韓国語、「我」を英語と判定したものは、聞き違い。
+ * - 中身が1語より多い（ラテン文字の言語は2語以上、ほかは3文字以上）。話の間の「Now.」「No.」のような1語の判定は、雑音や言いよどみの聞き違いが多い。
  * - 会話の言語（[SpeechLanguages.groups]）のどれかである。
  *
  * 会話の相手が中国語でなければ、中国語・広東語と判定されたものは日本語の聞き違い（漢字の多い日本語）として日本語と同じ組にする。
@@ -31,29 +31,14 @@ object LanguageEvidence {
         val lang = recognition.lang ?: return null
         val group = group(lang, languages.separateChinese) ?: return null
         if (languages.groups != null && group !in languages.groups) return null
-        val letters = Letters.of(recognition.text)
-        if (lang in Letters.LANGS) {
-            if (!letters.matches(lang)) return null
-            if (!letters.enough(lang)) return null
-        } else if (!otherLanguageMatches(recognition.text, lang)) {
-            return null
-        }
+        val counts = ScriptCounts.of(recognition.text)
+        if (!counts.fits(lang) || !enough(counts, lang)) return null
         return group
     }
 
-    /**
-     * 日・韓・英・中の外の言語（Qwen3-ASR で聞く言語）：文の多数派の文字が言語の文字と合い、中身が1語より多い
-     * （英字の言語は2語以上、ほかは3文字以上）。
-     */
-    private fun otherLanguageMatches(text: String, lang: String): Boolean {
-        val script = Script.ofLanguage(lang)
-        if (Script.ofText(text) != script) return false
-        return if (script == Script.LATIN) {
-            text.split(NON_LETTER).count { it.isNotEmpty() } >= MIN_WORDS
-        } else {
-            text.count { it.isLetter() } >= MIN_CHARS
-        }
-    }
+    /** 中身が1語より多いか（ラテン文字の言語は2語以上、ほかは3文字以上）。 */
+    private fun enough(counts: ScriptCounts, lang: String): Boolean =
+        if (Script.ofLanguage(lang) == Script.LATIN) counts.latinWords >= MIN_WORDS else counts.letters >= MIN_CHARS
 
     /** 言語のコードを、比べるための組にまとめる（根拠かどうかは見ない。言語の境界探しはこれで比べる）。 */
     fun group(lang: String?, separateChinese: Boolean): String? = when (lang) {
@@ -61,49 +46,9 @@ object LanguageEvidence {
         else -> lang
     }
 
-    /** 文字の種類ごとの数と、英字の語の数。 */
-    private class Letters(val hangul: Int, val latin: Int, val kana: Int, val han: Int, val latinWords: Int) {
-        val total get() = hangul + latin + kana + han
-
-        /** 判定した言語の文字が、文字の半分以上を占めるか。 */
-        fun matches(lang: String): Boolean = when (lang) {
-            "ko" -> hangul * 2 >= total
-            "en" -> latin * 2 >= total
-            "ja" -> (kana + han) * 2 >= total
-            "zh", "yue" -> han * 2 >= total && kana == 0
-            else -> false
-        }
-
-        fun enough(lang: String): Boolean = if (lang == "en") latinWords >= MIN_WORDS else total >= MIN_CHARS
-
-        companion object {
-            /** この数え方で判定する言語。ほかの言語は [Script] で判定する。 */
-            val LANGS = setOf("ko", "en", "ja", "zh", "yue")
-
-            fun of(text: String): Letters {
-                var hangul = 0
-                var latin = 0
-                var kana = 0
-                var han = 0
-                for (c in text) when {
-                    c in '가'..'힣' || c in 'ㄱ'..'ㆎ' -> hangul++
-                    c in 'A'..'Z' || c in 'a'..'z' -> latin++
-                    c in 'ぁ'..'ヿ' -> kana++
-                    Character.UnicodeScript.of(c.code) == Character.UnicodeScript.HAN -> han++
-                }
-                val words = text.split(NON_LATIN).count { it.isNotEmpty() }
-                return Letters(hangul, latin, kana, han, words)
-            }
-
-            private val NON_LATIN = Regex("[^A-Za-z]+")
-        }
-    }
-
-    private val NON_LETTER = Regex("[^\\p{L}]+")
-
-    /** 英語の判定を根拠にする語の数。 */
+    /** ラテン文字の言語の判定を根拠にする語の数。 */
     private const val MIN_WORDS = 2
 
-    /** 英語以外の判定を根拠にする文字の数（仮名・漢字・ハングル）。 */
+    /** ラテン文字以外の言語の判定を根拠にする文字の数。 */
     private const val MIN_CHARS = 3
 }
