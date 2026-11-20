@@ -309,4 +309,26 @@ class CameraSessionTest {
         val open = effects.filterIsInstance<Effect.OpenStream>().single()
         assertEquals(null, open.options.source)
     }
+
+    @Test
+    fun モデルを切り替えても訳は残し_品質の低い訳だけ頼み直して同じか高い品質の訳で書き換える() {
+        val s = session()
+        s.handle(Event.EngineChanged(2, quality = 1))
+        s.handle(Event.StreamOpened)
+        val id = ids(s.readTwice("cold brew coffee")).single()
+        s.handle(Event.Final(id, "水出しコーヒー（小）"))
+
+        // 品質の高いモデルへ：訳は出したまま、頼み直す
+        s.handle(Event.EngineChanged(2, quality = 2))
+        val again = ids(s.handle(Event.StreamOpened))
+        assertEquals(1, again.size)
+        assertEquals("水出しコーヒー（小）", s.boxes().single().translation)
+        s.handle(Event.Final(again.single(), "水出しコーヒー（大）"))
+        assertEquals("水出しコーヒー（大）", s.boxes().single().translation)
+
+        // 品質の低いモデルへ戻しても、品質の高い訳を使い、頼み直さない
+        s.handle(Event.EngineChanged(2, quality = 1))
+        assertTrue(ids(s.handle(Event.StreamOpened)).isEmpty())
+        assertEquals("水出しコーヒー（大）", s.boxes().single().translation)
+    }
 }

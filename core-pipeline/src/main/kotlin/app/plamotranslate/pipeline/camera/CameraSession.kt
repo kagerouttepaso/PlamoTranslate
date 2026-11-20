@@ -88,8 +88,11 @@ class CameraSession<L>(
         /** 訳し方の設定（原文の言語・訳す先・モード）。最初の1回も送る。 */
         data class SettingsChanged(val settings: Settings) : Event<Nothing>
 
-        /** 翻訳モデルのエンジンが使えるようになった・切り替わった。[intake] はストリームに一度に渡しておく数（`intakeFor`）。 */
-        data class EngineChanged(val intake: Int) : Event<Nothing>
+        /**
+         * 翻訳モデルのエンジンが使えるようになった・切り替わった。[intake] はストリームに一度に渡しておく数（`intakeFor`）。
+         * [quality] はモデルの訳の品質（`ModelOrigin.quality`。大きいほど高い）で、確定した訳はこの品質と一緒に覚える。
+         */
+        data class EngineChanged(val intake: Int, val quality: Int = 0) : Event<Nothing>
 
         /** 同じエンジンのまま、ストリームに一度に渡しておく数が変わった（同時に訳す数の設定）。 */
         data class IntakeChanged(val intake: Int) : Event<Nothing>
@@ -132,13 +135,21 @@ class CameraSession<L>(
     var paused = false
         private set
 
+    /** 確定した訳と、それを訳したモデルの品質。 */
+    private class Done(val text: String, val quality: Int)
+
     /**
      * 確定した訳（原文のキー → 訳）。読み揺れはほぼ同じ文（[similar]）で吸収する。新しく使った順に [TRANSLATED_LIMIT] 件まで。
-     * カメラを戻して、同じ文が別の段落として現れたときにも使う。
+     * カメラを戻して、同じ文が別の段落として現れたときにも使う。翻訳モデルを切り替えても捨てず、翻訳の契約のキャッシュと同じ規則で
+     * 扱う（docs/設計/翻訳コア.md「キャッシュ」）：出すのは品質によらず残っている訳で、今のモデルより品質の低い訳は頼み直し、
+     * 同じか高い品質の訳が届いたら書き換える。
      */
-    private val translated = object : LinkedHashMap<String, String>(256, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > TRANSLATED_LIMIT
+    private val translated = object : LinkedHashMap<String, Done>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Done>?) = size > TRANSLATED_LIMIT
     }
+
+    /** 今のモデルの品質（[Event.EngineChanged]）。 */
+    private var quality = 0
 
     /** 段落の番号 → 最後に確定した訳。原文が変わって訳し直している間も、これを出し続ける。 */
     private val lastTranslation = HashMap<Long, String>()
@@ -212,9 +223,11 @@ class CameraSession<L>(
                 }
             }
             is Event.EngineChanged -> {
-                // 翻訳モデルが変わったら、前のモデルの訳は使わない
+                // 翻訳モデルが変わっても確定した訳は残し、品質で使うか頼み直すかを決める（translated）。渡していた文は開き直すストリームと消える
                 intake = event.intake
-                forgetTranslations()
+                quality = event.quality
+                partial.clear()
+                failures.clear()
                 reopen(effects)
             }
             is Event.IntakeChanged -> intake = event.intake
@@ -227,7 +240,7 @@ class CameraSession<L>(
             is Event.Final -> inFlight.remove(event.id)?.let { r ->
                 // 訳が空でも入れる（入れないと、枠が「訳待ち」のまま残り続ける）
                 val text = event.text.trim().ifEmpty { UNTRANSLATABLE }
-                translated[r.key] = text
+                remember(r.key, text)
                 lastTranslation[r.objectId] = text
                 partial.remove(r.key)
             }
@@ -238,7 +251,7 @@ class CameraSession<L>(
                 failures[k] = count
                 if (count >= MAX_FAILURES) {
                     // 上限まで失敗したら、枠を「訳せませんでした」で終わらせる
-                    translated[r.key] = UNTRANSLATABLE
+                    remember(r.key, UNTRANSLATABLE)
                     lastTranslation[r.objectId] = UNTRANSLATABLE
                 } else {
                     // 同じ文をすぐには頼み直さない（次の出来事でまた候補になる）
@@ -303,7 +316,7 @@ class CameraSession<L>(
      */
     private fun needsTranslation(objectId: Long, k: String): Boolean =
         inFlight.values.none { it.objectId == objectId || similar(it.key, k) } &&
-            translationOf(k) == null &&
+            (doneOf(k)?.quality ?: Int.MIN_VALUE) < quality && partialOf(k) == null &&
             (failures.entries.firstOrNull { similar(it.key, k) }?.value ?: 0) < MAX_FAILURES
 
     /**
@@ -314,12 +327,23 @@ class CameraSession<L>(
         ?: inFlight.values.firstOrNull { it.objectId == p.objectId }?.let { r -> partial[r.key]?.takeIf { it.isNotBlank() } }
         ?: lastTranslation[p.objectId]
 
-    /** 訳を探す。読み取りはコマごとに1〜2文字揺れるので、ほぼ同じ文（[similar]）の訳も使う。途中の訳もあれば出す。 */
-    private fun translationOf(k: String): String? {
-        translated[k]?.let { return it }
-        partial[k]?.takeIf { it.isNotBlank() }?.let { return it }
-        return translated.entries.firstOrNull { similar(it.key, k) }?.value
-            ?: partial.entries.firstOrNull { it.value.isNotBlank() && similar(it.key, k) }?.value
+    /**
+     * 出す訳を探す。読み取りはコマごとに1〜2文字揺れるので、ほぼ同じ文（[similar]）の訳も使う。確定した訳は品質によらず出し
+     * （品質の低い訳は頼み直している間も出し続ける）、無ければ途中の訳を出す。
+     */
+    private fun translationOf(k: String): String? = doneOf(k)?.text ?: partialOf(k)
+
+    /** 確定した訳（ほぼ同じ文のものも）。 */
+    private fun doneOf(k: String): Done? = translated[k] ?: translated.entries.firstOrNull { similar(it.key, k) }?.value
+
+    /** 訳している途中の訳（ほぼ同じ文のものも）。 */
+    private fun partialOf(k: String): String? = partial[k]?.takeIf { it.isNotBlank() }
+        ?: partial.entries.firstOrNull { it.value.isNotBlank() && similar(it.key, k) }?.value
+
+    /** 確定した訳を今のモデルの品質で覚える。同じキーにより品質の高い訳があれば書き換えない（翻訳の契約のキャッシュと同じ）。 */
+    private fun remember(k: String, text: String) {
+        val old = translated[k]
+        if (old == null || old.quality <= quality) translated[k] = Done(text, quality)
     }
 
     /**

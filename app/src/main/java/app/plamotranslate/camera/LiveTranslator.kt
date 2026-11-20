@@ -155,14 +155,14 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
         // CameraSession が決める）。ストリームに一度に渡しておく数は、同時に訳す数から `intakeFor` で決まる
         scope.launch {
             EngineHolder.awaitEngine(context)
-            combine(EngineHolder.state, EngineHolder.parallel) { st, _ -> (st as? ModelState.Ready)?.engine }
+            combine(EngineHolder.state, EngineHolder.parallel) { st, _ -> st as? ModelState.Ready }
                 .filterNotNull()
-                .map { it to intakeFor(it.parallel) }
+                .map { Triple(it.engine, intakeFor(it.engine.parallel), it.model.origin.quality) }
                 .distinctUntilChanged { a, b -> a.first === b.first && a.second == b.second }
-                .collect { (e, intake) ->
+                .collect { (e, intake, quality) ->
                     val changed = e !== engine
                     engine = e
-                    dispatch(if (changed) Event.EngineChanged(intake) else Event.IntakeChanged(intake))
+                    dispatch(if (changed) Event.EngineChanged(intake, quality) else Event.IntakeChanged(intake))
                 }
         }
     }
