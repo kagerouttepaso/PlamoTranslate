@@ -21,6 +21,15 @@ object AppVersion {
         return rest.split('.').filter { it.isNotEmpty() }
     }
 
+    /**
+     * リリースの一覧から、更新に使う1件を選ぶ：下書きを除き、版を読めて、照合できるAPKがあるもののうち一番新しいもの。
+     * 無ければ null。
+     */
+    fun newest(entries: List<ReleaseEntry>): ReleaseInfo? = entries
+        .filter { !it.draft && parse(it.tag) != null }
+        .mapNotNull { it.apk }
+        .maxWithOrNull { a, b -> compare(a.tag, b.tag) ?: 0 }
+
     /** [candidate] が [current] より新しいか。どちらかが読めなければ false（更新を勧めない）。 */
     fun isNewer(candidate: String, current: String): Boolean = (compare(candidate, current) ?: 0) > 0
 
@@ -52,3 +61,6 @@ object AppVersion {
         return 0
     }
 }
+
+/** GitHubのリリースの一覧の1件。[apk] は照合できるAPK（APKが無いか、ハッシュが公開されていなければ null）。 */
+data class ReleaseEntry(val tag: String, val draft: Boolean, val apk: ReleaseInfo?)

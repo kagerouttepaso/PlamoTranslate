@@ -31,6 +31,34 @@ class AppVersionTest {
         assertFalse(AppVersion.isNewer("v0.5.0", ""))
     }
 
+    private fun apk(tag: String) = ReleaseInfo(tag, "", "", "app.apk", "https://example.invalid/$tag.apk", 1, "00")
+
+    private fun entry(tag: String, draft: Boolean = false, hasApk: Boolean = true) =
+        ReleaseEntry(tag, draft, if (hasApk) apk(tag) else null)
+
+    @Test
+    fun newestPicksTheHighestVersionNotTheListOrder() {
+        val entries = listOf(entry("v0.9.0"), entry("v0.13.0"), entry("v0.13.0-beta.2"), entry("v0.10.1"))
+        assertEquals("v0.13.0", AppVersion.newest(entries)?.tag)
+    }
+
+    @Test
+    fun newestSkipsDraftsReleasesWithoutAVerifiableApkAndUnreadableTags() {
+        val entries = listOf(
+            entry("v0.14.0", draft = true),
+            entry("v0.13.1", hasApk = false),
+            entry("nightly"),
+            entry("v0.13.0-beta.1"),
+        )
+        assertEquals("v0.13.0-beta.1", AppVersion.newest(entries)?.tag)
+    }
+
+    @Test
+    fun newestIsNullWhenNothingIsUsable() {
+        assertNull(AppVersion.newest(listOf(entry("v0.14.0", draft = true), entry("v0.13.0", hasApk = false))))
+        assertNull(AppVersion.newest(emptyList()))
+    }
+
     @Test
     fun betaIsOlderThanTheReleaseOfTheSameNumber() {
         assertTrue(AppVersion.isNewer("v0.11.0-beta.1", "0.10.1"))

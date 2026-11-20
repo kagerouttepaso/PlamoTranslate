@@ -192,21 +192,21 @@ object AppUpdater {
     }
 
     /**
-     * リリースの一覧のJSONから、下書きを除き、照合できるAPKがあるもののうち一番新しい版を選ぶ（pre-release を含む）。
-     * 版を読めないタグは選ばない。
+     * リリースの一覧のJSON（pre-release を含む）を読み、一番新しい版を選ぶ。どれを選ぶかの判断は [AppVersion.newest] にあり、
+     * ここは JSON を一覧に読むだけ。
      */
-    internal fun newestRelease(json: String): ReleaseInfo {
+    private fun newestRelease(json: String): ReleaseInfo {
         val list = JSONArray(json)
-        val releases = (0 until list.length()).map { list.getJSONObject(it) }
-            .filter { !it.optBoolean("draft") && AppVersion.parse(it.optString("tag_name")) != null }
-            .mapNotNull { runCatching { parseRelease(it.toString()) }.getOrNull() }
-        return releases.maxWithOrNull { a, b -> AppVersion.compare(a.tag, b.tag) ?: 0 }
-            ?: throw IOException("APKのあるリリースが見つかりません")
+        val entries = (0 until list.length()).map { list.getJSONObject(it) }.map {
+            ReleaseEntry(it.optString("tag_name"), it.optBoolean("draft"), runCatching { release(it) }.getOrNull())
+        }
+        return AppVersion.newest(entries) ?: throw IOException("APKのあるリリースが見つかりません")
     }
 
+    private fun parseRelease(json: String): ReleaseInfo = release(JSONObject(json))
+
     /** GitHubのリリースのJSONから、APKのアセットを1つ選ぶ。SHA-256（digest）が無ければ照合できないので使わない。 */
-    internal fun parseRelease(json: String): ReleaseInfo {
-        val o = JSONObject(json)
+    private fun release(o: JSONObject): ReleaseInfo {
         val assets = o.optJSONArray("assets") ?: throw IOException("リリースにファイルがありません")
         for (i in 0 until assets.length()) {
             val a = assets.getJSONObject(i)
