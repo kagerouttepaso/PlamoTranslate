@@ -1,5 +1,7 @@
 package app.plamotranslate.pipeline.screen
 
+import app.plamotranslate.pipeline.EventLoop
+
 /**
  * 画面翻訳の状態遷移（docs/設計/画面翻訳.md「状態遷移」）。画面翻訳の制御は、ここだけが決める。
  *
@@ -136,7 +138,7 @@ object ScreenSession {
 
         /**
          * 撮影・文字認識・翻訳・のぞきを取り消し、セッションの材料を捨てる。[reason] は理由（記録に書く）。[working] は
-         * 撮ってから訳し終わるまでの途中だったか（途中なら「取り消した」、訳を出していたなら「訳を消した」と記録する）。
+         * 撮ってから訳し終わるまでの途中だったか（途中なら「取り消した」、表示している間なら「表示を消した」と記録する）。
          */
         data class Cancel(val session: Int, val reason: String, val working: Boolean) : Effect
         data object ClearOverlay : Effect
@@ -252,7 +254,8 @@ object ScreenSession {
         effects += Effect.ClearOverlay
         effects += Effect.EndValidity
         val watching = state.trigger == Trigger.AUTO && state.autoOn
-        if (watching) effects += Effect.ResetStart else if (state.phase == Phase.Watching) effects += Effect.EndStart
+        // 判定Aは待ちの間だけ動かす。メニューを開いている間は止めておき、閉じたら（MenuClosed）始め直す
+        if (watching && !state.menuOpen) effects += Effect.ResetStart else if (state.phase == Phase.Watching) effects += Effect.EndStart
         return state.copy(phase = if (watching) Phase.Watching else Phase.Idle) to effects
     }
 
@@ -277,45 +280,23 @@ object ScreenSession {
 }
 
 /**
- * 出来事を順に [ScreenSession.reduce] へ渡し、返った作業を [perform] で行う。作業を行っている間に届いた出来事（作業の中から
- * 同期で出たものを含む）は、今の出来事の作業をすべて行ってから順に渡す。作業の途中で状態遷移へ入り直すと、外側の残りの作業が
- * 内側の後片付けの後に走るため（取り消したセッションの作業が走る）。メインスレッドだけで使う。
+ * 画面翻訳の状態遷移の入口。出来事を [EventLoop] で順に [ScreenSession.reduce] へ渡し、今の状態を持つ。
+ * 作業の中で出た出来事は、今の作業を終えてから渡す（[EventLoop]）。
  */
-class ScreenSessionLoop(trigger: ScreenSession.Trigger, private val perform: (ScreenSession.Effect) -> Unit) {
+class ScreenSessionLoop(trigger: ScreenSession.Trigger, perform: (ScreenSession.Effect) -> Unit) {
     var state: ScreenSession.State = ScreenSession.initial(trigger)
         private set
-    private val pending = ArrayDeque<ScreenSession.SessionEvent>()
-    private var running = false
+    private val loop = EventLoop<ScreenSession.SessionEvent, ScreenSession.Effect>(
+        handle = { event -> ScreenSession.reduce(state, event).let { (next, effects) -> state = next; effects } },
+        perform = perform,
+    )
 
-    /** 始め直す（始め方の設定を読み直したとき）。 */
+    /** サービスを始めるときの1回（始め方を読んで、自動なら判定Aの待ちに入る）。途中で始め方を変えるのは [ScreenSession.SessionEvent.TriggerChanged]。 */
     fun start(trigger: ScreenSession.Trigger) {
         val (next, effects) = ScreenSession.start(trigger)
         state = next
-        run(effects)
+        loop.run(effects)
     }
 
-    fun dispatch(event: ScreenSession.SessionEvent) {
-        pending.addLast(event)
-        if (running) return
-        running = true
-        try {
-            while (pending.isNotEmpty()) {
-                val (next, effects) = ScreenSession.reduce(state, pending.removeFirst())
-                state = next
-                effects.forEach(perform)
-            }
-        } finally {
-            running = false
-        }
-    }
-
-    private fun run(effects: List<ScreenSession.Effect>) {
-        running = true
-        try {
-            effects.forEach(perform)
-        } finally {
-            running = false
-        }
-        if (pending.isNotEmpty()) dispatch(pending.removeFirst())
-    }
+    fun dispatch(event: ScreenSession.SessionEvent) = loop.dispatch(event)
 }

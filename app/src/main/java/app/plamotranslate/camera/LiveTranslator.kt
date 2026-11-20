@@ -18,6 +18,7 @@ import app.plamotranslate.overlay.selectTargets
 import app.plamotranslate.overlay.textLine
 import app.plamotranslate.overlay.toBox
 import app.plamotranslate.overlay.toRect
+import app.plamotranslate.pipeline.EventLoop
 import app.plamotranslate.pipeline.camera.CameraSession
 import app.plamotranslate.pipeline.camera.CameraSession.Effect
 import app.plamotranslate.pipeline.camera.CameraSession.Event
@@ -93,6 +94,9 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
 
     private val session = CameraSession<BoxColors>(lineOf = { text, box -> textLine(text, box.toRect()) })
 
+    /** 中核の制御の入口（作業の中で出た出来事は、今の作業を終えてから渡す。[EventLoop]）。init より前に置く。 */
+    private val loop = EventLoop<Event<BoxColors>, Effect>(session::handle, ::perform)
+
     /** 今の翻訳エンジン（切り替わったかを見分ける）。 */
     private var engine: TranslationEngine? = null
 
@@ -129,7 +133,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
                 "ここまでに渡した ${s.submitted}件・うち訳し直し ${s.resubmitted}件、読めた行 ${s.read}件・うちぶれて軽くした ${s.blurred}件）")
         }
         if (!value) pausedAt = null
-        apply(session.handle(if (value) Event.Paused else Event.Resumed))
+        dispatch(if (value) Event.Paused else Event.Resumed)
     }
 
     /** 一時停止した時刻（見えている訳がそろうまでの時間をログに出すため）。 */
@@ -154,13 +158,13 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
                 .collect { (e, intake) ->
                     val changed = e !== engine
                     engine = e
-                    apply(session.handle(if (changed) Event.EngineChanged(intake) else Event.IntakeChanged(intake)))
+                    dispatch(if (changed) Event.EngineChanged(intake) else Event.IntakeChanged(intake))
                 }
         }
     }
 
     private fun settingsChanged() {
-        apply(session.handle(Event.SettingsChanged(settings)))
+        dispatch(Event.SettingsChanged(settings))
     }
 
     /**
@@ -171,17 +175,22 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
         // 向きが変わったら座標の向きも変わるので、追っていた行は捨てる
         if (rotation != this.rotation) {
             this.rotation = rotation
-            apply(session.handle(Event.Rotated))
+            dispatch(Event.Rotated)
         }
         val (readings, ocrMillis) = read(bitmap, rotation) ?: return
-        // 読んでいる間に一時停止したら、そのコマは使わない（止めたコマを固定するため）
-        if (session.paused) return
         val screen = CameraGeometry.visibleRect(bitmap.width, bitmap.height, rotation, viewWidth.toFloat(), viewHeight.toFloat())
             ?.let { Box(floor(it.left).toInt(), floor(it.top).toInt(), ceil(it.right).toInt(), ceil(it.bottom).toInt()) }
-        val effects = session.handle(Event.Read(readings, screen))
-        _frame.value = LiveFrame(bitmap, boxes(), ocrMillis, rotation, table = settings.table)
-        apply(effects)
+        // このコマを画面に出すかは中核の制御が決める（読んでいる間に一時停止したら採らない。採ったら ShowFrame）
+        reading = LiveFrame(bitmap, emptyList(), ocrMillis, rotation, table = settings.table)
+        try {
+            dispatch(Event.Read(readings, screen))
+        } finally {
+            reading = null
+        }
     }
+
+    /** 今読んで制御へ渡しているコマ（[Effect.ShowFrame] で画面に出す）。 */
+    private var reading: LiveFrame? = null
 
     /** 縦持ちの画像を正立させて読み、訳す行の読み取りと、かかった時間を返す。読めなければ null。 */
     private suspend fun read(bitmap: Bitmap, rotation: Int): Pair<List<Reading<BoxColors>>, Long>? {
@@ -220,7 +229,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
     private suspend fun readStill() {
         val f = _frame.value ?: return
         val (readings, _) = read(f.bitmap, f.rotation) ?: return
-        apply(session.handle(Event.Read(readings, screen = null, still = true)))
+        dispatch(Event.Read(readings, screen = null, still = true))
     }
 
     fun close() {
@@ -239,9 +248,16 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
         _frame.value = f.with(boxes(), table = settings.table)
     }
 
-    /** 中核の制御が返した作業を行い、枠を描き直す。 */
-    private fun apply(effects: List<Effect>) {
-        for (e in effects) when (e) {
+    /** 出来事を中核の制御へ順に渡し、一時停止と枠を写し直す。 */
+    private fun dispatch(event: Event<BoxColors>) {
+        loop.dispatch(event)
+        _paused.value = session.paused
+        refresh()
+    }
+
+    /** 中核の制御が返した作業を1つ行う。 */
+    private fun perform(e: Effect) {
+        when (e) {
             is Effect.OpenStream -> openStream(e.options)
             is Effect.Submit -> stream?.submit(e.segments)
             Effect.ReadStill -> scope.launch { readStill() }
@@ -249,9 +265,8 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
                 Logs.i("カメラ翻訳: 一時停止から見えている訳がそろうまで ${SystemClock.uptimeMillis() - it}ms")
                 pausedAt = null
             }
+            Effect.ShowFrame -> reading?.let { _frame.value = it }
         }
-        _paused.value = session.paused
-        refresh()
     }
 
     /** 前のストリームを閉じ、[options] で翻訳のストリームを開き直す。渡していた文はストリームと一緒に消える。 */
@@ -261,7 +276,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
         val s = Translations.open(scope, context, options)
         stream = s
         streamCollector = scope.launch { s.updates.collect(::onUpdate) }
-        apply(session.handle(Event.StreamOpened))
+        dispatch(Event.StreamOpened)
     }
 
     private fun onUpdate(u: SegmentUpdate) {
@@ -276,6 +291,6 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
                 Event.Failed(u.id)
             }
         }
-        apply(session.handle(event))
+        dispatch(event)
     }
 }

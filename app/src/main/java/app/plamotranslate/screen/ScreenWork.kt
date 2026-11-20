@@ -88,8 +88,14 @@ internal class PageLayout(
 internal class TranslationRun(val model: String, val startedAt: Long, private val stream: TranslationStream) {
     var stats: TranslationStream.Stats? = null
 
-    /** 翻訳のストリームを閉じる（訳し終えた・失敗した）。閉じると流し込む工程の購読が終わる。 */
+    /** 閉じたか。閉じた後に届いた更新は、流し込む工程が捨てる。 */
+    var closed = false
+        private set
+
+    /** 翻訳のストリームを閉じる（訳し終えた・失敗した・取り消した）。1回だけ効く。 */
     fun close() {
+        if (closed) return
+        closed = true
         stats = stream.stats
         stream.close()
     }

@@ -65,7 +65,7 @@ class ScreenSessionTest {
     @Test
     fun どこから取り消しても後片付けは同じ() {
         val events = listOf(
-            SessionEvent.Invalidated("x"), SessionEvent.OutsideTouched, SessionEvent.MenuOpened, SessionEvent.Rotated,
+            SessionEvent.Invalidated("x"), SessionEvent.OutsideTouched, SessionEvent.Rotated,
             SessionEvent.ModelChanged, SessionEvent.StatusTapped,
         )
         for (e in events) {
@@ -166,7 +166,9 @@ class ScreenSessionTest {
         val showing = run(translatingAuto(), SessionEvent.SegmentDone(1), SessionEvent.SegmentDone(1)).first
         val (opened, openEffects) = run(showing, SessionEvent.MenuOpened)
         assertTrue(opened.menuOpen)
-        assertEquals(listOf(Effect.Cancel(1, "", false), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), openEffects.anyReason())
+        // メニューを開いている間は判定Aを動かさない（閉じたら始め直す）
+        assertEquals(listOf(Effect.Cancel(1, "", false), Effect.ClearOverlay, Effect.EndValidity), openEffects.anyReason())
+        assertTrue(run(auto, SessionEvent.MenuOpened).second.contains(Effect.EndStart))
         val (closed, closeEffects) = run(opened, SessionEvent.MenuClosed)
         assertEquals(false, closed.menuOpen)
         assertEquals(listOf(Effect.ResetStart), closeEffects)
@@ -290,5 +292,17 @@ class ScreenSessionTest {
         assertTrue("$performed", capture in 0 until cancel)
         assertEquals(Phase.Watching, loop.state.phase)
         assertTrue(performed.last() is Effect.CaptureFailed)
+    }
+
+    @Test
+    fun 入口は始めるときの作業の中で出た出来事もその後で渡す() {
+        val performed = mutableListOf<Effect>()
+        lateinit var loop: ScreenSessionLoop
+        loop = ScreenSessionLoop(Trigger.AUTO) { effect ->
+            performed += effect
+            if (effect == Effect.ResetStart && performed.size == 1) loop.dispatch(SessionEvent.Settled)
+        }
+        loop.start(Trigger.AUTO)
+        assertEquals(listOf(Effect.ResetStart, Effect.EndStart, Effect.Capture(1)), performed)
     }
 }

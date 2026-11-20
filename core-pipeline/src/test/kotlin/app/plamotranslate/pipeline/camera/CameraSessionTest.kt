@@ -280,4 +280,23 @@ class CameraSessionTest {
         assertEquals(false, s.paused)
         assertEquals(emptyList<CameraSession.Effect>(), s.handle(CameraSession.Event.Resumed))
     }
+
+    @Test
+    fun 読んだコマは一時停止中でなければ採り_一時停止中は止めたコマのままにする() {
+        val s = session()
+        assertTrue(s.handle(Event.Read(lines("Hello world"), screen)).contains(Effect.ShowFrame))
+        s.handle(Event.Paused)
+        assertEquals(emptyList<Effect>(), s.handle(Event.Read(lines("Other text"), screen)))
+        // 止めた画像の読み直しは、表示するコマを差し替えない
+        assertFalse(s.handle(Event.Read(lines("Hello world"), screen = null, still = true)).contains(Effect.ShowFrame))
+    }
+
+    @Test
+    fun 原文と訳す先が同じ設定を直接渡しても原文は自動として扱う() {
+        val s = session(settings = Settings(source = Language.KO, target = Language.JA, table = true))
+        // 訳す先を韓国語にした設定を直接作って渡す：原文の韓国語は自動になり、ストリームは原文の言語なしで開く
+        val effects = s.handle(Event.SettingsChanged(Settings(source = Language.KO, target = Language.KO, table = true)))
+        val open = effects.filterIsInstance<Effect.OpenStream>().single()
+        assertEquals(null, open.options.source)
+    }
 }

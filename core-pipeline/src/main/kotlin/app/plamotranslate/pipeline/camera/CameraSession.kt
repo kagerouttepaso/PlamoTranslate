@@ -112,6 +112,9 @@ class CameraSession<L>(
 
         /** 一時停止の後、見えている段落の訳がすべてそろった（一時停止のたびに1回）。 */
         data object VisibleComplete : Effect
+
+        /** 読んだコマを採った（一時停止中でない）。そのコマを画面に出す。一時停止中は止めたコマを出したままにする。 */
+        data object ShowFrame : Effect
     }
 
     private val tracker = LineTracker<L>()
@@ -156,6 +159,7 @@ class CameraSession<L>(
         when (event) {
             is Event.Read -> {
                 if (paused && !event.still) return emptyList()
+                if (!event.still) effects += Effect.ShowFrame
                 val updated = tracker.update(event.readings)
                 if (!event.still) {
                     read += updated.size
@@ -182,17 +186,19 @@ class CameraSession<L>(
                 regroup()
             }
             is Event.SettingsChanged -> {
+                // 原文と訳す先の組み合わせは、渡された値によらずここで正す（Settings.of の規則を迂回させない）
+                val next = event.settings.let { Settings.of(it.source, it.target, it.table) }
                 val before = settings
-                settings = event.settings
-                if (before != event.settings) {
+                settings = next
+                if (before != next) {
                     // 原文の言語が変わると読み方（認識器）が変わるので、前の読み取りで多数決しない
-                    val sourceChanged = before != null && before.source != event.settings.source
+                    val sourceChanged = before != null && before.source != next.source
                     if (sourceChanged) {
                         tracker.clear()
                         grouping.clear()
                     }
                     // まとめ方（文章／表・メニュー）が変わったら、前のまとめ方の区切りを持ち越さない
-                    if (before != null && before.table != event.settings.table) grouping.clear()
+                    if (before != null && before.table != next.table) grouping.clear()
                     forgetTranslations()
                     regroup()
                     reopen(effects)

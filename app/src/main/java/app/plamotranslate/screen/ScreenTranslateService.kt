@@ -34,7 +34,6 @@ import app.plamotranslate.pipeline.screen.ScreenChange
 import app.plamotranslate.pipeline.screen.ScreenSession
 import app.plamotranslate.pipeline.screen.ScreenSessionLoop
 import app.plamotranslate.pipeline.screen.ScreenSession.Effect
-import app.plamotranslate.pipeline.screen.ScreenSession.Phase
 import app.plamotranslate.pipeline.screen.ScreenSession.SessionEvent
 import app.plamotranslate.pipeline.screen.StartJudge
 import app.plamotranslate.pipeline.screen.Thumb
@@ -57,7 +56,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.transformWhile
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 
 /**
@@ -88,7 +87,6 @@ class ScreenTranslateService : Service() {
     private var debugReceiver: BroadcastReceiver? = null
     private var orientation = Configuration.ORIENTATION_UNDEFINED
 
-    /** 画面翻訳の状態（中核の状態遷移が決める）。 */
     /** 状態遷移の入口（出来事を順に渡す。作業の中で出た出来事は、今の作業を終えてから渡す）。 */
     private val loop = ScreenSessionLoop(ScreenSession.Trigger.TAP, ::perform)
     private val state: ScreenSession.State get() = loop.state
@@ -209,7 +207,7 @@ class ScreenTranslateService : Service() {
             is Effect.Peek -> peek(effect.session)
             is Effect.ShowBoxes -> overlay?.setBoxesVisible(true)
             is Effect.Cancel -> {
-                Logs.i("画面翻訳: ${effect.reason}ので${if (effect.working) "取り消した" else "訳を消した"}")
+                Logs.i("画面翻訳: ${effect.reason}ので${if (effect.working) "取り消した" else "表示を消した"}")
                 cancel(effect.session)
             }
             Effect.ClearOverlay -> overlay?.clear()
@@ -344,7 +342,8 @@ class ScreenTranslateService : Service() {
             val run = TranslationRun(ready.model.label, SystemClock.uptimeMillis(), stream).also(w::translating)
             try {
                 stream.submit(targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })
-                stream.updates.collect { u ->
+                // 閉じた後もチャンネルに溜まっていた更新は届くので、閉じたら（訳し終えた・失敗した）読むのをやめる
+                stream.updates.takeWhile { !run.closed }.collect { u ->
                     when (u) {
                         is SegmentUpdate.Partial -> overlay?.setTranslation(u.id.toInt(), u.text)
                         is SegmentUpdate.Final -> {
@@ -452,18 +451,17 @@ class ScreenTranslateService : Service() {
             val now = SystemClock.uptimeMillis()
             if (sample != null) lastAt = sample.second
             val thumb = sample?.first
-            when {
-                // 判定Aは状態遷移の作業（ResetStart・EndStart）で待っている間だけ、判定Bは BeginValidity・EndValidity の間だけ動く
-                startJudge.active -> {
-                    val own = thumb?.let { t -> ScreenChange.mask(t, listOfNotNull(button?.bounds?.toBox())) }
-                    if (startJudge.feed(thumb, now, own)) dispatch(SessionEvent.Settled)
-                }
-                validity.active && thumb != null -> {
-                    val own = overlay?.occupiedRects().orEmpty().map { it.toBox() } + listOfNotNull(button?.bounds?.toBox())
-                    val boxes = overlay?.boxBounds.orEmpty().map { it.toBox() }
-                    val verdict = validity.feed(thumb, boxes, own, watchOutside = state.watchOutside)
-                    if (verdict is Validity.Invalid) dispatch(SessionEvent.Invalidated(verdict.label))
-                }
+            // 判定Aは状態遷移の作業（ResetStart・EndStart）の間だけ、判定Bは BeginValidity・EndValidity の間だけ動く。
+            // どちらへ渡すかはそれぞれが動いているかで決め、互いに排他にしない（片方が残っても、もう片方を黙らせない）
+            if (startJudge.active) {
+                val own = thumb?.let { t -> ScreenChange.mask(t, listOfNotNull(button?.bounds?.toBox())) }
+                if (startJudge.feed(thumb, now, own)) dispatch(SessionEvent.Settled)
+            }
+            if (validity.active && thumb != null) {
+                val own = overlay?.occupiedRects().orEmpty().map { it.toBox() } + listOfNotNull(button?.bounds?.toBox())
+                val boxes = overlay?.boxBounds.orEmpty().map { it.toBox() }
+                val verdict = validity.feed(thumb, boxes, own, watchOutside = state.watchOutside)
+                if (verdict is Validity.Invalid) dispatch(SessionEvent.Invalidated(verdict.label))
             }
         }
     }
@@ -518,7 +516,9 @@ class ScreenTranslateService : Service() {
     /** 場面の設定（認識モードと訳の消え方から組み立てる撮り方・読み方・判定器）を今の設定に合わせ、判定器を作り直す。 */
     private fun applyProfile() {
         profile = preferences.settings.scene
-        startJudge = StartJudge(profile.start).also { it.reset(SystemClock.uptimeMillis()) }
+        // 作り直した判定Aは止まったままにする。動かすのは状態遷移の作業（ResetStart）だけ（設定はメニューから変えるので、
+        // メニューを閉じたときの ResetStart で動き出す。始めるときは ScreenSessionLoop.start の作業で）
+        startJudge = StartJudge(profile.start)
         validity = ValidityJudge(profile.validity)
     }
 

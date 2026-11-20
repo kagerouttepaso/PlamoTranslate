@@ -178,7 +178,8 @@ class CameraTranslateActivity : ComponentActivity() {
         }
         lifecycleScope.launch {
             try {
-                if (!paused) translator.process(bitmap, deviceRotation)
+                // 一時停止中に読み終えたコマを採るかは、中核の制御が決める
+                translator.process(bitmap, deviceRotation)
             } finally {
                 busy.set(false)
             }
