@@ -192,8 +192,9 @@ class ScreenTranslateService : Service() {
             }
             is Effect.Translate -> translate(effect.session)
             is Effect.Finished -> workOf(effect.session)?.let {
-                finished(it)
+                // 閉じたときにストリームの数（キャッシュ・チャンク）が入るので、閉じてから記録する
                 it.run?.close()
+                finished(it)
             }
             is Effect.CaptureFailed -> overlay?.showStatus("画面を撮影できませんでした")
             is Effect.BoxesFailed -> {
