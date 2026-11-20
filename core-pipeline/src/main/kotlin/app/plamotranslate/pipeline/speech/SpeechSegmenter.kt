@@ -35,8 +35,7 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  *
  * 話している間は、まだ終わっていない文を、カードの言語で書き起こして途中結果を出す（書き起こした文につなぐ。疑似ストリーミング）。
  * カードの言語が決まるまでは書き起こさず、決まったら文字より先に知らせる（空の途中結果）。確定は、書き起こした文と、
- * 区切る位置までの残りをつなぐ。書き起こしの重いモデル（[heavy]、Qwen3-ASR）には、話し始めの前に足した音声のうち、
- * 声の始まり（[SpeechOnset]）より前を渡さない（書き起こしの時間は音声の長さに比例する）。
+ * 区切る位置までの残りをつなぐ。ジョブの出し方と、音声認識モデルの性質による違い（渡す音声・頼む間隔）は [RecognitionRequests]。
  *
  * カードの表示の言語（途中結果と確定の言語）は、話し手の時系列の [SpeakerTrack.label]。文・区切った残り・途中結果の書き起こしの
  * 言語のうち、認識器が音声から判定したもの（[LanguageSource.JUDGED]）も根拠として時系列に渡す（[noteTranscript]）。
@@ -44,26 +43,28 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  * 確定を出すカードの音声は [retain] に渡す（書き起こし直しのための取り置きは [UtteranceRetention] が持つ）。
  *
  * 判断は部品に分ける：話し手は [SpeakerJudge]、区切る位置は [CutPoint]、認識した文字の聞き違いの判定は [TranscriptCleanup]、
- * ジョブの順番は [RecognitionQueue]、確定を出す順番は [CardEvents]。状態を持つので、すべての呼び出しは1本のスレッドから行う（[SpeechPipeline]）。
+ * ジョブの順番は [RecognitionQueue]、確定を出す順番は [CardEvents]、ジョブの出し方は [RecognitionRequests]。状態を持つので、すべての呼び出しは1本のスレッドから行う（[SpeechPipeline]）。
  * [trace] はセグメンターの経過を書く口（話した言葉を含むので、渡す側が詳しい記録を残すとき（デバッグ版の既定、正式版は
  * 詳細設定で選ぶ）だけ書く）。
  */
 class SpeechSegmenter(
     private val vad: VoiceActivity,
     /** 書き起こさずにスコアを出せる認識器か（[SpeechRecognizer.identifies]）。出せればスコアは識別のワーカーに回す。 */
-    private val identifies: Boolean,
+    identifies: Boolean,
     private val profile: SegmentationProfile = SegmentationProfile.CONVERSATION,
     /** 書き起こしの重いモデルか（[SpeechModel.heavy]）。声の始まりより前を渡さず、途中結果の間隔を詰める。 */
-    private val heavy: Boolean = false,
+    heavy: Boolean = false,
     private val emit: (SpeechEvent) -> Unit,
-    private val submit: (RecognitionJob) -> Unit,
+    submit: (RecognitionJob) -> Unit,
     private val trace: (() -> String) -> Unit = {},
     private val clock: () -> Long = System::nanoTime,
     /** 確定を出すカードの番号（[Utterance.id]）と音声。確定の出来事より先に呼ぶ。 */
     private val retain: (Long, FloatArray) -> Unit = { _, _ -> },
     /** ジョブの番号の採番（同じエンジンの中でほかにジョブを出す部品と同じものを渡す）。 */
-    private val jobIds: JobIds = JobIds(),
+    jobIds: JobIds = JobIds(),
 ) {
+    private val requests = RecognitionRequests(identifies, heavy, submit, clock, jobIds)
+
     private val prerollSamples = (profile.prerollSeconds * SAMPLE_RATE).toInt()
     private val splitAfterSamples = (profile.splitAfterSeconds * SAMPLE_RATE).toInt()
 
@@ -81,9 +82,6 @@ class SpeechSegmenter(
 
     /** ためる音声の上限（念のため）。前に足す音声と区切りより長くしておく。 */
     private val buffer = SpeechBuffer(prerollSamples, prerollSamples + splitAfterSamples + SAMPLE_RATE * 6)
-
-    /** スコアを頼むワーカー。 */
-    private val languageLane = if (identifies) RecognitionLane.IDENTIFY else RecognitionLane.TRANSCRIBE
 
     @Volatile var languages = SpeechLanguages.ANY
 
@@ -114,15 +112,6 @@ class SpeechSegmenter(
 
     /** 前に区間のスコアを頼んでから、話している音声がどれだけ増えたか。 */
     private var sinceLastWatch = 0
-
-    /**
-     * 話し中の区間の間隔。どのモデルも、最短0.5秒で、監視1回にかかった時間（待ち時間を含む）の3倍より短くはしない。
-     * スコアを書き起こしのワーカーで出すモデル（SenseVoice）では、ワーカーが混むと延びて途中結果の時間を残す。
-     */
-    private var watchInterval = WATCH_INTERVAL_SAMPLES
-
-    /** 途中結果を頼む間隔。かかった時間の何倍かより短くはしない（CPU を途中結果で埋めない）。 */
-    private var partialInterval = MIN_PARTIAL_INTERVAL
 
     /** 直前に届いた途中結果（後処理の後）と、それを書き起こした音声の始まり。区切る位置の候補に使う。 */
     private var lastPartial: Recognition? = null
@@ -180,8 +169,6 @@ class SpeechSegmenter(
     /** 音声をためているカード。話していなければ null。 */
     private var open: Card? = null
     private var nextCard = 0L
-
-    private val handlers = HashMap<Long, (RecognitionOutput) -> Unit>()
 
     private var closed = false
 
@@ -247,11 +234,11 @@ class SpeechSegmenter(
             sinceLastPartial += samples.size
             // 区間は話している音声だけで数える（無音の区間は、識別がどの言語とも言い切ることがある）
             if (!inGap) sinceLastWatch += samples.size
-            if (sinceLastWatch >= watchInterval && !inGap) {
+            if (sinceLastWatch >= requests.watchInterval && !inGap) {
                 sinceLastWatch = 0
                 watchLanguage(card)
             }
-            if (sinceLastPartial >= partialInterval && buffer.size - speechStart >= MIN_PARTIAL_SAMPLES) {
+            if (sinceLastPartial >= requests.partialInterval && buffer.size - speechStart >= MIN_PARTIAL_SAMPLES) {
                 sinceLastPartial = 0
                 requestPartial(card)
             }
@@ -261,7 +248,7 @@ class SpeechSegmenter(
     /** 頼んだジョブの結果。届いた時点で、まだ意味のある結果だけを使う（閉じたカードの途中結果などは捨てる）。 */
     fun onResult(id: Long, output: RecognitionOutput) {
         if (closed) return
-        handlers.remove(id)?.invoke(output)
+        requests.onResult(id, output)
     }
 
     /** 残っている音声を確定させる。すべてのカードを確定し終えたら [SpeechEvent.Flushed] を出す。 */
@@ -286,15 +273,14 @@ class SpeechSegmenter(
         if (closed) return
         vad.reset()
         buffer.clear()
-        handlers.clear()
+        requests.clear()
         events.clear()
         open = null
         received = 0
         bufferStart = 0
         speechStart = 0
         lastLang = null
-        partialInterval = MIN_PARTIAL_INTERVAL
-        watchInterval = WATCH_INTERVAL_SAMPLES
+        requests.resetPacing()
         startSpeech()
     }
 
@@ -307,7 +293,7 @@ class SpeechSegmenter(
     fun close() {
         if (closed) return
         closed = true
-        handlers.clear()
+        requests.clear()
         vad.close()
     }
 
@@ -422,11 +408,8 @@ class SpeechSegmenter(
         val fromAbs = abs(from)
         val toAbs = abs(buffer.size)
         card.watchPending = true
-        val submittedAt = clock()
         scores(card, fromAbs, toAbs, RecognitionPriority.LANGUAGE, PURPOSE_WATCH) { scores, _ ->
             card.watchPending = false
-            val costSamples = ((clock() - submittedAt) / 1_000_000 * SAMPLE_RATE / 1000).toInt()
-            watchInterval = maxOf(WATCH_INTERVAL_SAMPLES, costSamples * WATCH_COST_RATIO)
             if (card === open) follow(card, card.track.window(fromAbs, toAbs, SpeakerJudge.decide(scores, languages, SpeakerJudge.WINDOW)))
             card.afterWatch?.let {
                 card.afterWatch = null
@@ -477,17 +460,11 @@ class SpeechSegmenter(
         val to = (rel(seek.to) + LANG_PROBE_SAMPLES).coerceIn(minOf(from + LANG_PROBE_SAMPLES, buffer.size), buffer.size)
         val fromAbs = abs(from)
         val previous = card.lang
-        job(
-            { id ->
-                RecognitionJob.Seam(
-                    id, card.id, languageLane, buffer.slice(from, to), abs(to),
-                    PURPOSE_SEAM, languages, newLang, LANG_PROBE_SAMPLES, LANG_PROBE_STEP_SAMPLES,
-                )
-            },
-        ) { out ->
+        requests.seam(
+            card.id, buffer.slice(from, to), abs(to), PURPOSE_SEAM, languages, newLang, LANG_PROBE_SAMPLES, LANG_PROBE_STEP_SAMPLES,
+        ) { seam ->
             card.seamPending = false
-            if (card !== open) return@job
-            val seam = (out as? RecognitionOutput.SeamFound)?.at
+            if (card !== open) return@seam
             trace { "境界 ${seam?.let { at(fromAbs + it) } ?: "なし"}（$previous→$newLang）" }
             if (seam == null) {
                 card.track.seamMissed()
@@ -624,13 +601,9 @@ class SpeechSegmenter(
         if (buffer.size - from < MIN_PARTIAL_SAMPLES) return
         val fromAbs = abs(from)
         val phrase = Phrase(fromAbs, abs(buffer.size), lang)
-        val submittedAt = clock()
         card.partialInFlight = true
         transcribe(card, phrase, RecognitionPriority.PARTIAL, "途中", lang) { r ->
             card.partialInFlight = false
-            // 途中結果の間隔は、かかった時間（待ち時間を含む）の何倍か。音声の処理は止まらないので、CPU の取り分だけを決める
-            val costSamples = ((clock() - submittedAt) / 1_000_000 * SAMPLE_RATE / 1000).toInt()
-            partialInterval = maxOf(MIN_PARTIAL_INTERVAL, costSamples * if (heavy) HEAVY_PARTIAL_COST_RATIO else PARTIAL_COST_RATIO)
             if (card !== open || card.lang != lang) return@transcribe
             noteTranscript(card, phrase, r)
             lastPartial = r
@@ -692,34 +665,22 @@ class SpeechSegmenter(
 
     // ---- ジョブと出来事 ----
 
-    private fun job(make: (Long) -> RecognitionJob, handler: (RecognitionOutput) -> Unit) {
-        val id = jobIds.next()
-        handlers[id] = handler
-        submit(make(id))
-    }
-
     /**
      * [phrase] の音声を [language] として書き起こしてもらう（識別を省く）。null なら識別してもらい、識別できなければ
-     * 前の話し手の言語として書き起こす。書き起こしの重いモデルは、話し始めの前に足した音声のうち、声の始まりより前を渡さない。
+     * 前の話し手の言語として書き起こす。
      */
     private fun transcribe(card: Card, phrase: Phrase, priority: RecognitionPriority, purpose: String, language: String?, then: (Recognition) -> Unit) {
         val samples = phrase.audio ?: capture(rel(phrase.from), rel(phrase.end))
-        val fallback = fallbackLang(card)
-        job(
-            { id -> RecognitionJob.Transcribe(id, card.id, priority, samples, phrase.end, purpose, languages, language, fallback) },
-        ) { out ->
-            val r = TranscriptCleanup.clean((out as? RecognitionOutput.Transcribed)?.recognition ?: Recognition("", null))
+        requests.transcribe(card.id, samples, phrase.end, priority, purpose, languages, language, fallbackLang(card)) { r ->
             trace { "書き起こし（$purpose）${at(phrase.from)}〜${at(phrase.end)} 言語の指定 $language: [${r.lang}] ${r.text}" }
             then(r)
         }
     }
 
-    /** ためた音声の [from]〜[to] の写し（書き起こしに渡す）。書き起こしの重いモデルは、話し始めの前に足した音声のうち声の始まりより前を除く。 */
+    /** ためた音声の [from]〜[to] の写し（認識に渡す。始まりは [RecognitionRequests.captureStart]）。 */
     private fun capture(from: Int, to: Int): FloatArray {
         val end = to.coerceIn(0, buffer.size)
-        var start = from.coerceIn(0, end)
-        if (heavy && start == 0 && speechStart > 0) start = SpeechOnset.start(buffer.slice(0, speechStart), speechStart).coerceAtMost(end)
-        return buffer.slice(start, end)
+        return buffer.slice(requests.captureStart(buffer, from, end, speechStart), end)
     }
 
     /**
@@ -740,9 +701,7 @@ class SpeechSegmenter(
             then(null, null)
             return
         }
-        job({ id -> RecognitionJob.Language(id, card.id, languageLane, priority, buffer.slice(start, end), to, purpose, languages) }) { out ->
-            val scored = out as? RecognitionOutput.Scored
-            val recognition = scored?.recognition?.let(TranscriptCleanup::clean)
+        requests.scores(card.id, buffer.slice(start, end), to, priority, purpose, languages) { scored, recognition ->
             trace { "スコア（$purpose）${at(from)}〜${at(to)}: ${scored?.scores?.entries?.sortedByDescending { it.value }?.take(3)?.joinToString { "%s=%.2f".format(it.key, it.value) }}" }
             then(scored?.scores, recognition)
         }
@@ -752,19 +711,6 @@ class SpeechSegmenter(
     private fun at(pos: Long): String = "%.2f秒".format(pos.coerceAtLeast(0) / SAMPLE_RATE.toDouble())
 
     companion object {
-        /** 途中結果は0.5秒ごとより頻繁には頼まない。 */
-        private const val MIN_PARTIAL_INTERVAL = SAMPLE_RATE / 2
-
-        /** 話している最中に区間のスコアを頼む最短の間隔（話した音声の長さ）。途中結果の間隔とは別に数える。 */
-        private const val WATCH_INTERVAL_SAMPLES = SAMPLE_RATE / 2
-
-        /** 監視の間隔を、監視にかかった時間の何倍より短くしないか（監視がワーカーの時間の3分の1より多くを取らない）。 */
-        private const val WATCH_COST_RATIO = 3
-
-        /** 途中結果の間隔を、かかった時間の何倍にするか（書き起こしの重いモデルは2倍、ほかは3倍）。 */
-        private const val HEAVY_PARTIAL_COST_RATIO = 2
-        private const val PARTIAL_COST_RATIO = 3
-
         /** 短すぎる音声は認識しても空になりやすいので、0.4秒たまってから認識する。 */
         private const val MIN_PARTIAL_SAMPLES = SAMPLE_RATE * 4 / 10
 
