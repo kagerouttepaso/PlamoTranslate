@@ -38,7 +38,7 @@ data class CameraBox<L>(val box: Box, val source: String, val look: L?, val tran
  * 追った行の読み取りの履歴を持つので、状態はこの中に持つ（画面翻訳の `ScreenSession.reduce` と同じ考え方で、形だけ違う）。
  *
  * 訳す計画は「空いた分だけ、その時点で選んで渡す」（[dispatch]）。翻訳のストリームに渡しておく文を、ストリームが無駄なく訳せる数
- * （[Event.EngineChanged] の intake。`intakeFor`）までにとどめ、訳が1件確定するたびに、その時点で見えている段落から
+ * （[Event.EngineReady] の intake。`intakeFor`）までにとどめ、訳が1件確定するたびに、その時点で見えている段落から
  * いちばん先に訳すべきものを選んで渡す。深い待ち行列を作らないので、カメラを動かしても一時停止しても、次に渡す文が変わるだけで、
  * 並べ替えも取り消しも要らない（docs/判断/2026-11-13_カメラ翻訳は空いた分だけその時点で選んで訳す.md）。
  *
@@ -89,13 +89,12 @@ class CameraSession<L>(
         data class SettingsChanged(val settings: Settings) : Event<Nothing>
 
         /**
-         * 翻訳モデルのエンジンが使えるようになった・切り替わった。[intake] はストリームに一度に渡しておく数（`intakeFor`）。
-         * [quality] はモデルの訳の品質（`ModelOrigin.quality`。大きいほど高い）で、確定した訳はこの品質と一緒に覚える。
+         * 翻訳モデルのエンジンが使える。読み込むたび・同時に訳す数を変えるたびに届く。[generation] はエンジンの世代
+         * （読み込むたびに増える。`ModelState.Ready.generation`）で、変わったらストリームを開き直す。同じなら渡しておく数だけ変える。
+         * [intake] はストリームに一度に渡しておく数（`intakeFor`）。[quality] はモデルの訳の品質（`ModelOrigin.quality`。
+         * 大きいほど高い）で、確定した訳はこの品質と一緒に覚える。
          */
-        data class EngineChanged(val intake: Int, val quality: Int = 0) : Event<Nothing>
-
-        /** 同じエンジンのまま、ストリームに一度に渡しておく数が変わった（同時に訳す数の設定）。 */
-        data class IntakeChanged(val intake: Int) : Event<Nothing>
+        data class EngineReady(val generation: Long, val intake: Int, val quality: Int) : Event<Nothing>
 
         /** [Effect.OpenStream] で頼んだストリームを開いた。 */
         data object StreamOpened : Event<Nothing>
@@ -148,8 +147,9 @@ class CameraSession<L>(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Done>?) = size > TRANSLATED_LIMIT
     }
 
-    /** 今のモデルの品質（[Event.EngineChanged]）。 */
+    /** 今のモデルの品質と、エンジンの世代（[Event.EngineReady]。まだ無ければ null）。 */
     private var quality = 0
+    private var generation: Long? = null
 
     /** 段落の番号 → 最後に確定した訳。原文が変わって訳し直している間も、これを出し続ける。 */
     private val lastTranslation = HashMap<Long, String>()
@@ -222,15 +222,17 @@ class CameraSession<L>(
                     if (sourceChanged && paused) effects += Effect.ReadStill
                 }
             }
-            is Event.EngineChanged -> {
-                // 翻訳モデルが変わっても確定した訳は残し、品質で使うか頼み直すかを決める（translated）。渡していた文は開き直すストリームと消える
+            is Event.EngineReady -> {
                 intake = event.intake
-                quality = event.quality
-                partial.clear()
-                failures.clear()
-                reopen(effects)
+                if (event.generation != generation) {
+                    // 翻訳モデルが変わっても確定した訳は残し、品質で使うか頼み直すかを決める（translated）。渡していた文は開き直すストリームと消える
+                    generation = event.generation
+                    quality = event.quality
+                    partial.clear()
+                    failures.clear()
+                    reopen(effects)
+                }
             }
-            is Event.IntakeChanged -> intake = event.intake
             Event.StreamOpened -> streamReady = true
             is Event.Partial -> {
                 // 途中の訳では空きが変わらないので、渡し直さない

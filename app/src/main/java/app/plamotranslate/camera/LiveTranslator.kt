@@ -98,8 +98,6 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
     /** 中核の制御の入口（作業の中で出た出来事は、今の作業を終えてから渡す。[EventLoop]）。init より前に置く。 */
     private val loop = EventLoop<Event<BoxColors>, Effect>(session::handle, ::perform)
 
-    /** 今の翻訳エンジンの世代（[ModelState.Ready.generation]。切り替わったかを見分ける）。 */
-    private var generation = 0L
 
     /** 訳すストリームと、その結果の購読。 */
     private var stream: TranslationStream? = null
@@ -149,19 +147,15 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
 
     init {
         settingsChanged()
-        // 翻訳モデルの読み込み・切り替えと、同時に訳す数の変化を1本の購読で受け、出来事にする（ストリームを開き直すかは
-        // CameraSession が決める）。ストリームに一度に渡しておく数は、同時に訳す数から `intakeFor` で決まる
+        // 翻訳モデルの読み込み・切り替えと、同時に訳す数の変化を、エンジンの世代と一緒にそのまま出来事にする（ストリームを
+        // 開き直すかは CameraSession が世代で決める）。ストリームに一度に渡しておく数は、同時に訳す数から `intakeFor` で決まる
         scope.launch {
             EngineHolder.ensureLoaded(context)
             EngineHolder.state.map { it as? ModelState.Ready }
                 .filterNotNull()
-                .map { Triple(it.generation, intakeFor(it.parallel), it.model.origin.quality) }
-                .distinctUntilChanged { a, b -> a.first == b.first && a.second == b.second }
-                .collect { (g, intake, quality) ->
-                    val changed = g != generation
-                    generation = g
-                    dispatch(if (changed) Event.EngineChanged(intake, quality) else Event.IntakeChanged(intake))
-                }
+                .map { Event.EngineReady(it.generation, intakeFor(it.parallel), it.model.origin.quality) }
+                .distinctUntilChanged()
+                .collect(::dispatch)
         }
     }
 

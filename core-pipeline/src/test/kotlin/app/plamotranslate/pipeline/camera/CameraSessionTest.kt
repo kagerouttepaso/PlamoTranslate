@@ -22,7 +22,7 @@ class CameraSessionTest {
         lineOf = { text, box -> TextLine(text, box, kana = false, latin = true) },
     ).also {
         it.handle(Event.SettingsChanged(settings))
-        assertTrue(it.handle(Event.EngineChanged(intake)).any { e -> e is Effect.OpenStream })
+        assertTrue(it.handle(Event.EngineReady(1, intake, quality = 0)).any { e -> e is Effect.OpenStream })
         it.handle(Event.StreamOpened)
     }
 
@@ -67,12 +67,19 @@ class CameraSessionTest {
     }
 
     @Test
+    fun エンジンの世代が同じなら開き直さず_変わったら開き直す() {
+        val s = session(intake = 2)
+        assertTrue(s.handle(Event.EngineReady(1, 3, quality = 0)).none { it is Effect.OpenStream })
+        assertTrue(s.handle(Event.EngineReady(2, 3, quality = 0)).any { it is Effect.OpenStream })
+    }
+
+    @Test
     fun 同時に訳す数の設定が変わったら空きも変わる() {
         val s = session(intake = 1)
         val texts = arrayOf("first line here", "second line here", "third line here")
         assertEquals(1, submitted(s.readTwice(*texts)).size)
         // 増えた分を、その場で渡す
-        assertEquals(2, submitted(s.handle(Event.IntakeChanged(3))).size)
+        assertEquals(2, submitted(s.handle(Event.EngineReady(1, 3, quality = 0))).size)
     }
 
     @Test
@@ -119,14 +126,14 @@ class CameraSessionTest {
     @Test
     fun 一時停止中は読み取りがそろった段落を先にそろっていない段落も渡す() {
         val s = session(intake = 4)
-        s.handle(Event.IntakeChanged(0))
+        s.handle(Event.EngineReady(1, 0, quality = 0))
         // 上の行は2回読めてそろい、下の行は1回だけ。画面の中央に近いのは下の行
         s.handle(Event.Read(lines("read twice so settled", "read once only"), Box(0, 0, 400, 500)))
         s.handle(Event.Read(lines("read twice so settled"), Box(0, 0, 400, 500)))
         s.handle(Event.Paused)
         // 一時停止の後のコマは捨てる
         assertTrue(s.handle(Event.Read(lines("another frame text"), screen)).isEmpty())
-        assertEquals(listOf("read twice so settled", "read once only"), submitted(s.handle(Event.IntakeChanged(2))))
+        assertEquals(listOf("read twice so settled", "read once only"), submitted(s.handle(Event.EngineReady(1, 2, quality = 0))))
     }
 
     @Test
@@ -313,13 +320,13 @@ class CameraSessionTest {
     @Test
     fun モデルを切り替えても訳は残し_品質の低い訳だけ頼み直して同じか高い品質の訳で書き換える() {
         val s = session()
-        s.handle(Event.EngineChanged(2, quality = 1))
+        s.handle(Event.EngineReady(2, 2, quality = 1))
         s.handle(Event.StreamOpened)
         val id = ids(s.readTwice("cold brew coffee")).single()
         s.handle(Event.Final(id, "水出しコーヒー（小）"))
 
         // 品質の高いモデルへ：訳は出したまま、頼み直す
-        s.handle(Event.EngineChanged(2, quality = 2))
+        s.handle(Event.EngineReady(3, 2, quality = 2))
         val again = ids(s.handle(Event.StreamOpened))
         assertEquals(1, again.size)
         assertEquals("水出しコーヒー（小）", s.boxes().single().translation)
@@ -327,7 +334,7 @@ class CameraSessionTest {
         assertEquals("水出しコーヒー（大）", s.boxes().single().translation)
 
         // 品質の低いモデルへ戻しても、品質の高い訳を使い、頼み直さない
-        s.handle(Event.EngineChanged(2, quality = 1))
+        s.handle(Event.EngineReady(4, 2, quality = 1))
         assertTrue(ids(s.handle(Event.StreamOpened)).isEmpty())
         assertEquals("水出しコーヒー（大）", s.boxes().single().translation)
     }
