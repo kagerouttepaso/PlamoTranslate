@@ -516,8 +516,8 @@ class ScreenTranslateService : Service() {
     /** 場面の設定（認識モードと訳の消え方から組み立てる撮り方・読み方・判定器）を今の設定に合わせ、判定器を作り直す。 */
     private fun applyProfile() {
         profile = preferences.settings.scene
-        // 作り直した判定Aは止まったままにする。動かすのは状態遷移の作業（ResetStart）だけ（設定はメニューから変えるので、
-        // メニューを閉じたときの ResetStart で動き出す。始めるときは ScreenSessionLoop.start の作業で）
+        // 作り直した判定器は止まったままにする。動かすのは状態遷移の作業（ResetStart・BeginValidity）だけ。作り直したら
+        // SceneChanged を渡す（始めるときは ScreenSessionLoop.start の作業で動き出す）
         startJudge = StartJudge(profile.start)
         validity = ValidityJudge(profile.validity)
     }
@@ -546,7 +546,10 @@ class ScreenTranslateService : Service() {
             override fun triggerChanged(trigger: ScreenTrigger) = dispatch(SessionEvent.TriggerChanged(trigger.toTrigger()))
 
             /** 工程の中身の組を変えたら判定器を作り直す。次の翻訳から効く（メニューを開いた時点で今の翻訳は取り消してある）。 */
-            override fun settingsChanged() = applyProfile()
+            override fun settingsChanged() {
+                applyProfile()
+                dispatch(SessionEvent.SceneChanged)
+            }
 
             override fun switchModel(model: TranslationModel) = this@ScreenTranslateService.switchModel(model)
 

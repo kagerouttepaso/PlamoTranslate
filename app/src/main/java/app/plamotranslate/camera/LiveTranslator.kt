@@ -94,6 +94,9 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
 
     private val session = CameraSession<BoxColors>(lineOf = { text, box -> textLine(text, box.toRect()) })
 
+    /** 今読んで制御へ渡しているコマ（[Effect.ShowFrame] で画面に出す）。init より前に置く。 */
+    private var reading: LiveFrame? = null
+
     /** 中核の制御の入口（作業の中で出た出来事は、今の作業を終えてから渡す。[EventLoop]）。init より前に置く。 */
     private val loop = EventLoop<Event<BoxColors>, Effect>(session::handle, ::perform)
 
@@ -111,8 +114,10 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
      */
     var settings: Settings = Settings.of(null, Language.JA, table = false)
         set(value) {
-            if (field != value) {
-                field = value
+            // 中核の制御と同じ規則で正した値を持つ（認識器と訳す必要があるかの判定も、正した値で決める）
+            val normalized = Settings.of(value.source, value.target, value.table)
+            if (field != normalized) {
+                field = normalized
                 settingsChanged()
             }
         }
@@ -143,7 +148,6 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
     @Volatile var viewWidth = 0
     @Volatile var viewHeight = 0
 
-    private var rotation = 0
 
     init {
         settingsChanged()
@@ -172,25 +176,18 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
      * [bitmap] は縦持ちの向きの画像、[rotation] は端末の傾き（時計回り、0・90・180・270）。
      */
     suspend fun process(bitmap: Bitmap, rotation: Int = 0) {
-        // 向きが変わったら座標の向きも変わるので、追っていた行は捨てる
-        if (rotation != this.rotation) {
-            this.rotation = rotation
-            dispatch(Event.Rotated)
-        }
         val (readings, ocrMillis) = read(bitmap, rotation) ?: return
         val screen = CameraGeometry.visibleRect(bitmap.width, bitmap.height, rotation, viewWidth.toFloat(), viewHeight.toFloat())
             ?.let { Box(floor(it.left).toInt(), floor(it.top).toInt(), ceil(it.right).toInt(), ceil(it.bottom).toInt()) }
         // このコマを画面に出すかは中核の制御が決める（読んでいる間に一時停止したら採らない。採ったら ShowFrame）
         reading = LiveFrame(bitmap, emptyList(), ocrMillis, rotation, table = settings.table)
         try {
-            dispatch(Event.Read(readings, screen))
+            dispatch(Event.Read(readings, screen, rotation = rotation))
         } finally {
             reading = null
         }
     }
 
-    /** 今読んで制御へ渡しているコマ（[Effect.ShowFrame] で画面に出す）。 */
-    private var reading: LiveFrame? = null
 
     /** 縦持ちの画像を正立させて読み、訳す行の読み取りと、かかった時間を返す。読めなければ null。 */
     private suspend fun read(bitmap: Bitmap, rotation: Int): Pair<List<Reading<BoxColors>>, Long>? {
@@ -265,7 +262,8 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
                 Logs.i("カメラ翻訳: 一時停止から見えている訳がそろうまで ${SystemClock.uptimeMillis() - it}ms")
                 pausedAt = null
             }
-            Effect.ShowFrame -> reading?.let { _frame.value = it }
+            // Read はその場で処理する（process から直接渡す）ので、読んでいるコマが必ずある
+            Effect.ShowFrame -> _frame.value = checkNotNull(reading) { "読んでいるコマが無いのにコマを出す作業が来た" }
         }
     }
 

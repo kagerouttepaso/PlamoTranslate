@@ -305,4 +305,49 @@ class ScreenSessionTest {
         loop.start(Trigger.AUTO)
         assertEquals(listOf(Effect.ResetStart, Effect.EndStart, Effect.Capture(1)), performed)
     }
+
+    @Test
+    fun 場面の設定を変えたら待ちから始め直す() {
+        val (s, effects) = run(translatingAuto(), SessionEvent.SceneChanged)
+        assertEquals(Phase.Watching, s.phase)
+        assertTrue(effects.contains(Effect.ResetStart))
+        // メニューを開いている間に変えたら、閉じたときに始め直す
+        val (_, inMenu) = run(auto, SessionEvent.MenuOpened, SessionEvent.SceneChanged)
+        assertTrue(inMenu.none { it == Effect.ResetStart })
+    }
+
+    @Test
+    fun メニューを開いたまま始め方を変えても判定Aは動かさない() {
+        val opened = run(tap, SessionEvent.MenuOpened).first
+        val (_, effects) = run(opened, SessionEvent.TriggerChanged(Trigger.AUTO))
+        assertTrue(effects.none { it == Effect.ResetStart })
+    }
+
+    /** 判定Aが動いているか（ResetStart で動き、EndStart で止まる）を、出来事の列に沿って追う。 */
+    private fun startActive(initial: ScreenSession.State, vararg events: SessionEvent): List<Pair<ScreenSession.State, Boolean>> {
+        var active = ScreenSession.start(initial.trigger).second.contains(Effect.ResetStart)
+        var state = initial
+        return events.map { e ->
+            val (next, effects) = ScreenSession.reduce(state, e)
+            effects.forEach { if (it == Effect.ResetStart) active = true else if (it == Effect.EndStart) active = false }
+            state = next
+            state to active
+        }
+    }
+
+    @Test
+    fun 判定Aが動くのは自動で待っていてメニューを閉じている間だけ() {
+        val sequences = listOf(
+            startActive(tap, SessionEvent.ButtonTapped, SessionEvent.Captured(1, true), SessionEvent.Invalidated("x"), SessionEvent.MenuOpened, SessionEvent.MenuClosed),
+            startActive(
+                auto, SessionEvent.MenuOpened, SessionEvent.ButtonTapped, SessionEvent.ButtonTapped, SessionEvent.ModelChanged, SessionEvent.Rotated,
+                SessionEvent.SceneChanged, SessionEvent.MenuClosed, SessionEvent.Settled, SessionEvent.Captured(1, true), SessionEvent.Recognized(1, 0),
+                SessionEvent.TriggerChanged(Trigger.TAP), SessionEvent.TriggerChanged(Trigger.AUTO), SessionEvent.ButtonTapped,
+            ),
+        )
+        for (seq in sequences) for ((state, active) in seq) {
+            val expected = state.phase == Phase.Watching && !state.menuOpen
+            assertEquals("$state", expected, active)
+        }
+    }
 }

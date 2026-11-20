@@ -76,13 +76,14 @@ class CameraSession<L>(
     )
 
     sealed interface Event<out L> {
-        /** 1コマの読み取りと、画面に見えている範囲（正立した画像の座標。分からなければ null）。[still] は止めた画像の読み直し。 */
-        data class Read<L>(val readings: List<Reading<L>>, val screen: Box?, val still: Boolean = false) : Event<L>
+        /**
+         * 1コマの読み取りと、画面に見えている範囲（正立した画像の座標。分からなければ null）。[still] は止めた画像の読み直し。
+         * [rotation] は読んだときの端末の傾き。前のコマと違えば座標の向きも変わるので、追っていた行を捨てる（一時停止中のコマは
+         * 捨てるので、止めた枠は残る）。
+         */
+        data class Read<L>(val readings: List<Reading<L>>, val screen: Box?, val still: Boolean = false, val rotation: Int = 0) : Event<L>
         data object Paused : Event<Nothing>
         data object Resumed : Event<Nothing>
-
-        /** 端末の向きが変わった。座標の向きも変わるので、追っていた行を捨てる。 */
-        data object Rotated : Event<Nothing>
 
         /** 訳し方の設定（原文の言語・訳す先・モード）。最初の1回も送る。 */
         data class SettingsChanged(val settings: Settings) : Event<Nothing>
@@ -153,13 +154,23 @@ class CameraSession<L>(
     private val failures = HashMap<String, Int>()
     private var nextSegmentId = 1L
 
+    /** 前に読んだコマの端末の傾き。 */
+    private var rotation = 0
+
     fun handle(event: Event<L>): List<Effect> {
         val effects = mutableListOf<Effect>()
         var skip: String? = null
         when (event) {
             is Event.Read -> {
                 if (paused && !event.still) return emptyList()
-                if (!event.still) effects += Effect.ShowFrame
+                if (!event.still) {
+                    effects += Effect.ShowFrame
+                    if (event.rotation != rotation) {
+                        rotation = event.rotation
+                        tracker.clear()
+                        grouping.clear()
+                    }
+                }
                 val updated = tracker.update(event.readings)
                 if (!event.still) {
                     read += updated.size
@@ -178,11 +189,6 @@ class CameraSession<L>(
                 if (!paused) return emptyList()
                 paused = false
                 awaitingComplete = false
-                regroup()
-            }
-            Event.Rotated -> {
-                tracker.clear()
-                grouping.clear()
                 regroup()
             }
             is Event.SettingsChanged -> {

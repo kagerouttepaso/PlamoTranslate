@@ -99,6 +99,9 @@ object ScreenSession {
         /** 翻訳モデルを切り替えた。 */
         data object ModelChanged : SessionEvent
 
+        /** 場面の設定（認識モード・訳の消え方）を変え、判定器を作り直した。作り直した判定器は止まっている。 */
+        data object SceneChanged : SessionEvent
+
         /** ステータス表示をタップした。 */
         data object StatusTapped : SessionEvent
     }
@@ -244,6 +247,8 @@ object ScreenSession {
         }
         SessionEvent.Rotated -> rest(state, "画面を回した")
         SessionEvent.ModelChanged -> rest(state, "翻訳モデルを変えた")
+        // 作り直した判定器は止まっているので、待ちと判定Bを始め直す（rest が ResetStart で判定Aを動かす）
+        SessionEvent.SceneChanged -> rest(state, "場面の設定を変えた")
         SessionEvent.StatusTapped -> rest(state, "ステータス表示に触れた")
     }
 

@@ -182,10 +182,20 @@ class CameraSessionTest {
         val s = session()
         val id = ids(s.readTwice("cold brew coffee")).single()
         s.handle(Event.Final(id, "水出しコーヒー"))
-        s.handle(Event.Rotated)
-        assertTrue(s.boxes().isEmpty())
+        s.handle(Event.Read(lines("other"), screen, rotation = 90))
+        assertTrue(s.boxes().none { it.source == "cold brew coffee" })
+        s.handle(Event.Read(lines("cold brew coffee"), screen, rotation = 90))
+        s.handle(Event.Read(lines("cold brew coffee"), screen, rotation = 90))
+        assertEquals("水出しコーヒー", s.boxes().single { it.source == "cold brew coffee" }.translation)
+    }
+
+    @Test
+    fun 一時停止中に向きの違うコマが来ても止めた枠は残す() {
+        val s = session()
         s.readTwice("cold brew coffee")
-        assertEquals("水出しコーヒー", s.boxes().single().translation)
+        s.handle(Event.Paused)
+        s.handle(Event.Read(lines("other"), screen, rotation = 90))
+        assertEquals(listOf("cold brew coffee"), s.boxes().map { it.source })
     }
 
     @Test
