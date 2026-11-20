@@ -38,6 +38,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -89,16 +93,19 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
 
     private val session = CameraSession<BoxColors>(lineOf = { text, box -> textLine(text, box.toRect()) })
 
-    /** 今の翻訳エンジンと、ストリームに一度に渡しておく数（同時に訳す数の設定から `intakeFor` で決まる）。 */
+    /** 今の翻訳エンジン（切り替わったかを見分ける）。 */
     private var engine: TranslationEngine? = null
-    private var intake = 0
 
     /** 訳すストリームと、その結果の購読。 */
     private var stream: TranslationStream? = null
     private var streamCollector: Job? = null
 
-    /** 原文の言語。null は自動（すべての認識器で読み、PLaMoが原文の言語を判定する）。 */
-    var source: Language? = null
+    /**
+     * 訳し方（原文の言語・訳す先・モード）。作るときは [Settings.of] で。変えると中核の制御に渡す（ストリームを開き直すかは
+     * [CameraSession] が決める）。原文の言語は動かす認識器も決め（overlay/SourceLanguages.kt）、訳す先は訳す必要があるかの判定
+     * （selectTargets）にも使う。
+     */
+    var settings: Settings = Settings.of(null, Language.JA, table = false)
         set(value) {
             if (field != value) {
                 field = value
@@ -106,39 +113,24 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
             }
         }
 
-    /** 訳す先の言語（2026-11-08、作者の要望で日本語以外も選べるようにした）。
-     * 訳す必要があるかの判定（selectTargets）にも使う。訳す先を日本語以外にすると、日本語の文字も訳す。 */
-    var target: Language = Language.JA
-        set(value) {
-            if (field != value) {
-                field = value
-                settingsChanged()
-            }
-        }
+    /** 動かす認識器。原文の言語から決める。 */
+    private val recognizers: OcrLanguage get() = settings.source.recognizers
 
-    /** 動かす認識器。原文の言語から決める（overlay/SourceLanguages.kt）。 */
-    private val recognizers: OcrLanguage get() = source.recognizers
+    /** 一時停止中か（正本は [CameraSession.paused]。中核の制御が状態を変えるたびに写す）。画面の表示とコマを読むかに使う。 */
+    private val _paused = MutableStateFlow(false)
+    val paused: StateFlow<Boolean> = _paused.asStateFlow()
 
-    /** 文章のモード（行を段落にまとめる）か、表・メニューのモード（1行ずつ）か。 */
-    var groupParagraphs = true
-        set(value) {
-            if (field != value) {
-                field = value
-                settingsChanged()
-            }
+    /** 一時停止する・再開する。一時停止は読むのを止めて見えている段落を固定するだけで、訳し方は変えない（[CameraSession]）。 */
+    fun setPaused(value: Boolean) {
+        if (value && !session.paused) {
+            pausedAt = SystemClock.uptimeMillis()
+            val s = session.stats()
+            Logs.i("カメラ翻訳: 一時停止（見えている訳待ち ${s.waitingOnScreen}件、訳している途中 ${s.inFlight}件、" +
+                "ここまでに渡した ${s.submitted}件・うち訳し直し ${s.resubmitted}件、読めた行 ${s.read}件・うちぶれて軽くした ${s.blurred}件）")
         }
-
-    /** 一時停止中か。一時停止は読むのを止めて見えている段落を固定するだけで、訳し方は変えない（[CameraSession]）。 */
-    var paused = false
-        set(value) {
-            if (field == value) return
-            field = value
-            pausedAt = if (value) SystemClock.uptimeMillis() else null
-            if (value) Logs.i("カメラ翻訳: 一時停止（見えている訳待ち ${session.waitingOnScreen()}件、訳している途中 ${session.inFlightCount}件、" +
-                "ここまでに渡した ${session.submittedCount}件・うち訳し直し ${session.resubmittedCount}件、" +
-                "読めた行 ${session.readCount}件・うちぶれて軽くした ${session.blurredCount}件）")
-            apply(session.handle(if (value) Event.Paused else Event.Resumed))
-        }
+        if (!value) pausedAt = null
+        apply(session.handle(if (value) Event.Paused else Event.Resumed))
+    }
 
     /** 一時停止した時刻（見えている訳がそろうまでの時間をログに出すため）。 */
     private var pausedAt: Long? = null
@@ -151,21 +143,24 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
 
     init {
         settingsChanged()
-        // 翻訳モデルが読み込まれたら・切り替わったら、知らせる（ストリームを開き直すかは CameraSession が決める）
+        // 翻訳モデルの読み込み・切り替えと、同時に訳す数の変化を1本の購読で受け、出来事にする（ストリームを開き直すかは
+        // CameraSession が決める）。ストリームに一度に渡しておく数は、同時に訳す数から `intakeFor` で決まる
         scope.launch {
             EngineHolder.awaitEngine(context)
-            EngineHolder.state.collect { st ->
-                if (st is ModelState.Ready && st.engine !== engine) {
-                    engine = st.engine
-                    intake = intakeFor(st.engine.parallel)
-                    apply(session.handle(Event.EngineChanged(intake)))
+            combine(EngineHolder.state, EngineHolder.parallel) { st, _ -> (st as? ModelState.Ready)?.engine }
+                .filterNotNull()
+                .map { it to intakeFor(it.parallel) }
+                .distinctUntilChanged { a, b -> a.first === b.first && a.second == b.second }
+                .collect { (e, intake) ->
+                    val changed = e !== engine
+                    engine = e
+                    apply(session.handle(if (changed) Event.EngineChanged(intake) else Event.IntakeChanged(intake)))
                 }
-            }
         }
     }
 
     private fun settingsChanged() {
-        apply(session.handle(Event.SettingsChanged(Settings(source, target, table = !groupParagraphs))))
+        apply(session.handle(Event.SettingsChanged(settings)))
     }
 
     /**
@@ -178,14 +173,13 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
             this.rotation = rotation
             apply(session.handle(Event.Rotated))
         }
-        // 同時に訳す数は設定の画面で変わる（エンジンはそのまま）
-        engine?.let { e -> intakeFor(e.parallel).takeIf { it != intake }?.let { intake = it; apply(session.handle(Event.IntakeChanged(it))) } }
         val (readings, ocrMillis) = read(bitmap, rotation) ?: return
-        if (paused) return
+        // 読んでいる間に一時停止したら、そのコマは使わない（止めたコマを固定するため）
+        if (session.paused) return
         val screen = CameraGeometry.visibleRect(bitmap.width, bitmap.height, rotation, viewWidth.toFloat(), viewHeight.toFloat())
             ?.let { Box(floor(it.left).toInt(), floor(it.top).toInt(), ceil(it.right).toInt(), ceil(it.bottom).toInt()) }
         val effects = session.handle(Event.Read(readings, screen))
-        _frame.value = LiveFrame(bitmap, boxes(), ocrMillis, rotation, table = !groupParagraphs)
+        _frame.value = LiveFrame(bitmap, boxes(), ocrMillis, rotation, table = settings.table)
         apply(effects)
     }
 
@@ -197,7 +191,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
         val t0 = SystemClock.uptimeMillis()
         return try {
             // カメラでは1文字だけの読み取りを捨てる（韓国語のラベルを中国語の認識器が読み違えた「太」「我」などの雑音が多い）
-            val targets = selectTargets(ocr.recognize(upright, recognizers).map(TextBlock::of), upright, statusBarHeight = 0, target = target)
+            val targets = selectTargets(ocr.recognize(upright, recognizers).map(TextBlock::of), upright, statusBarHeight = 0, target = settings.target)
                 .filter { t -> t.sourceText.count { it.isLetter() } >= 2 }
             // 鋭さは行の数だけ画素を回るので、画面のスレッドを塞がない
             val readings = withContext(Dispatchers.Default) {
@@ -242,7 +236,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
     /** 今のコマの枠に、訳の進み具合を入れ直す。 */
     private fun refresh() {
         val f = _frame.value ?: return
-        _frame.value = f.with(boxes(), table = !groupParagraphs)
+        _frame.value = f.with(boxes(), table = settings.table)
     }
 
     /** 中核の制御が返した作業を行い、枠を描き直す。 */
@@ -256,6 +250,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
                 pausedAt = null
             }
         }
+        _paused.value = session.paused
         refresh()
     }
 

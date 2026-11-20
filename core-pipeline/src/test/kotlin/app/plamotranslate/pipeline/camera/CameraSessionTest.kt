@@ -56,7 +56,7 @@ class CameraSessionTest {
         assertTrue(s.handle(Event.Partial(ids(first).first(), "途中")).isEmpty())
         // 1件確定したら、次の1件を渡す
         assertEquals(1, submitted(s.handle(Event.Final(ids(first).first(), "訳"))).size)
-        assertEquals(2, s.inFlightCount)
+        assertEquals(2, s.stats().inFlight)
     }
 
     @Test
@@ -81,7 +81,7 @@ class CameraSessionTest {
         assertEquals(listOf("menu item number one"), submitted(s.readTwice("menu item number one")))
         // 1文字違って読めた（同じ行）。訳はまだ1文字も出ていない
         repeat(3) { s.handle(Event.Read(lines("menu item numbcr one"), screen)) }
-        assertEquals(1, s.inFlightCount)
+        assertEquals(1, s.stats().inFlight)
     }
 
     @Test
@@ -99,7 +99,7 @@ class CameraSessionTest {
         assertEquals("最初の文", s.boxes().single().translation)
         // 渡している間に、また少し違って読めても頼み直さない
         repeat(2) { s.handle(Event.Read(para("the first sentence of text", "and the second one fol1ows"), screen)) }
-        assertEquals(1, s.inFlightCount)
+        assertEquals(1, s.stats().inFlight)
     }
 
     @Test
@@ -259,7 +259,25 @@ class CameraSessionTest {
         assertEquals(listOf("the first line of a paragraph continues on the second line"), submitted(effects))
         s.handle(Event.Final(ids(effects).single(), "訳"))
         repeat(6) { i -> s.handle(Event.Read(listOf(first, second(joined = i % 2 == 1)), screen)) }
-        assertEquals(1, s.submittedCount)
-        assertEquals(0, s.resubmittedCount)
+        assertEquals(1, s.stats().submitted)
+        assertEquals(0, s.stats().resubmitted)
+    }
+
+    @Test
+    fun 原文と訳す先が同じ言語なら原文は自動にする() {
+        assertEquals(null, CameraSession.Settings.of(Language.JA, Language.JA, table = false).source)
+        assertEquals(null, CameraSession.Settings.of(Language.ZH_HANT, Language.ZH, table = false).source)
+        assertEquals(Language.KO, CameraSession.Settings.of(Language.KO, Language.JA, table = false).source)
+    }
+
+    @Test
+    fun 一時停止を重ねても一時停止の後の待ちは始め直さない() {
+        val s = session()
+        s.handle(CameraSession.Event.Paused)
+        assertTrue(s.paused)
+        assertEquals(emptyList<CameraSession.Effect>(), s.handle(CameraSession.Event.Paused))
+        assertEquals(emptyList<CameraSession.Effect>(), s.handle(CameraSession.Event.Resumed).filterIsInstance<CameraSession.Effect.VisibleComplete>())
+        assertEquals(false, s.paused)
+        assertEquals(emptyList<CameraSession.Effect>(), s.handle(CameraSession.Event.Resumed))
     }
 }

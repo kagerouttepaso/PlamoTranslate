@@ -35,6 +35,10 @@ object EngineHolder {
     private val _state = MutableStateFlow<ModelState>(ModelState.Loading)
     val state: StateFlow<ModelState> = _state.asStateFlow()
 
+    /** 同時に訳す文の数（設定。0は読み込み前）。変えると今のエンジンにもすぐ効く（[setParallel]）。購読すれば変化が分かる。 */
+    private val _parallel = MutableStateFlow(0)
+    val parallel: StateFlow<Int> = _parallel.asStateFlow()
+
     /** 選ばれている翻訳モデル。選んだモデルのファイルが無ければ0.8Bを使う。 */
     fun selected(context: Context): TranslationModel {
         val model = TranslationPreferences(context).model
@@ -96,6 +100,7 @@ object EngineHolder {
             // 読み込みと初回の推論（warmUp）の間にGPUのカーネルを組み立てる。ここで落ちたら、次の起動でCPUにする
             if (gpu) GpuGuard.beginGpuLoad(app)
             val parallel = preferences.parallel
+            _parallel.value = parallel
             _state.value = runCatching {
                 TranslationEngine.load(file, libDir, gpu, cpu = cpu).also {
                     it.parallel = parallel
@@ -140,6 +145,7 @@ object EngineHolder {
     fun setParallel(context: Context, parallel: Int) {
         TranslationPreferences(context.applicationContext).parallel = parallel
         (_state.value as? ModelState.Ready)?.engine?.parallel = parallel
+        _parallel.value = parallel
     }
 
     /** 今の翻訳モデルを閉じて読み直す（CPUの詳細設定を変えたとき。設定は先に [TranslationPreferences.saveCpu] で保存する）。 */

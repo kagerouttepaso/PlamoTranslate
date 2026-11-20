@@ -65,7 +65,7 @@ import app.plamotranslate.EngineHolder
 import app.plamotranslate.ModelState
 import app.plamotranslate.ModelSwitch
 import app.plamotranslate.llm.Language
-import app.plamotranslate.llm.sameAs
+import app.plamotranslate.pipeline.camera.CameraSession
 import app.plamotranslate.overlay.shortName
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -102,7 +102,8 @@ class CameraTranslateActivity : ComponentActivity() {
         }
     }
 
-    private var paused by mutableStateOf(false)
+    /** 一時停止中か（正本は中核の制御。[LiveTranslator.paused]）。 */
+    private val paused: Boolean get() = translator.paused.value
     private var torch by mutableStateOf(false)
     /** 原文の言語。null は自動。 */
     private var source by mutableStateOf<Language?>(null)
@@ -124,12 +125,7 @@ class CameraTranslateActivity : ComponentActivity() {
         enableEdgeToEdge()
         EngineHolder.ensureLoaded(applicationContext)
         translator = LiveTranslator(applicationContext, lifecycleScope)
-        source = preferences.source
-        translator.source = source
-        target = preferences.target
-        translator.target = target
-        tableMode = preferences.tableMode
-        translator.groupParagraphs = !tableMode
+        applySettings(CameraSession.Settings.of(preferences.source, preferences.target, preferences.tableMode))
         analysisExecutor = Executors.newSingleThreadExecutor()
         previewView = PreviewView(this).apply { scaleType = PreviewView.ScaleType.FILL_CENTER }
         // 画面に見えている範囲の計算に、表示の大きさを渡す
@@ -190,29 +186,24 @@ class CameraTranslateActivity : ComponentActivity() {
     }
 
     /** 一時停止したら、読むのを止めてそのコマを固定する（見えている文は訳し続ける）。 */
-    private fun togglePause() {
-        paused = !paused
-        translator.paused = paused
-    }
+    private fun togglePause() = translator.setPaused(!paused)
 
-    private fun chooseTableMode(table: Boolean) {
-        tableMode = table
-        preferences.tableMode = table
-        translator.groupParagraphs = !table
-    }
+    private fun chooseTableMode(table: Boolean) = applySettings(CameraSession.Settings.of(source, target, table))
 
-    private fun chooseSource(lang: Language?) {
-        source = lang
-        preferences.source = lang
-        translator.source = lang
-    }
+    private fun chooseSource(lang: Language?) = applySettings(CameraSession.Settings.of(lang, target, tableMode))
 
-    private fun chooseTarget(lang: Language) {
-        target = lang
-        preferences.target = lang
-        translator.target = lang
-        // 原文と訳す先が同じ言語になったら、原文は自動に戻す
-        if (source?.sameAs(lang) == true) chooseSource(null)
+    /** 原文と訳す先が同じ言語になったら、原文は自動に戻る（[CameraSession.Settings.of]）。 */
+    private fun chooseTarget(lang: Language) = applySettings(CameraSession.Settings.of(source, lang, tableMode))
+
+    /** 訳し方を画面の選択・保存・翻訳へ1回で渡す（ストリームの開き直しは1回）。 */
+    private fun applySettings(settings: CameraSession.Settings) {
+        source = settings.source
+        target = settings.target
+        tableMode = settings.table
+        preferences.source = settings.source
+        preferences.target = settings.target
+        preferences.tableMode = settings.table
+        translator.settings = settings
     }
 
     private fun switchTorch(on: Boolean) {
@@ -239,6 +230,7 @@ class CameraTranslateActivity : ComponentActivity() {
     @Composable
     private fun CameraScreen() {
         val frame by translator.frame.collectAsStateWithLifecycle()
+        val paused by translator.paused.collectAsStateWithLifecycle()
         val model by EngineHolder.state.collectAsStateWithLifecycle()
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
@@ -262,7 +254,7 @@ class CameraTranslateActivity : ComponentActivity() {
                 ) {
                     TextButton(onClick = ::finish) { Text("←", fontSize = 22.sp, color = Color.White) }
                     Text(
-                        statusText(frame),
+                        statusText(frame, paused),
                         color = Color.White,
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.weight(1f),
@@ -392,7 +384,7 @@ class CameraTranslateActivity : ComponentActivity() {
         }
     }
 
-    private fun statusText(frame: LiveFrame?): String {
+    private fun statusText(frame: LiveFrame?, paused: Boolean): String {
         val f = frame ?: return "文字を探しています…"
         if (f.boxes.isEmpty()) return "文字が見つかりません（読み取り ${f.ocrMillis}ms）"
         val waiting = f.boxes.count { it.translation == null && it.onScreen }

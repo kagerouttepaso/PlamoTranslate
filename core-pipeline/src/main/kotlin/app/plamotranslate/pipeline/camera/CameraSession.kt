@@ -1,6 +1,7 @@
 package app.plamotranslate.pipeline.camera
 
 import app.plamotranslate.llm.Language
+import app.plamotranslate.llm.sameAs
 import app.plamotranslate.pipeline.camera.TextSimilarity.key
 import app.plamotranslate.pipeline.camera.TextSimilarity.similar
 import app.plamotranslate.pipeline.layout.Grouping
@@ -47,12 +48,32 @@ class CameraSession<L>(
     private val lineOf: (String, Box) -> TextLine,
     private val join: (List<String>) -> String = CameraText::join,
 ) {
-    /** 訳し方を変える設定。どれかが変わると前の訳は使わない。 */
+    /** 訳し方を変える設定。どれかが変わると前の訳は使わない。作るときは [of] で（原文と訳す先の組み合わせを正す）。 */
     data class Settings(val source: Language?, val target: Language, val table: Boolean) {
         /** 翻訳のストリームの設定。表・メニューのモードでは、短い語の意味を決める手がかりに背景を渡す。 */
         val options: TranslationStream.Options
             get() = TranslationStream.Options(source, target, context = if (table) TABLE_CONTEXT else null)
+
+        companion object {
+            /** 選んだ原文の言語・訳す先・モードから作る。原文と訳す先が同じ言語なら、原文は自動にする（同じ言語へは訳さない）。 */
+            fun of(source: Language?, target: Language, table: Boolean): Settings =
+                Settings(source?.takeUnless { it.sameAs(target) }, target, table)
+        }
     }
+
+    /** 実機で比べるための数え上げ（一時停止したときに記録へ書く）。 */
+    data class Stats(
+        /** 見えている段落のうち、まだ訳の無いもの。 */
+        val waitingOnScreen: Int,
+        /** ストリームに渡して、まだ確定していない文。 */
+        val inFlight: Int,
+        /** 渡した文と、そのうち訳のある段落の訳し直し（原文が変わったため）。区切りと原文の安定を比べる。 */
+        val submitted: Int,
+        val resubmitted: Int,
+        /** 読めた行と、そのうちぶれたコマとして票を軽くしたもの（[LineTracker.Track.lastBlurred]）。鋭さの重みを確かめる。 */
+        val read: Int,
+        val blurred: Int,
+    )
 
     sealed interface Event<out L> {
         /** 1コマの読み取りと、画面に見えている範囲（正立した画像の座標。分からなければ null）。[still] は止めた画像の読み直し。 */
@@ -137,18 +158,20 @@ class CameraSession<L>(
                 if (paused && !event.still) return emptyList()
                 val updated = tracker.update(event.readings)
                 if (!event.still) {
-                    readCount += updated.size
-                    blurredCount += updated.count { it.lastBlurred() }
+                    read += updated.size
+                    blurred += updated.count { it.lastBlurred() }
                 }
                 event.screen?.let { screen = it }
                 regroup(observe = true)
             }
             Event.Paused -> {
+                if (paused) return emptyList()
                 paused = true
                 awaitingComplete = true
                 regroup()
             }
             Event.Resumed -> {
+                if (!paused) return emptyList()
                 paused = false
                 awaitingComplete = false
                 regroup()
@@ -227,20 +250,13 @@ class CameraSession<L>(
     /** 見えている段落のうち、まだ訳の無いものの数。 */
     fun waitingOnScreen(): Int = paragraphs.count { onScreen(it.box) && shownTranslation(it) == null }
 
-    /** ストリームに渡して、まだ確定していない文の数。 */
-    val inFlightCount: Int get() = inFlight.size
+    /** 今の数え上げ。 */
+    fun stats(): Stats = Stats(waitingOnScreen(), inFlight.size, submitted, resubmitted, read, blurred)
 
-    /** 渡した文の数と、そのうち訳のある段落の訳し直しの数（原文が変わったため）。区切りと原文の安定を実機で比べるため。 */
-    var submittedCount = 0
-        private set
-    var resubmittedCount = 0
-        private set
-
-    /** 読めた行の数と、そのうちぶれたコマとして票を軽くした数（[LineTracker.Track.lastBlurred]）。鋭さの重みを実機で確かめるため。 */
-    var readCount = 0
-        private set
-    var blurredCount = 0
-        private set
+    private var submitted = 0
+    private var resubmitted = 0
+    private var read = 0
+    private var blurred = 0
 
     /**
      * 空いた分だけ、その時点でいちばん先に訳すべき段落を選んで渡す（[TranslationPlan.choose]）。
@@ -261,8 +277,8 @@ class CameraSession<L>(
         if (chosen.isEmpty()) return emptyList()
         val segments = chosen.map { c ->
             val id = nextSegmentId++
-            submittedCount++
-            if (c.id in lastTranslation) resubmittedCount++
+            submitted++
+            if (c.id in lastTranslation) resubmitted++
             inFlight[id] = Request(c.id, key(c.text))
             Segment(id, c.text)
         }
