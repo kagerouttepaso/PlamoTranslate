@@ -1,13 +1,12 @@
 package app.plamotranslate.camera
 
+import app.plamotranslate.pipeline.translation.ModelState
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.SystemClock
 import app.plamotranslate.EngineHolder
-import app.plamotranslate.ModelState
 import app.plamotranslate.llm.Language
-import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.log.Logs
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.ocr.OcrLanguage
@@ -42,7 +41,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -100,8 +98,8 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
     /** 中核の制御の入口（作業の中で出た出来事は、今の作業を終えてから渡す。[EventLoop]）。init より前に置く。 */
     private val loop = EventLoop<Event<BoxColors>, Effect>(session::handle, ::perform)
 
-    /** 今の翻訳エンジン（切り替わったかを見分ける）。 */
-    private var engine: TranslationEngine? = null
+    /** 今の翻訳エンジンの世代（[ModelState.Ready.generation]。切り替わったかを見分ける）。 */
+    private var generation = 0L
 
     /** 訳すストリームと、その結果の購読。 */
     private var stream: TranslationStream? = null
@@ -154,14 +152,14 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
         // 翻訳モデルの読み込み・切り替えと、同時に訳す数の変化を1本の購読で受け、出来事にする（ストリームを開き直すかは
         // CameraSession が決める）。ストリームに一度に渡しておく数は、同時に訳す数から `intakeFor` で決まる
         scope.launch {
-            EngineHolder.awaitEngine(context)
-            combine(EngineHolder.state, EngineHolder.parallel) { st, _ -> st as? ModelState.Ready }
+            EngineHolder.ensureLoaded(context)
+            EngineHolder.state.map { it as? ModelState.Ready }
                 .filterNotNull()
-                .map { Triple(it.engine, intakeFor(it.engine.parallel), it.model.origin.quality) }
-                .distinctUntilChanged { a, b -> a.first === b.first && a.second == b.second }
-                .collect { (e, intake, quality) ->
-                    val changed = e !== engine
-                    engine = e
+                .map { Triple(it.generation, intakeFor(it.parallel), it.model.origin.quality) }
+                .distinctUntilChanged { a, b -> a.first == b.first && a.second == b.second }
+                .collect { (g, intake, quality) ->
+                    val changed = g != generation
+                    generation = g
                     dispatch(if (changed) Event.EngineChanged(intake, quality) else Event.IntakeChanged(intake))
                 }
         }

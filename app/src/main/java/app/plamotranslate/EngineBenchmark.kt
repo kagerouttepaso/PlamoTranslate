@@ -21,7 +21,7 @@ object EngineBenchmark {
 
     /** 今の翻訳モデルで1文を測る。モデルが読めない・訳が終わらなければ null。 */
     suspend fun run(context: Context): Result? {
-        val engine = EngineHolder.awaitEngine(context) ?: return null
+        val engine = EngineHolder.awaitEngine(context)?.first ?: return null
         val source = SingleRequest(
             TranslationRequest(
                 "明日の朝は九時に駅の北口で待ち合わせて、そのまま美術館へ向かいましょう。昼ご飯は近くの店を予約してあります。",
@@ -40,7 +40,7 @@ object EngineBenchmark {
      * 測れなければ null。初回だけ遅くならないよう、測る前に同じ件数で短く1回訳しておく。
      */
     suspend fun runParallel(context: Context, parallel: Int): Double? {
-        val engine = EngineHolder.awaitEngine(context) ?: return null
+        val engine = EngineHolder.awaitEngine(context)?.first ?: return null
         val requests = PARALLEL_TEXTS.take(parallel).map { TranslationRequest(it, Language.JA, Language.EN) }
         // 決まった依頼を一度ずつ出すだけの出し手
         fun source() = object : JobSource {

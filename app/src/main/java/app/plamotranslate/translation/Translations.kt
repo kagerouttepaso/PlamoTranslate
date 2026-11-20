@@ -29,7 +29,7 @@ object Translations {
     ): TranslationStream {
         val app = context.applicationContext
         return TranslationStream(scope, {
-            EngineHolder.awaitReady(app)?.let { ready -> TranslationStream.Backend(ready.engine, ready.model.origin, persistent) }
+            EngineHolder.awaitEngine(app)?.let { (engine, ready) -> TranslationStream.Backend(engine, ready.model.origin, persistent) }
         }, options, cache)
     }
 }

@@ -72,8 +72,7 @@ class BenchActivity : ComponentActivity() {
             say("ベンチ: 画像がありません: ${input.path}")
             return
         }
-        val ready = EngineHolder.awaitReady(this)
-        if (ready == null) {
+        val (engine, ready) = EngineHolder.awaitEngine(this) ?: run {
             say("ベンチ: 翻訳モデルを読めません")
             return
         }
@@ -110,7 +109,7 @@ class BenchActivity : ComponentActivity() {
             val t1 = SystemClock.uptimeMillis()
             // 訳す対象が無い画像（日本語だけ・空の画面）ではストリームを開かない。空の依頼は何も流さないので、確定を待つと止まる
             if (targets.isNotEmpty()) coroutineScope {
-                val stream = TranslationStream(this, { TranslationStream.Backend(ready.engine, ready.model.origin) }, TranslationStream.Options(source, SCREEN_TARGET))
+                val stream = TranslationStream(this, { TranslationStream.Backend(engine, ready.model.origin) }, TranslationStream.Options(source, SCREEN_TARGET))
                 try {
                     stream.submit(targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })
                     val done = HashSet<Long>()

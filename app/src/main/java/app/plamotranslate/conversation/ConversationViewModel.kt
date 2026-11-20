@@ -1,12 +1,13 @@
 package app.plamotranslate.conversation
 
+import app.plamotranslate.pipeline.translation.ModelState
+import app.plamotranslate.models.TranslationModel
 import android.Manifest
 import android.app.Application
 import androidx.annotation.RequiresPermission
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.plamotranslate.EngineHolder
-import app.plamotranslate.ModelState
 import app.plamotranslate.ReadAloud
 import app.plamotranslate.AdvancedPreferences
 import app.plamotranslate.RecognitionPreferences
@@ -100,7 +101,7 @@ data class ConversationUiState(
 class ConversationViewModel(private val app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(ConversationUiState())
     val state: StateFlow<ConversationUiState> = _state.asStateFlow()
-    val model: StateFlow<ModelState> = EngineHolder.state
+    val model: StateFlow<ModelState<TranslationModel>> = EngineHolder.state
 
     /** 表示モードと自分の言語は次に開いたときも同じにする。init より前に置く（init で読む）。 */
     private val preferences = ConversationPreferences(app)
@@ -330,10 +331,11 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
      * （docs/設計/翻訳コア.md「ストリームを通さない呼び出し」）。
      */
     private suspend fun configureTranslation(threads: Int) {
-        val ready = model.value as? ModelState.Ready ?: return
+        if (model.value !is ModelState.Ready) return
+        val engine = EngineHolder.awaitEngine(app)?.first ?: return
         val cpu = TranslationPreferences(app).cpuOptions
         val restore = if (cpu.threads > 0) cpu.threads else TranslationEngine.defaultThreads()
-        ready.engine.configure(cpu.boost, if (threads > 0) threads else restore)
+        engine.configure(cpu.boost, if (threads > 0) threads else restore)
         log("翻訳のスレッド数: ${if (threads > 0) threads else restore}")
     }
 

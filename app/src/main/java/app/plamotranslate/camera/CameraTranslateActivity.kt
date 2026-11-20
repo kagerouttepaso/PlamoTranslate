@@ -1,5 +1,7 @@
 package app.plamotranslate.camera
 
+import app.plamotranslate.pipeline.translation.ModelState
+import app.plamotranslate.models.TranslationModel
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -62,7 +64,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import app.plamotranslate.AppTheme
 import app.plamotranslate.EngineHolder
-import app.plamotranslate.ModelState
 import app.plamotranslate.ModelSwitch
 import app.plamotranslate.llm.Language
 import app.plamotranslate.pipeline.camera.CameraSession
@@ -367,7 +368,7 @@ class CameraTranslateActivity : ComponentActivity() {
      * 読み込み中・失敗のときだけ上のバーの下に出す。文字の枠は出ているのに訳が出ない理由が分かるように。
      */
     @Composable
-    private fun ModelBanner(model: ModelState) {
+    private fun ModelBanner(model: ModelState<TranslationModel>) {
         val text = when (model) {
             is ModelState.Ready -> return
             ModelState.Loading -> "翻訳モデル（${EngineHolder.selected(this).label}）を読み込み中…　読み込みが終わると訳が出ます"

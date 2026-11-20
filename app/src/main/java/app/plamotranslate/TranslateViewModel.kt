@@ -1,5 +1,7 @@
 package app.plamotranslate
 
+import app.plamotranslate.pipeline.translation.ModelState
+import app.plamotranslate.models.TranslationModel
 import android.Manifest
 import android.app.Application
 import androidx.annotation.RequiresPermission
@@ -52,7 +54,7 @@ enum class VoiceState { Idle, Loading, Listening }
 class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(TranslateUiState())
     val state: StateFlow<TranslateUiState> = _state.asStateFlow()
-    val model: StateFlow<ModelState> = EngineHolder.state
+    val model: StateFlow<ModelState<TranslationModel>> = EngineHolder.state
 
     private var translateJob: Job? = null
 

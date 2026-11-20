@@ -1,8 +1,8 @@
 package app.plamotranslate.screen
 
+import app.plamotranslate.pipeline.translation.ModelState
 import android.content.Context
 import app.plamotranslate.EngineHolder
-import app.plamotranslate.ModelState
 import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.llm.Language
 import app.plamotranslate.pipeline.layout.Grouping

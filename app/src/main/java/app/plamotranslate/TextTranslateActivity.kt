@@ -1,5 +1,6 @@
 package app.plamotranslate
 
+import app.plamotranslate.pipeline.translation.ModelState
 import android.Manifest
 import android.content.ClipboardManager
 import android.content.pm.PackageManager

@@ -1,5 +1,6 @@
 package app.plamotranslate
 
+import app.plamotranslate.pipeline.translation.ModelState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -37,7 +38,7 @@ fun ModelSwitch(color: Color = Color.Unspecified) {
     var open by remember { mutableStateOf(false) }
     val current = (model as? ModelState.Ready)?.model ?: EngineHolder.selected(context)
     val label = when (val m = model) {
-        is ModelState.Ready -> "${m.model.label}・${if (m.engine.usesGpu) "GPU" else "CPU"} ⚙"
+        is ModelState.Ready -> "${m.model.label}・${if (m.gpu) "GPU" else "CPU"} ⚙"
         ModelState.Loading -> "${current.label} 読込中"
         is ModelState.Missing -> "モデルなし ⚙"
         is ModelState.Failed -> "読み込み失敗 ⚙"

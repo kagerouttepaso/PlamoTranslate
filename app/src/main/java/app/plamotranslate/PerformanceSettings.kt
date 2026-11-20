@@ -1,5 +1,7 @@
 package app.plamotranslate
 
+import app.plamotranslate.pipeline.translation.ModelState
+import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.pipeline.translation.ParallelTuner
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -41,7 +43,7 @@ private val PARALLEL_CHOICES = listOf(1, 2, 3, 4, 6, 8)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PerformanceCard(model: ModelState) {
+fun PerformanceCard(model: ModelState<TranslationModel>) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val libDir = context.applicationInfo.nativeLibraryDir
@@ -77,7 +79,7 @@ fun PerformanceCard(model: ModelState) {
             val ready = model as? ModelState.Ready
             val backend = remember(ready) { TranslationEngine.cpuBackend() }
             Text(
-                "今：${if (ready?.engine?.usesGpu == true) "GPU" else "CPU"}で動作" +
+                "今：${if (ready?.gpu == true) "GPU" else "CPU"}で動作" +
                     (if (backend.isNotEmpty()) "（${backend.removePrefix("libggml-cpu-").removeSuffix(".so")}）" else ""),
                 style = MaterialTheme.typography.bodySmall,
             )

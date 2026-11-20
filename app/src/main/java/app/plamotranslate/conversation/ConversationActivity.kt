@@ -1,5 +1,7 @@
 package app.plamotranslate.conversation
 
+import app.plamotranslate.pipeline.translation.ModelState
+import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.pipeline.conversation.LiveSpeech
 import app.plamotranslate.pipeline.conversation.PartnerMode
 import androidx.activity.ComponentActivity
@@ -37,7 +39,6 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.WindowManager
 import app.plamotranslate.AppTheme
-import app.plamotranslate.ModelState
 import app.plamotranslate.ReadAloud
 import app.plamotranslate.llm.Language
 import kotlinx.coroutines.flow.drop
@@ -138,7 +139,7 @@ internal class ConversationActions(
 )
 
 @Composable
-private fun ConversationScreen(state: ConversationUiState, model: ModelState, actions: ConversationActions) {
+private fun ConversationScreen(state: ConversationUiState, model: ModelState<TranslationModel>, actions: ConversationActions) {
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             when (state.viewMode) {

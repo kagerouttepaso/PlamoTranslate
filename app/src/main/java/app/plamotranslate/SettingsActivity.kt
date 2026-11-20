@@ -1,5 +1,6 @@
 package app.plamotranslate
 
+import app.plamotranslate.pipeline.translation.ModelState
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -154,7 +155,7 @@ private fun SettingsHome(open: (SettingsPage) -> Unit) {
 /** トップの「翻訳モデル」の行に添える一言。 */
 @Composable
 private fun modelSummary(): String = when (val model = EngineHolder.state.collectAsStateWithLifecycle().value) {
-    is ModelState.Ready -> "${model.model.label}・${if (model.engine.usesGpu) "GPU" else "CPU"}で動作"
+    is ModelState.Ready -> "${model.model.label}・${if (model.gpu) "GPU" else "CPU"}で動作"
     ModelState.Loading -> "読み込み中"
     else -> "使えません"
 }
@@ -206,7 +207,7 @@ private fun AboutPage() {
  * 選んだ大きさが端末に無ければ、ここからダウンロードする。
  */
 @Composable
-private fun ModelChooser(model: ModelState) {
+private fun ModelChooser(model: ModelState<TranslationModel>) {
     val context = LocalContext.current
     val download by ModelDownloads.items.collectAsStateWithLifecycle()
     val current = (model as? ModelState.Ready)?.model ?: EngineHolder.selected(context)
@@ -236,14 +237,14 @@ private fun ModelChooser(model: ModelState) {
 }
 
 @Composable
-private fun ModelStatus(model: ModelState, onRetry: () -> Unit) {
+private fun ModelStatus(model: ModelState<TranslationModel>, onRetry: () -> Unit) {
     when (model) {
         ModelState.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(Modifier.padding(end = 8.dp))
             Text("モデルを読み込み中…")
         }
         is ModelState.Ready -> Text(
-            "今の翻訳モデル：${model.model.label}（${if (model.engine.usesGpu) "GPU" else "CPU"}で動作、" +
+            "今の翻訳モデル：${model.model.label}（${if (model.gpu) "GPU" else "CPU"}で動作、" +
                 "読込 ${"%.1f".format(model.loadMillis / 1000.0)}秒）",
             style = MaterialTheme.typography.bodyMedium,
         )

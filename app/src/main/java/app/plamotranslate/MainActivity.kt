@@ -1,5 +1,7 @@
 package app.plamotranslate
 
+import app.plamotranslate.models.TranslationModel
+import app.plamotranslate.pipeline.translation.ModelState
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -334,8 +336,8 @@ private fun Tile(
 
 
 /** 右上の小さな表示。押すと設定の画面へ。 */
-private fun ModelState.shortLabel(): String = when (this) {
-    is ModelState.Ready -> "${model.label}・${if (engine.usesGpu) "GPU" else "CPU"}"
+private fun ModelState<TranslationModel>.shortLabel(): String = when (this) {
+    is ModelState.Ready -> "${model.label}・${if (gpu) "GPU" else "CPU"}"
     ModelState.Loading -> "読み込み中…"
     is ModelState.Missing -> "モデルなし"
     is ModelState.Failed -> "読み込み失敗"

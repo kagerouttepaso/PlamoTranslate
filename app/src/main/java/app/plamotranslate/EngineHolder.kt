@@ -1,43 +1,38 @@
 package app.plamotranslate
 
 import android.content.Context
-import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.TranslationEngine
-import app.plamotranslate.llm.TranslationRequest
 import app.plamotranslate.models.TranslationModel
-import app.plamotranslate.pipeline.translation.SingleRequest
+import app.plamotranslate.pipeline.translation.ModelHost
+import app.plamotranslate.pipeline.translation.ModelState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
-import java.io.File
-
-sealed interface ModelState {
-    data object Loading : ModelState
-    data class Ready(val engine: TranslationEngine, val model: TranslationModel, val loadMillis: Long) : ModelState
-    /** モデルのファイルが無い。アプリを開くと出る「モデルの準備」の画面（MainActivity の SetupScreen）でダウンロードしてもらう。 */
-    data class Missing(val expectedPath: String) : ModelState
-    data class Failed(val message: String) : ModelState
-}
 
 /**
- * 翻訳モデルをアプリ全体で1つだけ持つ（docs/設計/アーキテクチャ.md）。
- * テキスト翻訳画面・画面翻訳サービス・カメラ翻訳・会話翻訳のすべてから同じエンジンを使う。
- * 0.8Bと2Bのどちらを使うかは作者が選び、次に起動したときも同じものを使う（2026-11-06）。
- * 設定（使うモデル・CPUの詳細）の保存は [TranslationPreferences]、速さの計測は [EngineBenchmark] が持つ。
+ * 翻訳モデルをアプリ全体で1つだけ持つ口（docs/設計/翻訳コア.md「読み込み」）。テキスト翻訳画面・画面翻訳サービス・カメラ翻訳・
+ * 会話翻訳のすべてが同じエンジンを使う。読み込み・切り替え・読み直しの判断は中核の [ModelHost] が持ち、ここは設定
+ * （[TranslationPreferences]）を保存して命令を渡すだけ。読み込みの中身（GPU の判定・初回の準備）は [LlamaEngineLoader]。
+ * 画面とサービスは命令を出して [state] を購読し、エンジンは受け取らない（受け取るのは [awaitEngine] を使う
+ * 翻訳のストリームの入口と計測だけ。docs/設計/翻訳コア.md「ストリームを通さない呼び出し」）。
  */
 object EngineHolder {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val _state = MutableStateFlow<ModelState>(ModelState.Loading)
-    val state: StateFlow<ModelState> = _state.asStateFlow()
+    private lateinit var app: Context
 
-    /** 同時に訳す文の数（設定。0は読み込み前）。変えると今のエンジンにもすぐ効く（[setParallel]）。購読すれば変化が分かる。 */
-    private val _parallel = MutableStateFlow(0)
-    val parallel: StateFlow<Int> = _parallel.asStateFlow()
+    private val host = ModelHost(
+        CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        LlamaEngineLoader { app },
+        selected = { selected(app) },
+        parallel = { TranslationPreferences(app).parallel },
+    )
+
+    val state: StateFlow<ModelState<TranslationModel>> get() = host.state
+
+    @Synchronized
+    private fun attach(context: Context) {
+        if (!::app.isInitialized) app = context.applicationContext
+    }
 
     /** 選ばれている翻訳モデル。選んだモデルのファイルが無ければ0.8Bを使う。 */
     fun selected(context: Context): TranslationModel {
@@ -45,129 +40,35 @@ object EngineHolder {
         return if (model.isPresent(context)) model else TranslationModel.SMALL
     }
 
-    fun modelFile(context: Context): File = selected(context).file.file(context)
-
     /** まだ読んでいなければ読み込みを始める。読み込み済み・読み込み中なら何もしない。 */
-    @Synchronized
     fun ensureLoaded(context: Context) {
-        val current = _state.value
-        if (current is ModelState.Ready) return
-        if (current is ModelState.Loading && loading) return
-        load(context.applicationContext, selected(context.applicationContext))
+        attach(context)
+        host.ensureLoaded()
     }
 
-    /**
-     * 翻訳モデルを切り替える。今のエンジンを閉じてから、選んだモデルを読み込む。
-     * 閉じるのは推論のスレッドで順番に行うので、走っている翻訳が終わってから閉じる。
-     */
-    @Synchronized
+    /** 翻訳モデルを切り替える。読み込み中なら、読み込みが終わってから切り替える。 */
     fun select(context: Context, model: TranslationModel) {
-        val app = context.applicationContext
-        TranslationPreferences(app).model = model
-        val current = _state.value
-        if (current is ModelState.Ready && current.model == model) return
-        if (loading) return
-        val old = (current as? ModelState.Ready)?.engine
-        _state.value = ModelState.Loading
-        loading = true
-        scope.launch {
-            // loading は立てたまま読み込みへ進む（その間に ensureLoaded が二重に読み込まないように）
-            old?.close()
-            load(app, model)
-        }
+        attach(context)
+        TranslationPreferences(context.applicationContext).model = model
+        host.select(model)
     }
 
-    @Synchronized
-    private fun load(app: Context, model: TranslationModel) {
-        val file = model.file.file(app)
-        if (!file.exists()) {
-            _state.value = ModelState.Missing(file.path)
-            return
-        }
-        loading = true
-        _state.value = ModelState.Loading
-        // OpenCLのカーネルのコンパイル結果を残す場所。既定の一時フォルダーはアプリから書けない
-        val clCache = File(app.cacheDir, "cl-cache").apply { mkdirs() }
-        android.system.Os.setenv("GGML_OPENCL_KERNEL_CACHE_DIR", clCache.path, true)
-        val libDir = app.applicationInfo.nativeLibraryDir
-        val preferences = TranslationPreferences(app)
-        // 前回GPUでの読み込み中にアプリが終わっていたら、ここでCPUに切り替える（GpuGuard）
-        val gpuAllowed = GpuGuard.allowGpu(app)
-        val gpu = preferGpu(preferences.cpuOnly) && gpuAllowed
-        val cpu = preferences.cpuOptions
-        scope.launch {
-            val start = System.nanoTime()
-            // 読み込みと初回の推論（warmUp）の間にGPUのカーネルを組み立てる。ここで落ちたら、次の起動でCPUにする
-            if (gpu) GpuGuard.beginGpuLoad(app)
-            val parallel = preferences.parallel
-            _parallel.value = parallel
-            _state.value = runCatching {
-                TranslationEngine.load(file, libDir, gpu, cpu = cpu).also {
-                    it.parallel = parallel
-                    warmUp(it)
-                }
-            }.fold(
-                onSuccess = { ModelState.Ready(it, model, (System.nanoTime() - start) / 1_000_000) },
-                onFailure = { ModelState.Failed(it.message ?: it.toString()) },
-            )
-            if (gpu) GpuGuard.endGpuLoad(app)
-            loading = false
-        }
-    }
-
-    @Volatile
-    private var loading = false
-
-    /**
-     * GPU（OpenCL）を使うか。llama.cppのOpenCLはQualcomm（Snapdragon）のAdrenoに合わせて作られているので、
-     * Qualcommのチップの端末だけGPUを使い、ほかはCPUで動かす（2026-11-06、APKを配布するため）。
-     * GPUでの読み込みに失敗したときは [TranslationEngine.load] がCPUでやり直す。失敗が返らずにプロセスごと終わったときは、
-     * 次の起動で [GpuGuard] がCPUに切り替える。
-     * 設定の「性能」で「CPUだけで動かす」を選ぶと、Snapdragonの端末でもCPUで動く（CPUの速さを確かめるため）。
-     */
-    private fun preferGpu(cpuOnly: Boolean): Boolean {
-        if (cpuOnly) return false
-        val soc = android.os.Build.SOC_MANUFACTURER
-        return soc.equals("QTI", ignoreCase = true) || soc.contains("Qualcomm", ignoreCase = true) ||
-            android.os.Build.HARDWARE.equals("qcom", ignoreCase = true)
-    }
-
-    /**
-     * GPU（OpenCL）は初回の推論でカーネルを準備するため4秒ほどかかる（2026-11-05実測）。
-     * 読み込み直後に短い文を1回訳しておき、作者の最初の翻訳を待たせない。
-     */
-    private suspend fun warmUp(engine: TranslationEngine) {
-        runCatching { engine.run(1, SingleRequest(TranslationRequest("안녕하세요", Language.KO, Language.JA)), maxTokens = 8) }
-            .onFailure { app.plamotranslate.log.Logs.w("起動診断: 準備用の推論が失敗しました", it) }
-    }
-
-    /** 同時に訳す文の数を保存し、今のエンジンにもすぐ効かせる（読み直さない）。 */
+    /** 同時に訳す数を保存し、今のエンジンにもすぐ効かせる（読み直さない）。 */
     fun setParallel(context: Context, parallel: Int) {
+        attach(context)
         TranslationPreferences(context.applicationContext).parallel = parallel
-        (_state.value as? ModelState.Ready)?.engine?.parallel = parallel
-        _parallel.value = parallel
+        host.setParallel(parallel)
     }
 
     /** 今の翻訳モデルを閉じて読み直す（CPUの詳細設定を変えたとき。設定は先に [TranslationPreferences.saveCpu] で保存する）。 */
-    @Synchronized
     fun reload(context: Context) {
-        val app = context.applicationContext
-        if (loading) return
-        val old = (_state.value as? ModelState.Ready)?.engine
-        _state.value = ModelState.Loading
-        loading = true
-        scope.launch {
-            old?.close()
-            load(app, selected(app))
-        }
+        attach(context)
+        host.reload()
     }
 
-    /** 読み込みが終わるまで待ってエンジンを返す。失敗・未配置なら null。 */
-    suspend fun awaitEngine(context: Context): TranslationEngine? = awaitReady(context)?.engine
-
-    /** 読み込みが終わるまで待って、エンジンとどのモデルかを返す。失敗・未配置なら null。 */
-    suspend fun awaitReady(context: Context): ModelState.Ready? {
-        ensureLoaded(context)
-        return state.first { it !is ModelState.Loading } as? ModelState.Ready
+    /** 読み込みが終わるまで待ってエンジンと状態を返す。失敗・未配置なら null。翻訳のストリームの入口と計測だけが使う。 */
+    suspend fun awaitEngine(context: Context): Pair<TranslationEngine, ModelState.Ready<TranslationModel>>? {
+        attach(context)
+        return host.awaitEngine()
     }
 }

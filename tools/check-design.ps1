@@ -46,7 +46,7 @@ foreach ($hit in Grep @('-E', '^import (android|androidx|app\.plamotranslate\.(l
 # 約束2：翻訳はすべて TranslationStream を通す。エンジンを直接使ってよいのは、速さの計測と初回の準備だけ
 $singleRequestAllowed = @(
     'core-pipeline/',                                              # 定義と単体テスト
-    'app/src/main/java/app/plamotranslate/EngineHolder.kt',        # 初回の準備
+    'app/src/main/java/app/plamotranslate/LlamaEngineLoader.kt',   # 初回の準備
     'app/src/main/java/app/plamotranslate/EngineBenchmark.kt',     # 速さの計測
     'app/src/debug/java/app/plamotranslate/TranslateBenchActivity.kt' # 翻訳モデルの比べ（デバッグ版）
 )

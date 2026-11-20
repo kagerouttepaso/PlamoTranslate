@@ -330,7 +330,7 @@ class ScreenTranslateService : Service() {
         overlay?.show(targets.map { it.slot }, "${targets.size}件を翻訳中…")
         val source = frame.choice.source
         scope.launch(w.job) {
-            val ready = EngineHolder.awaitReady(this@ScreenTranslateService)
+            val ready = EngineHolder.awaitEngine(this@ScreenTranslateService)?.second
             if (ready == null) {
                 dispatch(SessionEvent.TranslationFailed(session, "翻訳モデルを読めません。アプリを開いて確認してください"))
                 return@launch
@@ -565,7 +565,7 @@ class ScreenTranslateService : Service() {
         modelJob?.cancel()
         modelJob = scope.launch {
             overlay?.showStatus("${model.label}を読み込んでいます…")
-            val ready = EngineHolder.awaitReady(this@ScreenTranslateService)
+            val ready = EngineHolder.awaitEngine(this@ScreenTranslateService)?.second
             overlay?.showStatus(if (ready != null) "翻訳モデルを${ready.model.label}にしました" else "翻訳モデルを読めませんでした")
         }
     }
@@ -582,7 +582,7 @@ class ScreenTranslateService : Service() {
                 when (intent.action) {
                     DEBUG_TRANSLATE -> dispatch(SessionEvent.ButtonTapped)
                     DEBUG_CONFIG -> scope.launch {
-                        EngineHolder.awaitEngine(this@ScreenTranslateService)?.configure(
+                        EngineHolder.awaitEngine(this@ScreenTranslateService)?.first?.configure(
                             boost = intent.getBooleanExtra("boost", true),
                             threads = intent.getIntExtra("threads", 0),
                         )

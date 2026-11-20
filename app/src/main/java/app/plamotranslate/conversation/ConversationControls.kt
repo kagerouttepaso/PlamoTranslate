@@ -1,5 +1,7 @@
 package app.plamotranslate.conversation
 
+import app.plamotranslate.pipeline.translation.ModelState
+import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.pipeline.conversation.PartnerMode
 import app.plamotranslate.pipeline.conversation.conversationLabel
 import androidx.compose.animation.core.animateFloatAsState
@@ -49,7 +51,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
-import app.plamotranslate.ModelState
 import app.plamotranslate.ModelSwitch
 import app.plamotranslate.llm.Language
 
@@ -65,7 +66,7 @@ import app.plamotranslate.llm.Language
  * その下に状態を1行出す。
  */
 @Composable
-internal fun Controls(state: ConversationUiState, model: ModelState, actions: ConversationActions) {
+internal fun Controls(state: ConversationUiState, model: ModelState<TranslationModel>, actions: ConversationActions) {
     // 操作欄は地の色と分け、上下の線で会話の一覧と区切る（対面では2人の面の境目にもなる）
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     Column(
