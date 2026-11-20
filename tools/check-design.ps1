@@ -8,6 +8,7 @@
   誤り（終了コード1）：設計の約束に反する
     - 中核（core-pipeline）が Android や端末の部品に依存する
     - SingleRequest（翻訳の契約を通らずにエンジンを使う）を、許した場所の外で使う
+    - 翻訳エンジンそのもの（EngineHolder.awaitEngine）を、許した場所の外で受け取る
     - llama.cpp の JNI（LlamaNative）を core-llm の外で使う
     - ロガー（core-log の Logs）を通さずに logcat へ書く
     - モジュールが、docs/設計/アーキテクチャ.md「層とモジュール」の表に無いモジュールに依存する
@@ -54,6 +55,22 @@ foreach ($hit in Grep @('-E', '\bSingleRequest\b', '--', '*.kt')) {
     $file = ($hit -split ':', 2)[0]
     if (-not ($singleRequestAllowed | Where-Object { $file.StartsWith($_) })) {
         $errors.Add("翻訳の契約を通らずにエンジンを使っている：$hit")
+    }
+}
+
+# 約束2の続き：エンジンそのものを受け取ってよいのは、ストリームの入口・速さの計測・スレッド数を変える口だけ
+# （docs/設計/翻訳コア.md「ストリームを通さない呼び出し」）
+$awaitEngineAllowed = @(
+    'app/src/main/java/app/plamotranslate/EngineHolder.kt',                       # 定義
+    'app/src/main/java/app/plamotranslate/translation/Translations.kt',           # ストリームの入口
+    'app/src/main/java/app/plamotranslate/EngineBenchmark.kt',                    # 速さの計測
+    'app/src/main/java/app/plamotranslate/conversation/ConversationViewModel.kt', # スレッド数を変える口
+    'app/src/main/java/app/plamotranslate/screen/ScreenTranslateService.kt'       # DEBUG_CONFIG（デバッグ版のスレッド数）
+)
+foreach ($hit in Grep @('-E', '\bawaitEngine\b', '--', 'app/*.kt')) {
+    $file = ($hit -split ':', 2)[0]
+    if (-not ($awaitEngineAllowed | Where-Object { $file -eq $_ })) {
+        $errors.Add("翻訳エンジンそのものを受け取っている：$hit")
     }
 }
 
