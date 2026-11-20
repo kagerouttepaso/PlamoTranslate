@@ -1,7 +1,6 @@
 package app.plamotranslate
 
 import android.content.Context
-import android.widget.Toast
 import app.plamotranslate.llm.Language
 import app.plamotranslate.log.Logs
 import app.plamotranslate.models.ModelCatalog
@@ -13,6 +12,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,7 +26,9 @@ import kotlinx.coroutines.launch
  * 一度に読むのは1つだけで、別のものを押すと前のものを止める。同じものをもう一度押すと止める。
  *
  * Supertonic 3を選んでいても、モデルが無い・読めない言語（中国語）のときは、端末の読み上げで読む。
- * 会話翻訳は読んでいる間とその直後、マイクの音を無音に置き換える（[isAudible]）。読み上げの声を相手の発話として拾わないため。
+ * 会話翻訳は読んでいる間とその直後、マイクの音を無音に置き換える（[audible]）。読み上げの声を相手の発話として拾わないため。
+ * 読み上げのモデル（Supertonic 3、約220MB）は初めて読むときに読み込み、読み上げを使う画面を離れたら手放す（[release]）。
+ * 会話翻訳では続けて何度も読むので、画面にいる間は持っておく（作者の判断）。失敗は画面へ渡し（[failures]）、画面が知らせる。
  * 設定（読むもの・声・速さ・ステップ数）は [SpeechPreferences] にあり、読むたびに読む。設定の画面で変えると次に読むときから効く。
  */
 object ReadAloud {
@@ -32,17 +37,27 @@ object ReadAloud {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var job: Job? = null
+    private var echoJob: Job? = null
     private var supertonic: SupertonicSpeaker? = null
     private var system: SystemSpeaker? = null
-    @Volatile private var endedAt = 0L
 
     private val _speaking = MutableStateFlow<String?>(null)
 
     /** 読んでいるものの識別子（[toggle] の key）。読んでいなければ null。 */
     val speaking: StateFlow<String?> = _speaking.asStateFlow()
 
-    /** 読み上げの声が鳴っている、または鳴り終わった直後か。 */
-    fun isAudible(): Boolean = _speaking.value != null || System.currentTimeMillis() - endedAt < ECHO_MILLIS
+    private val _audible = MutableStateFlow(false)
+
+    /**
+     * 読み上げの声が鳴っている、または鳴り終わってから [ECHO_MILLIS] の間（部屋の反響が残る）か。読み始めで真になり、
+     * 読み終わり・止めたときから [ECHO_MILLIS] 後に偽になる。録音のスレッドからも読める。
+     */
+    val audible: StateFlow<Boolean> = _audible.asStateFlow()
+
+    private val _failures = MutableSharedFlow<String>(extraBufferCapacity = 4)
+
+    /** 読み上げに失敗したときの知らせる文。読み上げを使う画面が購読して出す。 */
+    val failures: SharedFlow<String> = _failures.asSharedFlow()
 
     /** [key] を読んでいれば止め、そうでなければ [text] を [lang] で読む。 */
     fun toggle(context: Context, key: String, text: String, lang: Language) {
@@ -54,6 +69,7 @@ object ReadAloud {
         val app = context.applicationContext
         job?.cancel()
         _speaking.value = key
+        startAudible()
         job = scope.launch {
             try {
                 speakerFor(app, lang.code).speak(text, lang.code)
@@ -61,11 +77,11 @@ object ReadAloud {
                 throw e
             } catch (e: Exception) {
                 Logs.w("読み上げに失敗しました", e)
-                Toast.makeText(app, e.message ?: "読み上げに失敗しました", Toast.LENGTH_LONG).show()
+                _failures.tryEmit(e.message ?: "読み上げに失敗しました")
             } finally {
                 if (_speaking.value == key) {
                     _speaking.value = null
-                    endedAt = System.currentTimeMillis()
+                    endAudible()
                 }
             }
         }
@@ -73,8 +89,39 @@ object ReadAloud {
 
     fun stop() {
         job?.cancel()
-        if (_speaking.value != null) endedAt = System.currentTimeMillis()
+        if (_speaking.value != null) endAudible()
         _speaking.value = null
+    }
+
+    /**
+     * 読み上げを止め、読み上げのモデルを手放す（読み上げを使う画面を離れたとき）。読んでいる途中なら、止まるのを待ってから
+     * 手放す（作っている途中のモデルを閉じない）。次に読むときに読み込み直す（約0.8〜0.9秒）。
+     */
+    fun release() {
+        val reading = job
+        stop()
+        // 先に外しておく（手放す前にまた読み始めたら、新しく読み込んだものは閉じない）
+        val models = listOfNotNull(supertonic, system)
+        supertonic = null
+        system = null
+        scope.launch {
+            reading?.join()
+            models.forEach { it.close() }
+        }
+    }
+
+    private fun startAudible() {
+        echoJob?.cancel()
+        _audible.value = true
+    }
+
+    /** 鳴り終わった：反響が消えるまで待ってから、鳴っていないことにする（その間にまた読み始めたら取り消す）。 */
+    private fun endAudible() {
+        echoJob?.cancel()
+        echoJob = scope.launch {
+            delay(ECHO_MILLIS)
+            _audible.value = false
+        }
     }
 
     /** Supertonic 3の声の数（設定の画面の選択肢）。モデルが無ければ0。 */

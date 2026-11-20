@@ -1,5 +1,10 @@
 package app.plamotranslate.conversation
 
+import kotlinx.coroutines.launch
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.Lifecycle
+import android.widget.Toast
 import app.plamotranslate.pipeline.conversation.PartnerMode
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -58,6 +63,12 @@ class ConversationActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // 読み上げの失敗は、画面にいる間だけ知らせる
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                ReadAloud.failures.collect { Toast.makeText(this@ConversationActivity, it, Toast.LENGTH_LONG).show() }
+            }
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContent {
             AppTheme {
@@ -98,9 +109,9 @@ class ConversationActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        // 画面を離れたらマイクと読み上げを止める（フォアグラウンドサービスはまだ無い）
+        // 画面を離れたらマイクと読み上げを止め、読み上げのモデルを手放す（フォアグラウンドサービスはまだ無い）
         vm.stop()
-        ReadAloud.stop()
+        ReadAloud.release()
     }
 
     private fun startListening() {

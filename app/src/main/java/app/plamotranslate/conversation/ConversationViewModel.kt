@@ -241,7 +241,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
      * 訳文を読み上げている間とその直後は、マイクの音を無音に置き換える。読み上げの声を発話として拾わないため（2026-11-08）。
      * 録音した時点で判定する（認識が遅れていても、読み上げと重なった音声だけを消す）。
      */
-    private fun muteReadAloud(raw: FloatArray): FloatArray = if (ReadAloud.isAudible()) FloatArray(raw.size) else raw
+    private fun muteReadAloud(raw: FloatArray): FloatArray = if (ReadAloud.audible.value) FloatArray(raw.size) else raw
 
     /** 音量を画面に出す。音声認識のスレッドでは呼ばない（書き起こしの間に止まるため）。 */
     private fun meter(chunk: FloatArray) = _state.update { it.copy(level = level(chunk)) }
