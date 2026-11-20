@@ -102,6 +102,8 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
                 engine.languages = SpeechLanguages(separateChinese = _state.value.source?.isChinese == true)
                 engine.reset()
                 val spoke = AtomicBoolean(false)
+                // 開いたカードの番号（順に）。先頭が欄に出すカード
+                val opened = ArrayDeque<Long>()
                 var silentChunks = 0
                 val mic = launch(Dispatchers.IO) {
                     MicRecorder.stream().takeWhile { heard.get() == null && !stopVoice && (spoke.get() || silentChunks < WAIT_CHUNKS) }
@@ -114,13 +116,22 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
                 mic.invokeOnCompletion { engine.flush() }
                 for (event in events) {
                     when (event) {
-                        is SpeechEvent.Speaking -> if (event.speaking) spoke.set(true)
-                        is SpeechEvent.Partial -> if (heard.get() == null) _state.update { it.copy(input = joinSpoken(base, event.text)) }
-                        // 最初の確定で止める
-                        is SpeechEvent.Final -> if (heard.compareAndSet(null, event.utterance.text)) mic.cancel()
+                        // 最初に開いたカードだけを使う（後のカードは区切りより後ろの音声なので捨てる）
+                        is SpeechEvent.CardOpened -> {
+                            spoke.set(true)
+                            opened.addLast(event.card)
+                        }
+                        is SpeechEvent.CardText -> if (event.card == opened.firstOrNull() && heard.get() == null) {
+                            _state.update { it.copy(input = joinSpoken(base, event.text)) }
+                        }
+                        // そのカードの確定で止める。何も聞き取れなければ、次に開いたカードを使う
+                        is SpeechEvent.CardFinished -> if (event.card == opened.firstOrNull()) {
+                            val u = event.utterance
+                            if (u == null) opened.removeFirst() else if (heard.compareAndSet(null, u.text)) mic.cancel()
+                        }
                         SpeechEvent.Flushed -> break
-                        // 区切りと書き起こし直しは会話翻訳だけが使う
-                        SpeechEvent.CutDone, is SpeechEvent.Retranscribed, is SpeechEvent.RetranscribeFailed, is SpeechEvent.Released -> Unit
+                        // 閉じたことと書き起こし直しは会話翻訳だけが使う
+                        is SpeechEvent.CardClosed, is SpeechEvent.Retranscribed, is SpeechEvent.RetranscribeFailed, is SpeechEvent.Released -> Unit
                     }
                 }
             } catch (e: CancellationException) {

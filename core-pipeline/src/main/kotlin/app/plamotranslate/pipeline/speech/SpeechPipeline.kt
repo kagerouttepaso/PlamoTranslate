@@ -83,7 +83,7 @@ class SpeechPipeline(
             if (event == SpeechEvent.Flushed) flushPending = false
             listener(event)
             // 確定を出した後に取り置く（手放したイベント（Released）は、その確定の後に届く）
-            if (event is SpeechEvent.Final) retention.finalEmitted(event.utterance)
+            if (event is SpeechEvent.CardFinished) event.utterance?.let(retention::finalEmitted)
         },
         submit = ::enqueue,
         trace = trace,

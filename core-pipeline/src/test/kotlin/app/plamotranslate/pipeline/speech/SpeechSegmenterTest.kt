@@ -182,7 +182,9 @@ class SpeechSegmenterTest {
         settle()
     }
 
-    private fun finals(events: List<SpeechEvent>) = events.filterIsInstance<SpeechEvent.Final>().map { it.utterance }
+    private fun finals(events: List<SpeechEvent>) = events.filterIsInstance<SpeechEvent.CardFinished>().mapNotNull { it.utterance }
+
+    private fun partials(events: List<SpeechEvent>) = events.filterIsInstance<SpeechEvent.CardText>()
 
     /**
      * 採点の道具（`tools/score-conv.py`・`tools/score-speaker.py`）は、確定の行を `tools/conversation_log.py` の正規表現
@@ -223,8 +225,32 @@ class SpeechSegmenterTest {
         assertEquals(1, cards.size)
         assertEquals("ja", cards[0].lang)
         assertTrue(cards[0].text.all { it == 'あ' })
-        assertEquals(SpeechEvent.Speaking(true), events.first())
-        assertEquals(SpeechEvent.Speaking(false), events.last())
+        // カードを開き、話し終わりで閉じ、確定する（開く・閉じるはその場で、確定は書き起こしを待って）
+        val id = cards[0].id
+        assertEquals(SpeechEvent.CardOpened(id), events.first())
+        assertTrue(events.indexOf(SpeechEvent.CardClosed(id)) < events.indexOfFirst { it is SpeechEvent.CardFinished })
+        assertTrue(events.last() is SpeechEvent.CardFinished)
+    }
+
+    @Test
+    fun 前のカードを書き起こしている間に話し始めてもその場でカードを開く() {
+        // 書き起こしが2秒遅れる。話し終わってすぐ話し始めても、前のカードの確定を待たずに次のカードを開き、途中の文字を出す
+        val events = segmenter(latency = 20).feed(Sound.JA to 1.5, Sound.SILENCE to 2.2, Sound.KO to 2.5, Sound.SILENCE to 3.0)
+        val first = events.filterIsInstance<SpeechEvent.CardOpened>().map { it.card }
+        assertEquals(2, first.size)
+        val firstFinished = events.indexOfFirst { it is SpeechEvent.CardFinished }
+        assertTrue(events.indexOf(SpeechEvent.CardOpened(first[1])) < firstFinished)
+        // 確定はカードの順
+        assertEquals(first, events.filterIsInstance<SpeechEvent.CardFinished>().map { it.card })
+    }
+
+    @Test
+    fun 何も聞き取れなかったカードは発話の無い確定で閉じる() {
+        val events = segmenter().feed(Sound.NOISE to 1.0, Sound.SILENCE to 3.0)
+        val opened = events.filterIsInstance<SpeechEvent.CardOpened>()
+        val finished = events.filterIsInstance<SpeechEvent.CardFinished>()
+        assertEquals(opened.map { it.card }, finished.map { it.card })
+        assertTrue(finished.all { it.utterance == null })
     }
 
     @Test
@@ -298,7 +324,8 @@ class SpeechSegmenterTest {
         s.feed(Sound.JA to 1.5)
         val events = s.flush()
         assertEquals(1, finals(events).size)
-        assertEquals(listOf(SpeechEvent.Speaking(false), SpeechEvent.Flushed), events.takeLast(2))
+        assertTrue(events.takeLast(2).first() is SpeechEvent.CardFinished)
+        assertEquals(SpeechEvent.Flushed, events.last())
         // 話していなければ、止め終えた知らせだけ
         assertEquals(listOf(SpeechEvent.Flushed), s.flush())
     }
@@ -311,17 +338,17 @@ class SpeechSegmenterTest {
         val cut = finals(events)
         assertEquals(1, cut.size)
         assertTrue(cut[0].text.all { it == 'あ' })
-        assertEquals(SpeechEvent.CutDone, events.last())
+        assertEquals(SpeechEvent.CardClosed(cut[0].id), events.first())
         // 聞くのは続けるので、続けて話した分は次のカードになり、話し終わりで確定する
         val rest = finals(s.feed(Sound.KO to 1.5, Sound.SILENCE to 3.0))
         assertEquals(listOf("ko"), rest.map { it.lang })
-        // 話していないときに押したら、区切りを終えた知らせだけ
-        assertEquals(listOf(SpeechEvent.CutDone), s.cut())
+        // 話していないときに押しても何もしない
+        assertEquals(emptyList<SpeechEvent>(), s.cut())
     }
 
     @Test
     fun 途中結果は同じ文字を続けて出さない() {
-        val partials = segmenter().feed(Sound.JA to 1.5, Sound.SILENCE to 1.5).filterIsInstance<SpeechEvent.Partial>()
+        val partials = partials(segmenter().feed(Sound.JA to 1.5, Sound.SILENCE to 1.5))
         assertTrue(partials.isNotEmpty())
         assertEquals(partials.size, partials.map { it.text }.distinct().size)
     }
@@ -373,8 +400,9 @@ class SpeechSegmenterTest {
         // 認識の結果が1.5秒遅れて届く。前のカードの確定より先に、次のカードの出来事を出さない
         val events = segmenter(latency = 15).feed(Sound.JA to 1.5, Sound.SILENCE to 1.0, Sound.KO to 1.5, Sound.SILENCE to 3.0)
         assertEquals(listOf("ja", "ko"), finals(events).map { it.lang })
-        val firstFinal = events.indexOfFirst { it is SpeechEvent.Final }
-        assertTrue(events.take(firstFinal).filterIsInstance<SpeechEvent.Partial>().none { it.text.contains('가') })
+        // 前のカードの途中の文字に、次の話し手の文字が混ざらない
+        val firstCard = finals(events).first().id
+        assertTrue(partials(events).filter { it.card == firstCard }.none { it.text.contains('가') })
         // 区切っても音声は欠けない
         assertEquals(15, finals(events)[1].text.length)
     }
@@ -450,9 +478,8 @@ class SpeechSegmenterTest {
 
     @Test
     fun 重いモデルは文字より先にカードの言語を知らせる() {
-        val partials = phraseSegmenter(HeavyRecognizer()).feed(Sound.KO to 2.5, Sound.SILENCE to 3.0)
-            .filterIsInstance<SpeechEvent.Partial>()
-        assertEquals(SpeechEvent.Partial("", "ko"), partials.first())
+        val partials = partials(phraseSegmenter(HeavyRecognizer()).feed(Sound.KO to 2.5, Sound.SILENCE to 3.0))
+        assertEquals(SpeechEvent.CardText(partials.first().card, "", "ko"), partials.first())
         assertTrue(partials.drop(1).any { it.text.isNotEmpty() })
     }
 
@@ -484,7 +511,7 @@ class SpeechSegmenterTest {
         // 最初の文はカードの言語が決まる前に終わる（言語を指定せずに書き起こしを頼む）
         val events = s.feed(Sound.JA to 2.5, Sound.SILENCE to 1.0, Sound.JA to 5.0, Sound.SILENCE to 3.0)
         // 文字は話し終わる前に出る（言語が決まらないまま待たない）
-        assertTrue(events.takeWhile { it !is SpeechEvent.Final }.any { it is SpeechEvent.Partial && it.text.isNotEmpty() })
+        assertTrue(events.takeWhile { it !is SpeechEvent.CardFinished }.any { it is SpeechEvent.CardText && it.text.isNotEmpty() })
         assertEquals("ja", finals(events).single().lang)
         // 言語の手がかりが無くても、言語を決めずに書き起こさない（会話に無い言語の文を作り出すため）
         assertEquals(0, asr.unspecified)
@@ -567,7 +594,7 @@ class SpeechSegmenterTest {
         val events = s.collect { play(Sound.JA to 4.0, Sound.SILENCE to 0.6, Sound.JA to 0.6) }
         val cut = events + s.cut()
         assertEquals(listOf("ja"), finals(cut).map { it.lang })
-        assertTrue(cut.last() is SpeechEvent.CutDone)
+        assertTrue(cut.last() is SpeechEvent.CardFinished)
 
         val flushed = s.collect { play(Sound.KO to 4.0, Sound.SILENCE to 0.6, Sound.KO to 0.6) } + s.flush()
         assertEquals(listOf("ko"), finals(flushed).map { it.lang })
@@ -668,7 +695,7 @@ class SpeechSegmenterTest {
         // 話し中のカードの言語（区間の判定）は日本語になっていた
         assertTrue(s.traces.toString(), s.traces.any { it.startsWith("カードの言語 ja") })
         // 文字のある途中結果は、書き起こしの言語が届いてからは韓国語として出す
-        assertEquals("ko", events.filterIsInstance<SpeechEvent.Partial>().last { it.text.isNotEmpty() }.lang)
+        assertEquals("ko", partials(events).last { it.text.isNotEmpty() }.lang)
     }
 
     /** 結果の言語を指定の写し（[LanguageSource.SPECIFIED]）として返す認識器（Qwen3-ASR のように言語を指定して書き起こすもの）。 */
@@ -694,7 +721,7 @@ class SpeechSegmenterTest {
         val segmenter = SpeechSegmenter(
             FakeVad((profile.phraseSilenceSeconds * 10).toInt()), identifies = false, profile = profile,
             emit = { e ->
-                if (e is SpeechEvent.Final) assertTrue("確定より先に音声を渡す", retained.any { it.first == e.utterance.id })
+                if (e is SpeechEvent.CardFinished && e.utterance != null) assertTrue("確定より先に音声を渡す", retained.any { it.first == e.card })
                 events += e
             },
             submit = queue::submit,

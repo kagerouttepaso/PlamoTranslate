@@ -140,7 +140,7 @@ class ConversationReplayTest {
             mode = partner?.let(::PartnerMode) ?: PartnerMode.AUTO,
             self = Language.JA,
             heard = model.languages,
-        )
+        ).also { it.handle(ConversationSession.Event.Started) }
 
         var now = 0L // 模擬の時刻（サンプル数）
         val log = StringBuilder()
@@ -153,8 +153,8 @@ class ConversationReplayTest {
             profile = profile,
             heavy = model.heavy,
             emit = { event ->
-                if (event is SpeechEvent.Final) {
-                    val u = event.utterance
+                val u = (event as? SpeechEvent.CardFinished)?.utterance
+                if (u != null) {
                     cards += "%6.2f-%6.2f [%s] %s".format(u.startMs / 1000.0, (u.startMs + u.durationMs) / 1000.0, u.lang, u.text)
                 }
                 session.handle(ConversationSession.Event.Speech(event))

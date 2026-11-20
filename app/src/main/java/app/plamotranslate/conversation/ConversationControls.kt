@@ -41,7 +41,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import app.plamotranslate.ModelState
 import app.plamotranslate.ModelSwitch
@@ -99,7 +105,7 @@ internal fun Controls(state: ConversationUiState, model: ModelState, actions: Co
             model is ModelState.Failed -> model.message
             model is ModelState.Loading -> "翻訳モデルを準備中…"
             state.error != null -> state.error
-            state.live != null -> "聞き取り中…（話し終わると訳が確定します）"
+            state.canCut -> "聞き取り中…（話し終わると訳が確定します）"
             state.listening -> "聞いています（${state.self.label} ⇄ ${partnerLabel(state)}）"
             else -> "「開始」を押して話してください（${state.self.label} ⇄ ${partnerLabel(state)}）"
         }
@@ -177,14 +183,15 @@ private fun LogMenu(enabled: Boolean, actions: ConversationActions) {
 
 /**
  * 区切るボタン。押すと、今話している分を確定して次のカードにする（聞くのは続ける。docs/設計/会話翻訳.md「カードの区切り方」）。
- * 周りの輪はマイクの音量で、話していると判定している間は色を変える。聞いている間だけ押せる。
+ * 区切れるとき（聞いていて、話し中のカードがある。[ConversationUiState.canCut]）だけ押せ、名前は「区切る」。区切れないときは
+ * 押せず、話すよう促す語（「話して」）を出す。周りの輪はマイクの音量で、話し中のカードがある間は色を変える。
  * 名前は自分と相手の両方の言語で出す。対面では相手の言語を上に逆さに、1画面では自分の言語の下に小さく出す。
  */
 @Composable
 private fun CutButton(state: ConversationUiState, onCut: () -> Unit) {
     val level by animateFloatAsState(if (state.listening) state.level else 0f, label = "level")
     val c = MaterialTheme.colorScheme
-    val ring = if (state.live != null) c.primary else c.outline
+    val ring = if (state.canCut) c.primary else c.outline
     val track = c.surfaceVariant
     Box(Modifier.padding(horizontal = 10.dp).size(132.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
@@ -196,27 +203,49 @@ private fun CutButton(state: ConversationUiState, onCut: () -> Unit) {
         }
         FilledIconButton(
             onClick = onCut,
-            enabled = state.listening,
+            enabled = state.canCut,
             modifier = Modifier.size(112.dp),
             shape = CircleShape,
             colors = IconButtonDefaults.filledIconButtonColors(containerColor = c.primary, contentColor = c.onPrimary),
         ) {
-            val self = cutLabel(state.self)
-            val partner = state.partner?.let(::cutLabel) ?: "Done"
+            val self = cutLabel(state.self, state.canCut)
+            val partner = cutLabel(state.partner, state.canCut)
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 if (state.viewMode == ViewMode.FACE_TO_FACE) {
                     // 対面では相手が向かいから読むので、相手の言語を上に逆さに出す
-                    Text(partner, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.rotate(180f))
-                    HorizontalDivider(Modifier.width(56.dp).padding(vertical = 4.dp), color = c.onPrimary.copy(alpha = 0.5f))
-                    Text(self, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    CutLabel(partner, MaterialTheme.typography.titleMedium, bold = true, modifier = Modifier.rotate(180f))
+                    HorizontalDivider(Modifier.width(56.dp).padding(vertical = 4.dp), color = LocalContentColor.current.copy(alpha = 0.5f))
+                    CutLabel(self, MaterialTheme.typography.titleMedium, bold = true)
                 } else {
-                    Text(self, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text(partner, style = MaterialTheme.typography.labelLarge)
+                    CutLabel(self, MaterialTheme.typography.titleLarge, bold = true)
+                    CutLabel(partner, MaterialTheme.typography.labelLarge, bold = false)
                 }
             }
         }
     }
 }
+
+/**
+ * 区切るボタンの名前の1行。丸の中に収まる幅（[CUT_LABEL_WIDTH]）に1行で出し、収まらない名前（言語によって長い語。
+ * 「Sprechen」など）は文字を小さくして全部見せる（はみ出すと丸に切られて読めない）。色はボタンの文字の色（押せないときは薄い）。
+ */
+@Composable
+private fun CutLabel(text: String, style: TextStyle, bold: Boolean, modifier: Modifier = Modifier) {
+    BasicText(
+        text,
+        modifier.width(CUT_LABEL_WIDTH),
+        style = style.copy(
+            color = LocalContentColor.current,
+            fontWeight = if (bold) FontWeight.Bold else style.fontWeight,
+            textAlign = TextAlign.Center,
+        ),
+        maxLines = 1,
+        autoSize = TextAutoSize.StepBased(minFontSize = 9.sp, maxFontSize = style.fontSize, stepSize = 0.5.sp),
+    )
+}
+
+/** 区切るボタン（直径112dp）の名前の幅。中心から上下20dpほどの行でも丸に切られない幅にする。 */
+private val CUT_LABEL_WIDTH = 84.dp
 
 /**
  * 相手の言語の表示。自動で見つけた相手は、誤っていたら選び直せるように「自動で判定」と出す。まだ相手が話していなければ判定中。
@@ -229,18 +258,22 @@ private fun partnerLabel(state: ConversationUiState): String = when {
 
 /**
  * 区切るボタンの、その言語での名前。相手も押すので、自分と相手の両方の言語で出す（作者の要望）。
- * 「今話し終えたので次へ」が伝わる短い語にする。表に無い言語は英語の「Done」で代える。
+ * 区切れるとき（[canCut]）は「今話し終えたので次へ」が伝わる短い語、区切れないときは話すよう促す語にする。どちらも丸の中に
+ * 大きく出せるよう、「区切る」と同じくらいの長さの語を選ぶ（長い語は文字を小さくして収める（[CutLabel]）が、読みにくくなる）。
+ * 表に無い言語と、まだ決まっていない相手の言語（null）は英語で代える。
  */
-private fun cutLabel(language: Language): String = when (language) {
-    Language.JA -> "区切る"
-    Language.KO -> "여기까지"
-    Language.EN -> "Done"
-    Language.ZH -> "说完了"
-    Language.ZH_HANT -> "說完了"
-    Language.RU -> "Готово"
-    Language.HI -> "हो गया"
-    Language.FR -> "Terminé"
-    Language.ES -> "Listo"
-    Language.DE -> "Fertig"
-    else -> "Done"
+private fun cutLabel(language: Language?, canCut: Boolean): String {
+    val (cut, speak) = when (language) {
+        Language.JA -> "区切る" to "話して"
+        Language.KO -> "여기까지" to "말하세요"
+        Language.ZH -> "说完了" to "请说"
+        Language.ZH_HANT -> "說完了" to "請說"
+        Language.RU -> "Готово" to "Говорите"
+        Language.HI -> "हो गया" to "बोलिए"
+        Language.FR -> "Terminé" to "Parlez"
+        Language.ES -> "Listo" to "Hable"
+        Language.DE -> "Fertig" to "Sprechen"
+        else -> "Done" to "Speak"
+    }
+    return if (canCut) cut else speak
 }

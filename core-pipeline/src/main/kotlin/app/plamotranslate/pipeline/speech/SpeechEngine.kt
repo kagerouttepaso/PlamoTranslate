@@ -7,7 +7,7 @@ import app.plamotranslate.llm.Language
  * [lang] は話し手の言語のコード（"ja"・"ko"・"en"・"zh" など）。判定できなければ null。
  */
 data class Utterance(
-    /** 発話の番号（エンジンの中で一意）。書き起こし直し（[SpeechEngine.retranscribe]）で発話を指す。 */
+    /** 発話の番号。音声認識のカードの番号で、エンジンの中で一意。書き起こし直し（[SpeechEngine.retranscribe]）で発話を指す。 */
     val id: Long,
     val text: String,
     val lang: String?,
@@ -18,19 +18,26 @@ data class Utterance(
     val recognizeMs: Long,
 )
 
-/** 音声認識から届く出来事。 */
+/**
+ * 音声認識から届く出来事。聞き取り中のカードの出来事は、カードの番号（[Utterance.id] と同じ）で、どのカードの何かを示す
+ * （docs/設計/会話翻訳.md「聞き取り中のカード」）。カードは開く（[CardOpened]）→ 文（[CardText]）→ 閉じる（[CardClosed]）→
+ * 確定（[CardFinished]）の順に進む。開く・閉じるはその場で出し（前のカードの書き起こしを待たない）、確定はカードの順に出す。
+ */
 sealed interface SpeechEvent {
-    /** 話している最中の聞き取り。同じ発話の間は、届くたびに前の途中結果を置き換える。 */
-    data class Partial(val text: String, val lang: String?) : SpeechEvent
+    /** 話し始めて、カード [card] を開いた（話し中）。 */
+    data class CardOpened(val card: Long) : SpeechEvent
 
-    /** 話し終わった発話の確定結果。直前の途中結果を置き換える。 */
-    data class Final(val utterance: Utterance) : SpeechEvent
+    /**
+     * 話し中のカード [card] の、ここまでの聞き取り。届くたびに前の文を置き換える。[text] が空なら、文字より先に分かった
+     * 話し手の言語だけを伝える出来事。
+     */
+    data class CardText(val card: Long, val text: String, val lang: String?) : SpeechEvent
 
-    /** 話し始めたとき（[speaking] = true）と、話し終わったか音声が止んだとき（false）。 */
-    data class Speaking(val speaking: Boolean) : SpeechEvent
+    /** カード [card] を閉じた（話し終わり・長い発話・話し手の交代・区切る・止める）。確定まで書き起こし待ちになる。 */
+    data class CardClosed(val card: Long) : SpeechEvent
 
-    /** 区切るボタン（[SpeechEngine.cut]）の区切りを終えた。区切った分の確定（あれば）の後に届く。 */
-    data object CutDone : SpeechEvent
+    /** カード [card] を確定した。[utterance] は確定した発話で、何も聞き取れなければ null。カードの順に届く。 */
+    data class CardFinished(val card: Long, val utterance: Utterance?) : SpeechEvent
 
     /** 止める前に話した分（[SpeechEngine.flush]）を、すべて確定し終えた。最後に届く。 */
     data object Flushed : SpeechEvent
@@ -94,7 +101,7 @@ interface SpeechEngine : AutoCloseable {
 
     /**
      * 話している分を確定させ、聞き続ける（利用者が区切るボタンを押したとき）。続けて話した音声は次の発話になる。
-     * それまでに渡した音声の位置で区切り、終えたら [SpeechEvent.CutDone] が届く（話していなければ確定は無い）。
+     * それまでに渡した音声の位置で、話し中のカードを閉じる（[SpeechEvent.CardClosed]）。話していなければ何もしない。
      */
     fun cut()
 

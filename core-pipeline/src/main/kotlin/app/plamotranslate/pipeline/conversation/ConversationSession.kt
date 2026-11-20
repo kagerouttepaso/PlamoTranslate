@@ -52,18 +52,20 @@ enum class SwapState {
 }
 
 /**
- * 話している最中の聞き取り。話し終わると [Turn] に置き換わる。
+ * 聞き取り中のカード（音声認識のカード [card] が開いてから確定するまで）。話し中（[open]）か、閉じて書き起こし待ち。
+ * 確定すると [Turn] に置き換わる。
  * [translation] は途中の文字の訳（途中訳）。新しい途中の文字を訳し終わるまで、前の訳を出しておく。
  * [direction] は文字より先に決まることがある（書き起こしの重いモデルは、言語の識別で先に言語を知らせる）。
  * [startedAtMs] は話し始めた時刻（壁時計のミリ秒）。文字がまだ無い間、画面は話し始めからの秒数を出す。
  */
 data class LiveSpeech(
+    /** 音声認識のカードの番号（[SpeechEvent.CardOpened]）。確定した発話の [Utterance.id] と同じ。 */
+    val card: Long,
     val text: String,
     val direction: Direction?,
     val translation: String = "",
     val startedAtMs: Long = 0,
-    /** 書き起こし待ちのカード（[ConversationSession.queued]）の見分け。話し中のカードは0。 */
-    val id: Long = 0,
+    val open: Boolean = true,
 )
 
 /**
@@ -76,7 +78,13 @@ data class LiveSpeech(
  * - 確定訳は、話した順に1件ずつ渡す。
  * - 途中訳は、渡している途中訳が終わるまで、届いた途中の文字のうち最新のものだけを持つ（古いものは捨てる）。
  *   確定訳が残っている間は始めない。
- * - 確定した発話が来たら、走っている途中訳を取り消す。話し始め・確定のたびに世代を進め、古い世代の途中訳は出さない。
+ * - 確定した発話が来たら、走っている途中訳を取り消す。途中訳はカードの番号で持ち、話し中でなくなったカードの途中訳は始めない。
+ *
+ * 聞くことの始めと止める順番もここで決める：始める（[Event.Started]）と聞き始める作業（[Effect.Begin]）を返す。止める
+ * （[Event.StopRequested]）と、話していた分を確定させる作業（[Effect.Flush]）を返し、確定し終えたら（[SpeechEvent.Flushed]）
+ * 聞き終える作業（[Effect.Finish]）を返す。画面を閉じたら（[Event.Closed]）確定を待たずに聞き終える。[Effect.Begin] と
+ * [Effect.Finish] は1回ずつ対で返す。区切るボタンを押せるか（[canCut]）は、
+ * 聞いていて話し中のカードがあるか。
  * 制御は状態を持つので、[handle] は1本のスレッドから呼ぶ。[handle] は状態を書き換え終えてから作業を返すので、
  * 作業を行う側が、その場で終わった作業の結果を [handle] に渡し直してよい（呼び出しの中からの呼び直し）。
  * 時刻は [clock]（壁時計のミリ秒）から読む。
@@ -104,11 +112,14 @@ class ConversationSession(
         data class SelfChanged(val self: Language) : Event
         data class ModeChanged(val mode: PartnerMode) : Event
 
-        /**
-         * 区切るボタンが押された。音声認識より先に、画面の話し中のカードを書き起こし待ちの列へ移し、新しい話し中のカードを始める。
-         * 音声認識が押した位置まで追いついて区切ると、確定（[SpeechEvent.Final]）と [SpeechEvent.CutDone] が届く。
-         */
-        data object CutRequested : Event
+        /** 聞き始めた（音声認識は新しい会話として始め直す）。 */
+        data object Started : Event
+
+        /** 聞くのを止める（停止ボタン、音声ファイルの終わり、入力の失敗）。話していた分を確定し終えてから止まる。 */
+        data object StopRequested : Event
+
+        /** 画面を閉じた。聞いていれば、確定を待たずに聞き終える（音声認識も一緒に閉じる）。 */
+        data object Closed : Event
 
         /**
          * 音声認識の混み具合（[RecognitionLoad.urgent]：確定に要る書き起こしが残っている）。残っている間は途中訳を始めない。
@@ -124,9 +135,6 @@ class ConversationSession(
          * 指定した言語で書かれていないかもしれないので、言語だけを替えたままにはしない）。入れ替えられるのは [Turn.swap] が [SwapState.AVAILABLE] の発話だけ。
          */
         data class LanguageSwapped(val turnId: Long) : Event
-
-        /** 聞くのを止めた（聞き取り中の表示を消す）。 */
-        data object Stopped : Event
 
         /** 画面の発話を消す。 */
         data object Cleared : Event
@@ -144,6 +152,18 @@ class ConversationSession(
 
         /** 発話 [utterance] を [language] として書き起こし直してもらう（[SpeechEngine.retranscribe]）。 */
         data class Retranscribe(val utterance: Long, val language: Language) : Effect
+
+        /**
+         * 音声の入力を止め、話していた分を確定させる（[SpeechEngine.flush]）。入力を止めてから flush する（後に渡した音声は
+         * 次のカードになるため）。確定し終えると [SpeechEvent.Flushed] が届く。
+         */
+        data object Flush : Effect
+
+        /** 聞き始める：聞いている間だけの設定にし、音声認識を新しい会話として始め直してから、音声の入力を始める。 */
+        data object Begin : Effect
+
+        /** 聞き終えた。音声の入力が残っていれば止め、聞いている間だけの設定を戻す（[Begin] と対）。 */
+        data object Finish : Effect
     }
 
     private val router = LanguageRouter(mode, self, heard)
@@ -163,26 +183,24 @@ class ConversationSession(
     var turns: List<Turn> = emptyList()
         private set
 
-    /** 話している最中なら、ここまでの聞き取り。 */
-    var live: LiveSpeech? = null
+    /** 聞き取り中のカード（音声認識のカードの順）。話し中のカードと、閉じて書き起こし待ちのカード。 */
+    var listeningCards: List<LiveSpeech> = emptyList()
         private set
 
-    /**
-     * 区切るボタンで区切ったが、まだ確定していないカード（古い順）。書き起こしの重いモデルは認識が遅れるので、
-     * 押した時にカードが区切られたことを見せる。区切る前の音声の途中結果は、列の先頭のカードを更新する。
-     */
-    var queued: List<LiveSpeech> = emptyList()
-        private set
+    private enum class Phase { IDLE, LISTENING, STOPPING }
 
-    private var nextQueuedId = 1L
+    private var phase = Phase.IDLE
+
+    /** 聞いているか（止めて、確定し終えるのを待っている間も含む）。 */
+    val listening: Boolean get() = phase != Phase.IDLE
+
+    /** 区切るボタンを押せるか：聞いていて、話し中のカードがある。 */
+    val canCut: Boolean get() = phase == Phase.LISTENING && listeningCards.any { it.open }
 
     private var nextTurnId = 0L
     private var nextRequestId = 0L
 
-    /** 話し始め・確定のたびに進める世代。途中訳が古い発話のものか見分ける。 */
-    private var generation = 0L
-
-    private data class PartialRequest(val id: Long, val generation: Long, val text: String, val source: Language, val target: Language)
+    private data class PartialRequest(val id: Long, val card: Long, val text: String, val source: Language, val target: Language)
 
     /** まだ渡していない確定した発話（話した順）。 */
     private val finalQueue = ArrayDeque<QueuedFinal>()
@@ -238,28 +256,27 @@ class ConversationSession(
             is Event.PartialDone -> {
                 val request = partialRunning?.takeIf { it.id == event.requestId }
                 if (request != null) partialRunning = null
-                // 訳し終えたときにまだ同じ発話なら、聞き取り中の表示に出す
-                if (request != null && event.text != null && request.generation == generation) {
-                    live = live?.copy(translation = event.text)
-                }
+                // 訳し終えたときにまだ聞き取り中のカードなら、そのカードに出す
+                if (request != null && event.text != null) updateCard(request.card) { it.copy(translation = event.text) }
             }
             is Event.SelfChanged -> router.self = event.self
             is Event.ModeChanged -> {
                 router.mode = event.mode
                 retarget(onlyUntranslated = false)
             }
-            Event.CutRequested -> live?.let {
-                queued = queued + it.copy(id = nextQueuedId++)
-                // 走っている途中訳は区切った前のカードのものなので、新しい話し中のカードには出さない
-                generation++
-                live = LiveSpeech("", null, startedAtMs = clock())
+            Event.Started -> if (phase == Phase.IDLE) {
+                phase = Phase.LISTENING
+                listeningCards = emptyList()
+                effects += Effect.Begin
+            }
+            Event.Closed -> if (phase != Phase.IDLE) finish(effects)
+            Event.StopRequested -> if (phase == Phase.LISTENING) {
+                phase = Phase.STOPPING
+                partialPending = null
+                effects += Effect.Flush
             }
             is Event.RecognitionBusy -> recognitionBusy = event.busy
             is Event.LanguageSwapped -> swapLanguage(event.turnId, effects)
-            Event.Stopped -> {
-                live = null
-                queued = emptyList()
-            }
             Event.Cleared -> {
                 turns = emptyList()
                 finalQueue.clear()
@@ -272,39 +289,54 @@ class ConversationSession(
 
     private fun onSpeech(event: SpeechEvent, effects: MutableList<Effect>) {
         when (event) {
-            // 区切るボタンの区切りを終えた（確定の後に届く）。書き起こし待ちの列の先頭を消す（確定したカードに置き換わる）
-            SpeechEvent.CutDone -> queued = queued.drop(1)
-            SpeechEvent.Flushed -> Unit
+            // 止めた後に開いたカードも、止める前に渡した音声のものなので、確定まで出す
+            is SpeechEvent.CardOpened -> if (phase != Phase.IDLE) {
+                listeningCards = listeningCards + LiveSpeech(event.card, "", null, startedAtMs = clock())
+            }
+            is SpeechEvent.CardText -> onCardText(event)
+            is SpeechEvent.CardClosed -> updateCard(event.card) { it.copy(open = false) }
+            is SpeechEvent.CardFinished -> {
+                listeningCards = listeningCards.filterNot { it.card == event.card }
+                event.utterance?.let { utterance ->
+                    // 確定訳を優先する：途中訳は止める
+                    partialRunning?.let { effects += Effect.CancelPartial(it.id) }
+                    onUtterance(utterance)
+                }
+            }
+            // 止めて、話していた分を確定し終えた
+            SpeechEvent.Flushed -> if (phase == Phase.STOPPING) finish(effects)
             is SpeechEvent.Retranscribed -> onRetranscribed(event)
             is SpeechEvent.RetranscribeFailed -> onRetranscribeFailed(event.id)
             is SpeechEvent.Released -> updateUtterance(event.id) { it.copy(retained = false) }
-            is SpeechEvent.Speaking -> {
-                generation++
-                live = if (event.speaking) LiveSpeech("", null, startedAtMs = clock()) else null
-            }
-            is SpeechEvent.Partial -> {
-                val direction = router.preview(event.text, event.lang)
-                // 区切った位置より前の音声の途中結果は、書き起こし待ちの先頭のカードのもの。訳し直さない
-                queued.firstOrNull()?.let { head ->
-                    if (event.text.isNotEmpty() || head.text.isEmpty()) {
-                        queued = listOf(head.copy(text = event.text.ifEmpty { head.text }, direction = direction)) + queued.drop(1)
-                    }
-                    return
-                }
-                // 前の途中訳は、新しい途中の文字を訳し終わるまで出しておく（ちらつかせない）
-                val keep = live?.takeIf { it.direction == direction }?.translation.orEmpty()
-                live = LiveSpeech(event.text, direction, keep, live?.startedAtMs ?: clock())
-                // 文字の無い途中結果は言語の知らせ（カードの向きだけ決める）。訳すものは無い。相手不明の自分の発話も訳さない
-                val target = direction.target
-                if (event.text.isNotEmpty() && target != null) partialPending = PartialRequest(nextRequestId++, generation, event.text, direction.source, target)
-            }
-            is SpeechEvent.Final -> {
-                // 確定訳を優先する：古い発話の途中訳は要らないので止める
-                generation++
-                partialRunning?.let { effects += Effect.CancelPartial(it.id) }
-                onUtterance(event.utterance)
-            }
         }
+    }
+
+    /**
+     * 話し中のカードの途中の文字。前の途中訳は、新しい途中の文字を訳し終わるまで出しておく（ちらつかせない）。
+     * 文字の無い途中結果は言語の知らせ（カードの向きだけ決める）で、訳すものは無い。相手不明の自分の発話は訳さない。
+     * 止めた後に届いた途中の文字は出さない（話していた分は確定で出る）。
+     */
+    private fun onCardText(event: SpeechEvent.CardText) {
+        if (phase != Phase.LISTENING) return
+        val card = listeningCards.firstOrNull { it.card == event.card && it.open } ?: return
+        val direction = router.preview(event.text, event.lang)
+        val keep = card.translation.takeIf { card.direction == direction }.orEmpty()
+        updateCard(event.card) { it.copy(text = event.text, direction = direction, translation = keep) }
+        val target = direction.target
+        if (event.text.isNotEmpty() && target != null) {
+            partialPending = PartialRequest(nextRequestId++, event.card, event.text, direction.source, target)
+        }
+    }
+
+    private fun finish(effects: MutableList<Effect>) {
+        phase = Phase.IDLE
+        listeningCards = emptyList()
+        partialPending = null
+        effects += Effect.Finish
+    }
+
+    private fun updateCard(card: Long, change: (LiveSpeech) -> LiveSpeech) {
+        listeningCards = listeningCards.map { if (it.card == card) change(it) else it }
     }
 
     private fun onUtterance(utterance: Utterance) {
@@ -322,9 +354,6 @@ class ConversationSession(
         turns = turns + turn
         // 相手が今決まったら、それまでの自分の発話をさかのぼって訳す（話した順に、この発話より前に）
         retarget(onlyUntranslated = true)
-        // 話し続けていれば次の途中結果が来るので、ここでは聞き取り中の表示だけ空にする。
-        // 書き起こし待ちがあれば、この確定はその分なので、ボタンの後に始めた話し中のカードはそのままにする
-        if (queued.isEmpty()) live = live?.let { LiveSpeech("", null, startedAtMs = clock()) }
         enqueue(turn)
     }
 
@@ -438,8 +467,8 @@ class ConversationSession(
         if (partialRunning != null) return
         val request = partialPending ?: return
         partialPending = null
-        // 確定訳が残っている間と、古い発話の途中の文字は訳さない（次の途中の文字を待つ）
-        if (finalRunning != null || finalQueue.isNotEmpty() || request.generation != generation) return
+        // 確定訳が残っている間と、話し中でなくなったカードの途中の文字は訳さない（次の途中の文字を待つ）
+        if (finalRunning != null || finalQueue.isNotEmpty() || listeningCards.none { it.card == request.card && it.open }) return
         // 音声認識が確定を書き起こしている間は始めない。最新の1件を持っておき、空いたら渡す
         if (recognitionBusy) {
             partialPending = request

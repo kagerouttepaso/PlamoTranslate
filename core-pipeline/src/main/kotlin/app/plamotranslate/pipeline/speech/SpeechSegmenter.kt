@@ -29,8 +29,9 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  * 5〜7秒続いた。1本のスレッドで認識を待っていたので、1回の重い書き起こしの後ろに音声と区切りが並んでいた）。
  * 位置は聞き始めからのサンプル数で覚え、結果が届いた時点のためた音声の位置に直す。
  *
- * 出来事はカードの順に出す：前のカードの確定が届くまで、次のカードの出来事は [Card.held] に持っておく。
- * 確定に要るジョブは途中結果より先に処理される（[RecognitionQueue]）ので、待たせる時間はほとんど無い。
+ * 出来事はカードの番号で出す（[SpeechEvent]）。開く・閉じる・途中の文は、その場で出す（区切れるか・話し中かは今の状態なので、
+ * 前のカードの書き起こしを待たない）。確定と止め終わりはカードの順に出す：前のカードの確定が届くまで、次のカードの確定は
+ * [Card.held] に持っておく。確定に要るジョブは途中結果より先に処理される（[RecognitionQueue]）ので、待たせる時間はほとんど無い。
  *
  * 話している間は、まだ終わっていない文を、カードの言語で書き起こして途中結果を出す（書き起こした文につなぐ。疑似ストリーミング）。
  * カードの言語が決まるまでは書き起こさず、決まったら文字より先に知らせる（空の途中結果）。確定は、書き起こした文と、
@@ -142,8 +143,6 @@ class SpeechSegmenter(
         val reason: String,
         val startedAt: Long,
         val parts: List<Phrase>,
-        val manual: Boolean,
-        val speakingEnd: Boolean,
         val audio: FloatArray,
     )
 
@@ -151,10 +150,10 @@ class SpeechSegmenter(
     private class Card(val id: Long, val start: Long, minTurn: Long) {
         val phrases = mutableListOf<Phrase>()
 
-        /** 前のカードが終わるまで待たせている出来事。 */
+        /** 前のカードが終わるまで待たせている確定。 */
         val held = mutableListOf<SpeechEvent>()
 
-        /** このカードが終わった後に出す出来事（区切りを終えた・止め終えた）。 */
+        /** このカードが終わった後に出す出来事（止め終えた）。 */
         val after = mutableListOf<SpeechEvent>()
         var closing: Closing? = null
         var done = false
@@ -209,7 +208,7 @@ class SpeechSegmenter(
             buffer.speaking(samples)
             startSpeech()
             speechStart = preroll
-            send(openCard(), SpeechEvent.Speaking(true))
+            openCard()
         } else {
             buffer.speaking(samples)
         }
@@ -233,7 +232,7 @@ class SpeechSegmenter(
                 } else if (gapSamples >= cardEndGapSamples) {
                     // 話し終わり：書き起こした文をつなぐ（後ろは無音。重い書き起こしで確定を待たせない）。
                     // 短すぎて文として書き起こさなかった最後の文だけは、残りとして書き起こす
-                    close(card, buffer.size, "話し終わり", restEnd = lastPhraseEnd, speakingEnd = true)
+                    close(card, buffer.size, "話し終わり", restEnd = lastPhraseEnd)
                     buffer.clear()
                     return
                 }
@@ -250,7 +249,7 @@ class SpeechSegmenter(
                 to = buffer.size - MIN_TAIL_SAMPLES,
                 breaks = cutBreaks(card),
             )
-            cutAt(at, "長い発話", manual = false, lang = card.lang, sure = card.track.sure)
+            cutAt(at, "長い発話", lang = card.lang, sure = card.track.sure)
         } else {
             sinceLastPartial += samples.size
             // 区間は話している音声だけで数える（無音の区間は、識別がどの言語とも言い切ることがある）
@@ -272,25 +271,22 @@ class SpeechSegmenter(
         handlers.remove(id)?.invoke(output)
     }
 
-    /** 残っている音声を確定させる。終えたら [SpeechEvent.Flushed] を出す。 */
+    /** 残っている音声を確定させる。すべてのカードを確定し終えたら [SpeechEvent.Flushed] を出す。 */
     fun flush() {
         if (closed) return
         vad.flush()
         open?.let { card ->
-            close(card, buffer.size, "停止", restEnd = buffer.size, speakingEnd = true)
+            close(card, buffer.size, "停止", restEnd = buffer.size)
             buffer.clear()
         }
         sendLast(SpeechEvent.Flushed)
     }
 
-    /** 話している分を確定させ、続く音声は次のカードにする。終えたら [SpeechEvent.CutDone] を出す。 */
+    /** 話している分を確定させ、続く音声は次のカードにする。話していなければ何もしない。 */
     fun cut() {
         if (closed) return
-        if (!buffer.active || open == null) {
-            sendLast(SpeechEvent.CutDone)
-            return
-        }
-        cutAt(buffer.size, "手で区切り", manual = true)
+        if (!buffer.active || open == null) return
+        cutAt(buffer.size, "手で区切り")
     }
 
     fun reset() {
@@ -342,6 +338,7 @@ class SpeechSegmenter(
     private fun openCard(): Card = Card(nextCard++, bufferStart, minTurnSamples).also {
         cards.addLast(it)
         open = it
+        emit(SpeechEvent.CardOpened(it.id))
     }
 
     /** 決められない音声に使う言語：カードの言語、前の話し手、自分の言語の順。 */
@@ -385,7 +382,7 @@ class SpeechSegmenter(
             is SpeakerTrack.Verdict.Cut -> {
                 // 決めた話し手を文に持たせて次のカードへ渡す（同じ音声をもう一度判定しない）
                 phrase.lang = verdict.lang
-                cutAt(rel(verdict.at), "話し手の交代（文：$before→${verdict.lang}）", manual = false, lang = verdict.lang, sure = true)
+                cutAt(rel(verdict.at), "話し手の交代（文：$before→${verdict.lang}）", lang = verdict.lang, sure = true)
                 return
             }
             else -> follow(card, verdict)
@@ -466,7 +463,7 @@ class SpeechSegmenter(
         if (card !== open) return
         // 仮の言語で書き起こした途中結果は古いので、決めた言語で書き起こし直す
         card.tail = null
-        if (card.lastText.isEmpty()) send(card, SpeechEvent.Partial("", card.track.label()))
+        if (card.lastText.isEmpty()) emit(SpeechEvent.CardText(card.id, "", card.track.label()))
         sinceLastPartial = 0
         requestPartial(card)
     }
@@ -505,7 +502,7 @@ class SpeechSegmenter(
                 val s = rel(fromAbs) + seam
                 val at = CutPoint.languageSeam(buffer, s - CutPoint.FRAME_SAMPLES * 2, s + CutPoint.FRAME_SAMPLES * 6)
                 // 後ろの話し手は、確かな連続区間で決まっている
-                cutAt(at, "話し手の交代（話し中：$previous→$newLang）", manual = false, lang = newLang, sure = true)
+                cutAt(at, "話し手の交代（話し中：$previous→$newLang）", lang = newLang, sure = true)
             }
             closeAfterSeam(card)
         }
@@ -519,7 +516,7 @@ class SpeechSegmenter(
         val endAt = card.speakingEndAt ?: return
         card.speakingEndAt = null
         if (inGap || open == null) return
-        cutAt(rel(endAt).coerceIn(0, buffer.size), "話し終わり", manual = false)
+        cutAt(rel(endAt).coerceIn(0, buffer.size), "話し終わり")
     }
 
     /**
@@ -527,11 +524,11 @@ class SpeechSegmenter(
      * 区切る位置より後ろで終わった文は、次のカードの文として書き起こし直す（前のカードからは外すので、移さないと言葉が消える）。
      * 区切る位置から始まる文は、決めた話し手をそのまま使う。
      */
-    private fun cutAt(at: Int, reason: String, manual: Boolean, lang: String? = null, sure: Boolean = false) {
+    private fun cutAt(at: Int, reason: String, lang: String? = null, sure: Boolean = false) {
         val card = open ?: return
         val cutAbs = abs(at)
         val moved = card.phrases.filter { it.end > cutAbs }.map { p -> p.end to p.lang?.takeIf { p.from >= cutAbs } }
-        close(card, at, reason, restEnd = at, manual = manual)
+        close(card, at, reason, restEnd = at)
         lastLang = card.lang ?: lastLang
         buffer.take(at)
         bufferStart += at
@@ -548,9 +545,9 @@ class SpeechSegmenter(
      * 音声（区切る位置が文の途中なら、その文の頭から）を、カードの話し手の言語で書き起こす。話し手は話し手の時系列が決めたもので、
      * 残りだけで決め直さない（2026-11-15 の beta.3 の試用で、交代で区切った残りを決め直して新しい話し手の言語になり、
      * 前の話し手の文を違う言語で書き起こした）。カードの言語がまだ無いときだけ、残りのスコアを話し手の時系列に渡して決める。
-     * 書き起こしがすべて届いたら確定を出す（[finishIfReady]）。
+     * 閉じたことはその場で出し（[SpeechEvent.CardClosed]）、書き起こしがすべて届いたら確定を出す（[finishIfReady]）。
      */
-    private fun close(card: Card, at: Int, reason: String, restEnd: Int, manual: Boolean = false, speakingEnd: Boolean = false) {
+    private fun close(card: Card, at: Int, reason: String, restEnd: Int) {
         val start = card.start
         val end = abs(at)
         card.track.close()
@@ -583,15 +580,17 @@ class SpeechSegmenter(
                 }
             }
         }
-        card.closing = Closing(start, end, reason, clock(), parts, manual, speakingEnd, capture(rel(start).coerceAtLeast(0), at))
+        card.closing = Closing(start, end, reason, clock(), parts, capture(rel(start).coerceAtLeast(0), at))
         if (open === card) open = null
         trace { "区切ると決めた（$reason）${at(start)}〜${at(end)}" }
+        emit(SpeechEvent.CardClosed(card.id))
         finishIfReady(card)
     }
 
     /**
      * 区切ると決めたカードの書き起こしがすべて届いていれば、確定を出す。言語はカードの表示の言語（[SpeakerTrack.label]。
-     * 決まっていなければ書き起こしの言語）。確定を出すカードの音声は [retain] に渡す。
+     * 決まっていなければ書き起こしの言語）。何も聞き取れなければ発話の無い確定を出す（カードが残らないように）。
+     * 発話のあるカードの音声は [retain] に渡す。
      */
     private fun finishIfReady(card: Card) {
         val closing = card.closing ?: return
@@ -602,24 +601,18 @@ class SpeechSegmenter(
         val waitedMs = (clock() - closing.startedAt) / 1_000_000
         if (label != card.lang) trace { "カードの表示の言語 $label（書き起こしの言語。区間と文の全体では ${card.lang}）" }
         trace { "確定（${closing.reason}）${at(closing.start)}〜${at(closing.end)}: [$lang] ${r.text} ／ 直前の途中 ${card.lastText}（区切ってから${waitedMs}ms）" }
-        if (r.text.isNotEmpty()) {
-            retain(card.id, closing.audio)
-            send(
-                card,
-                SpeechEvent.Final(
-                    Utterance(
-                        id = card.id,
-                        text = r.text,
-                        lang = lang,
-                        startMs = closing.start.coerceAtLeast(0) * 1000 / SAMPLE_RATE,
-                        durationMs = (closing.end - closing.start) * 1000 / SAMPLE_RATE,
-                        recognizeMs = waitedMs,
-                    ),
-                ),
+        val utterance = r.text.takeIf { it.isNotEmpty() }?.let { text ->
+            Utterance(
+                id = card.id,
+                text = text,
+                lang = lang,
+                startMs = closing.start.coerceAtLeast(0) * 1000 / SAMPLE_RATE,
+                durationMs = (closing.end - closing.start) * 1000 / SAMPLE_RATE,
+                recognizeMs = waitedMs,
             )
         }
-        if (closing.manual) send(card, SpeechEvent.CutDone)
-        if (closing.speakingEnd) send(card, SpeechEvent.Speaking(false))
+        if (utterance != null) retain(card.id, closing.audio)
+        send(card, SpeechEvent.CardFinished(card.id, utterance))
         card.done = true
         // 話し終わりで閉じたカードの話し手は、次に話し始めたカードの「前の話し手」
         if (open == null) lastLang = card.lang ?: lastLang
@@ -682,7 +675,7 @@ class SpeechSegmenter(
     private fun showPartial(card: Card, r: Recognition) {
         if (r.text.isEmpty() || r.text == card.lastText) return
         card.lastText = r.text
-        send(card, SpeechEvent.Partial(r.text, card.track.label() ?: r.lang))
+        emit(SpeechEvent.CardText(card.id, r.text, card.track.label() ?: r.lang))
     }
 
     /**
@@ -763,7 +756,7 @@ class SpeechSegmenter(
         }
     }
 
-    /** [card] の出来事を出す。前のカードがまだ終わっていなければ、終わるまで持っておく。 */
+    /** [card] の確定を出す。前のカードがまだ終わっていなければ、終わるまで持っておく。 */
     private fun send(card: Card, event: SpeechEvent) {
         if (cards.firstOrNull() === card) emit(event) else card.held += event
     }

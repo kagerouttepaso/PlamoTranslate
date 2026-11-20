@@ -7,20 +7,35 @@ import app.plamotranslate.pipeline.speech.RetranscribeFailure
 import app.plamotranslate.pipeline.speech.SpeechEvent
 import app.plamotranslate.pipeline.speech.Utterance
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** 会話の訳す順番（[ConversationSession]）。 */
 class ConversationSessionTest {
-    private var nextUtterance = 0L
+    /** 音声認識のカードの番号の採番と、話し中のカード。 */
+    private var nextCard = 100L
+    private var card = -1L
 
-    private fun final(text: String, lang: String = "ja", id: Long = nextUtterance++) =
-        Event.Speech(SpeechEvent.Final(Utterance(id, text, lang, startMs = 0, durationMs = 1000, recognizeMs = 100)))
+    /** カード [id] の確定。番号を省くと、まだ使っていない番号のカード（前に話した分）の確定。 */
+    private fun final(text: String, lang: String = "ja", id: Long = nextCard++) =
+        Event.Speech(SpeechEvent.CardFinished(id, Utterance(id, text, lang, startMs = 0, durationMs = 1000, recognizeMs = 100)))
 
-    private fun partial(text: String, lang: String = "ja") = Event.Speech(SpeechEvent.Partial(text, lang))
+    /** 話し中のカードの途中の文字。 */
+    private fun partial(text: String, lang: String = "ja") = Event.Speech(SpeechEvent.CardText(card, text, lang))
 
-    private fun speaking(on: Boolean) = Event.Speech(SpeechEvent.Speaking(on))
+    /** 聞いていなければ聞き始め、話し始める（新しいカードを開く）。 */
+    private fun ConversationSession.speak(): List<Effect> {
+        handle(Event.Started)
+        card = nextCard++
+        return handle(Event.Speech(SpeechEvent.CardOpened(card)))
+    }
+
+    /** 話し中のカードを閉じる（話し終わり・区切る）。 */
+    private fun closed(id: Long = card) = Event.Speech(SpeechEvent.CardClosed(id))
+
+    /** 話し中のカード。 */
+    private val ConversationSession.live: LiveSpeech? get() = listeningCards.lastOrNull { it.open }
 
     @Test
     fun 確定訳は話した順に1件ずつ渡す() {
@@ -38,7 +53,7 @@ class ConversationSessionTest {
     fun 文字の無い途中結果はカードの向きだけ決めて訳さない() {
         var now = 1_000L
         val s = ConversationSession(PartnerMode.KOREAN, clock = { now })
-        s.handle(speaking(true))
+        s.speak()
         now = 2_000L
         assertTrue(s.handle(partial("", lang = "ko")).none { it is Effect.TranslatePartial })
         val live = s.live!!
@@ -49,33 +64,126 @@ class ConversationSessionTest {
     }
 
     @Test
-    fun 区切るボタンでその場で書き起こし待ちに並べ確定で入れ替える() {
+    fun 前のカードを書き起こしている間に話し始めてもその場で話し中になる() {
         val s = ConversationSession(PartnerMode.KOREAN)
-        s.handle(speaking(true))
-        s.handle(partial("こんに"))
-        s.handle(Event.CutRequested)
-        assertEquals(listOf("こんに"), s.queued.map { it.text })
-        assertEquals("", s.live!!.text)
-        // もう一度押すと2枚並ぶ
-        s.handle(Event.CutRequested)
-        assertEquals(2, s.queued.size)
-        // 区切った位置より前の途中結果は、先頭の待ちのカードを更新し、訳さない
-        assertTrue(s.handle(partial("こんにちは")).none { it is Effect.TranslatePartial })
-        assertEquals("こんにちは", s.queued.first().text)
-        // 確定と区切りの完了が届くと、先頭が確定したカードに置き換わる
-        s.handle(final("こんにちは"))
-        s.handle(Event.Speech(SpeechEvent.CutDone))
+        s.speak()
+        val first = card
+        s.handle(partial("こんにちは"))
+        s.handle(closed())
+        // 前のカードの確定を待たずに、次のカードが話し中になる
+        s.speak()
+        assertEquals(listOf(first to false, card to true), s.listeningCards.map { it.card to it.open })
+        assertEquals("こんにちは", s.listeningCards.first().text)
+        s.handle(partial("元気"))
+        assertEquals("元気", s.live?.text)
+        // 前のカードが確定すると、そのカードだけが確定したカードに置き換わる
+        s.handle(final("こんにちは", id = first))
         assertEquals(listOf("こんにちは"), s.turns.map { it.original })
-        assertEquals(1, s.queued.size)
-        // 止めたら待ちのカードは消す（残りは止めるときの確定で出る）
-        s.handle(Event.Stopped)
-        assertTrue(s.queued.isEmpty())
+        assertEquals(listOf(card), s.listeningCards.map { it.card })
+    }
+
+    @Test
+    fun 続けて2回区切ると1枚ずつ確定に置き換わる() {
+        val s = ConversationSession(PartnerMode.KOREAN)
+        s.speak()
+        val first = card
+        s.handle(partial("一"))
+        s.handle(closed())
+        s.speak()
+        val second = card
+        s.handle(partial("二"))
+        s.handle(closed())
+        assertEquals(listOf("一", "二"), s.listeningCards.map { it.text })
+        s.handle(final("一", id = first))
+        assertEquals(listOf("二"), s.listeningCards.map { it.text })
+        s.handle(final("二", id = second))
+        assertTrue(s.listeningCards.isEmpty())
+        assertEquals(listOf("一", "二"), s.turns.map { it.original })
+    }
+
+    @Test
+    fun 何も聞き取れなかったカードは残らない() {
+        val s = ConversationSession(PartnerMode.KOREAN)
+        s.speak()
+        s.handle(closed())
+        s.handle(Event.Speech(SpeechEvent.CardFinished(card, null)))
+        assertTrue(s.listeningCards.isEmpty())
+        assertTrue(s.turns.isEmpty())
+    }
+
+    @Test
+    fun 区切るボタンは話し中のカードがあるときだけ押せる() {
+        val s = ConversationSession(PartnerMode.KOREAN)
+        assertFalse(s.canCut)
+        s.handle(Event.Started)
+        // 聞いていても、話していなければ押せない
+        assertFalse(s.canCut)
+        s.speak()
+        assertTrue(s.canCut)
+        // 区切る・話し終わり（どちらもカードを閉じる）で押せなくなり、書き起こし待ちの間も押せない
+        s.handle(closed())
+        assertFalse(s.canCut)
+        s.speak()
+        assertTrue(s.canCut)
+        // 止めると押せない
+        s.handle(Event.StopRequested)
+        assertFalse(s.canCut)
+    }
+
+    @Test
+    fun 止めたら確定し終えるまで止まらず確定し終えたら止まる() {
+        val s = ConversationSession(PartnerMode.KOREAN)
+        assertEquals(listOf(Effect.Begin), s.handle(Event.Started))
+        s.speak()
+        s.handle(partial("こんに"))
+        assertEquals(listOf(Effect.Flush), s.handle(Event.StopRequested))
+        assertTrue(s.listening)
+        // 止めている間に、もう一度止めても始めても何もしない
+        assertTrue(s.handle(Event.StopRequested).isEmpty())
+        assertTrue(s.handle(Event.Started).isEmpty())
+        // 止めた後に届いた途中の文字は出さず、訳さない
+        assertTrue(s.handle(partial("こんにちは")).none { it is Effect.TranslatePartial })
+        assertEquals("こんに", s.listeningCards.single().text)
+        // 話していた分の確定は訳す
+        s.handle(closed())
+        assertTrue(s.handle(final("こんにちは", id = card)).any { it is Effect.TranslateFinal })
+        assertTrue(s.listening)
+        assertTrue(s.handle(Event.Speech(SpeechEvent.Flushed)).contains(Effect.Finish))
+        assertFalse(s.listening)
+        assertTrue(s.listeningCards.isEmpty())
+        // 止め終わってから止めても、届いた止め終わりも、何もしない
+        assertTrue(s.handle(Event.StopRequested).isEmpty())
+        assertTrue(s.handle(Event.Speech(SpeechEvent.Flushed)).isEmpty())
+    }
+
+    @Test
+    fun 止める前に渡した音声のカードは止めた後に開いても確定まで出す() {
+        val s = ConversationSession(PartnerMode.KOREAN)
+        s.handle(Event.Started)
+        s.handle(Event.StopRequested)
+        s.speak()
+        assertEquals(listOf(card), s.listeningCards.map { it.card })
+        assertTrue(s.handle(final("はい", id = card)).any { it is Effect.TranslateFinal })
+        assertTrue(s.listeningCards.isEmpty())
+    }
+
+    @Test
+    fun 画面を閉じたら確定を待たずに聞き終える() {
+        val s = ConversationSession(PartnerMode.KOREAN)
+        s.speak()
+        s.handle(Event.StopRequested)
+        // 聞き始めと聞き終えは1回ずつ対
+        assertEquals(listOf(Effect.Finish), s.handle(Event.Closed))
+        assertFalse(s.listening)
+        assertTrue(s.listeningCards.isEmpty())
+        assertTrue(s.handle(Event.Closed).isEmpty())
+        assertTrue(s.handle(Event.Speech(SpeechEvent.Flushed)).isEmpty())
     }
 
     @Test
     fun 音声認識が確定を書き起こしている間は途中訳を待たせ空いたら最新を訳す() {
         val s = ConversationSession(PartnerMode.KOREAN)
-        s.handle(speaking(true))
+        s.speak()
         s.handle(Event.RecognitionBusy(true))
         assertTrue(s.handle(partial("こんに")).none { it is Effect.TranslatePartial })
         assertTrue(s.handle(partial("こんにちは")).none { it is Effect.TranslatePartial })
@@ -95,7 +203,7 @@ class ConversationSessionTest {
     @Test
     fun 確定が来たら走っている途中訳を取り消す() {
         val s = ConversationSession(PartnerMode.KOREAN)
-        s.handle(speaking(true))
+        s.speak()
         val request = s.handle(partial("こんに")).filterIsInstance<Effect.TranslatePartial>().single()
         val effects = s.handle(final("こんにちは"))
         assertTrue(effects.contains(Effect.CancelPartial(request.requestId)))
@@ -106,6 +214,7 @@ class ConversationSessionTest {
     fun 確定訳が残っている間は途中訳を始めない() {
         val s = ConversationSession(PartnerMode.KOREAN)
         val id = s.handle(final("こんにちは")).filterIsInstance<Effect.TranslateFinal>().single().turn.id
+        s.speak()
         assertTrue(s.handle(partial("元気")).none { it is Effect.TranslatePartial })
         // 確定訳が終わっても、捨てた途中の文字は訳さない（次の途中の文字を待つ）
         assertTrue(s.handle(Event.FinalDone(id, "안녕하세요", 300)).none { it is Effect.TranslatePartial })
@@ -115,7 +224,7 @@ class ConversationSessionTest {
     @Test
     fun 途中訳の間に届いた途中の文字は最新のものだけを次に訳す() {
         val s = ConversationSession(PartnerMode.KOREAN)
-        s.handle(speaking(true))
+        s.speak()
         val first = s.handle(partial("こん")).filterIsInstance<Effect.TranslatePartial>().single()
         assertTrue(s.handle(partial("こんに")).isEmpty())
         assertTrue(s.handle(partial("こんにち")).isEmpty())
@@ -127,11 +236,11 @@ class ConversationSessionTest {
     @Test
     fun 古い発話の途中訳は出さない() {
         val s = ConversationSession(PartnerMode.KOREAN)
-        s.handle(speaking(true))
+        s.speak()
         val request = s.handle(partial("こんに")).filterIsInstance<Effect.TranslatePartial>().single()
         // 話し終わって次の発話が始まった
-        s.handle(speaking(false))
-        s.handle(speaking(true))
+        s.handle(closed())
+        s.speak()
         s.handle(Event.PartialDone(request.requestId, "안녕"))
         assertEquals("", s.live?.translation)
     }
@@ -139,7 +248,7 @@ class ConversationSessionTest {
     @Test
     fun 新しい途中の文字を訳し終わるまで前の途中訳を出しておく() {
         val s = ConversationSession(PartnerMode.KOREAN)
-        s.handle(speaking(true))
+        s.speak()
         val r = s.handle(partial("こんに")).filterIsInstance<Effect.TranslatePartial>().single()
         s.handle(Event.PartialDone(r.requestId, "안녕"))
         s.handle(partial("こんにちは"))
@@ -160,7 +269,7 @@ class ConversationSessionTest {
         val s = ConversationSession(self = Language.JA)
         // 相手不明：訳さず、途中訳もしない
         assertTrue(s.handle(final("こんにちは")).none { it is Effect.TranslateFinal })
-        s.handle(speaking(true))
+        s.speak()
         assertTrue(s.handle(partial("元気")).none { it is Effect.TranslatePartial })
         assertEquals(null, s.turns.single().direction.target)
         // 相手が英語で話した：さかのぼって自分の発話を英語へ訳し、相手の発話を訳す（話した順に）
@@ -221,11 +330,8 @@ class ConversationSessionTest {
     }
 
     @Test
-    fun 止めたら聞き取り中の表示を消し消去で発話を消す() {
+    fun 消去で発話を消す() {
         val s = ConversationSession(PartnerMode.KOREAN)
-        s.handle(speaking(true))
-        s.handle(Event.Stopped)
-        assertNull(s.live)
         s.handle(final("こんにちは"))
         s.handle(Event.Cleared)
         assertTrue(s.turns.isEmpty())
@@ -245,7 +351,7 @@ class ConversationSessionTest {
     @Test
     fun 取り消した途中訳が終わったら次の途中の文字を訳す() {
         val s = ConversationSession(PartnerMode.KOREAN)
-        s.handle(speaking(true))
+        s.speak()
         val r = s.handle(partial("こんに")).filterIsInstance<Effect.TranslatePartial>().single()
         val id = s.handle(final("こんにちは")).filterIsInstance<Effect.TranslateFinal>().single().turn.id
         s.handle(Event.PartialDone(r.requestId, null))

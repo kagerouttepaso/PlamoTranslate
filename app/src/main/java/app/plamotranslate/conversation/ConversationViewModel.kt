@@ -39,11 +39,13 @@ import java.util.Date
 import java.util.Locale
 import app.plamotranslate.llm.TranslationEngine
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -80,10 +82,10 @@ data class ConversationUiState(
     val level: Float = 0f,
     /** 音声認識が録音からどれだけ遅れているか（秒。認識を待っている音声の長さ）。 */
     val lagSeconds: Float = 0f,
-    /** 話している最中なら、ここまでの聞き取り（まだ文字になっていなければ空）。 */
-    val live: LiveSpeech? = null,
-    /** 区切るボタンで区切ったが、まだ確定していないカード（古い順）。 */
-    val queued: List<LiveSpeech> = emptyList(),
+    /** 聞き取り中のカード（話し中と書き起こし待ち。音声認識のカードの順）。 */
+    val cards: List<LiveSpeech> = emptyList(),
+    /** 区切るボタンを押せるか（聞いていて、話し中のカードがある）。 */
+    val canCut: Boolean = false,
     val error: String? = null,
     /** 会話で選べる言語（設定で選んだ音声認識モデルの言語）。 */
     val languages: List<Language> = SpeechModel.DEFAULT.languages,
@@ -110,7 +112,18 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     private val session = ConversationSession(self = preferences.self(speechModel.languages) ?: Language.JA, heard = speechModel.languages)
 
     private var asr: SpeechEngine? = null
-    private var listenJob: Job? = null
+
+    /** 音声を音声認識へ渡している作業（マイクか音声ファイル）。止めるときは、これを止めてから確定させる。 */
+    private var inputJob: Job? = null
+
+    /** 聞き始める作業（[Effect.Begin]）で流す音声の入力（マイクか音声ファイル）。 */
+    private var pendingInput: (suspend (SpeechEngine) -> Unit)? = null
+
+    /** 聞いている間だけ変えた翻訳の CPU のスレッド数（0 なら変えていない）。 */
+    private var translateThreads = 0
+
+    /** 画面を閉じた後にも終える後始末（翻訳のスレッド数を戻す）。エンジンは画面より長く生きるので、viewModelScope の外で行う。 */
+    private val releaseScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** 走っている途中訳。確定訳が来たら取り消す。 */
     private val partialJobs = mutableMapOf<Long, Job>()
@@ -165,10 +178,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
      */
     private fun attach(engine: SpeechEngine) {
         engine.languages = session.speechLanguages
-        engine.listener = { event ->
-            if (event == SpeechEvent.Flushed) flushed?.complete(Unit)
-            post(listOf(event))
-        }
+        engine.listener = { event -> post(listOf(event)) }
         engine.loadListener = { load ->
             viewModelScope.launch {
                 if (load.behindSeconds != _state.value.lagSeconds) _state.update { it.copy(lagSeconds = load.behindSeconds) }
@@ -177,16 +187,13 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         }
     }
 
-    /** 止めたときに、話しかけだった分を確定し終えるのを待つ。 */
-    @Volatile private var flushed: CompletableDeferred<Unit>? = null
-
     /**
      * マイクで聞く。録音の側で音量を測って画面に出し、音声は音声認識に渡すだけにする（音声認識はセグメンターと認識のワーカーの
      * スレッドで動き、録音を待たせない）。書き起こしが重いモデル（1回に1〜2秒）でも、音量のバーは止まらず、音声も落とさない。
      * 認識の遅れ（まだ書き起こしていない確定に要る音声が、どれだけ前のものか）は画面に出す。
      *
      * 区切るボタンは、音声と同じ順に区切りの命令を渡す（[cut]）。押した時点の音声の位置で区切られる。
-     * 停止は録音だけを止め、たまった音声を書き起こしてから終わる（[listen]）。
+     * 停止は録音だけを止め、たまった音声を書き起こしてから終わる（[stop]）。
      */
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start() = listen { engine ->
@@ -232,7 +239,8 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
             meter(part)
             engine.accept(part)
             val spentMs = (System.nanoTime() - begin) / 1_000_000
-            Thread.sleep((100 - spentMs).coerceAtLeast(0))
+            // 止めたら（取り消されたら）流すのをやめる
+            delay((100 - spentMs).coerceAtLeast(0))
         }
         log("音声ファイルの認識が終わりました: ${File(path).name}")
     }
@@ -247,22 +255,17 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     private fun meter(chunk: FloatArray) = _state.update { it.copy(level = level(chunk)) }
 
     /**
-     * 聞くのを止める。マイクで聞いているときは録音だけを止め、たまった音声を書き起こしてから終わる
-     * （認識が遅れていても、止める前に話した分を落とさない）。
+     * 聞くのを止める。録音だけを止め、たまった音声を書き起こしてから終わる（認識が遅れていても、止める前に話した分を落とさない）。
+     * 止める順番は制御が決める（[Event.StopRequested]）。
      */
-    fun stop() {
-        listenJob?.cancel()
-    }
+    fun stop() = handle(Event.StopRequested)
 
     /**
-     * 今話している分を確定して次のカードにする（聞くのは続ける）。画面はその場でカードを区切って書き起こし待ちに並べ、
-     * 音声認識は押した時点の音声の位置で区切る（認識が遅れていれば、たまった音声を処理した後に区切る）。
+     * 今話している分を確定して次のカードにする（聞くのは続ける）。音声認識は押した時点の音声の位置で話し中のカードを閉じ、
+     * 閉じたカードは書き起こし待ちになる。話し中のカードが無ければ押せない（[ConversationUiState.canCut]）。
      */
     fun cut() {
-        val engine = asr ?: return
-        if (listenJob?.isActive != true) return
-        handle(Event.CutRequested)
-        engine.cut()
+        if (session.canCut) asr?.cut()
     }
 
     /** 確定したカードの言語の取り違えを直す。もう一方の話し手の言語として書き起こし直し、訳し直す（[Event.LanguageSwapped]）。 */
@@ -274,40 +277,52 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     /**
-     * 聞く。[block] が音声を渡し終えたら（止めた・取り消された）、話しかけだった分も確定させ、確定し終えるまで待ってから終わる。
-     * 聞いている間だけ、翻訳の CPU のスレッド数を詳細設定の値にする（音声認識と翻訳の CPU の取り合いを測るため）。
-     * 画面を閉じても、音声認識は閉じた後の止める命令にも止め終わりを返す（SpeechPipeline）ので、ここで止まらず、スレッド数は戻る。
+     * 聞く。始める順番は制御が決め、聞き始める作業（[Effect.Begin]）で [begin] が [block] を流す。
      */
     private fun listen(block: suspend (SpeechEngine) -> Unit) {
+        if (asr == null || session.listening) return
+        pendingInput = block
+        _state.update { it.copy(error = null) }
+        handle(Event.Started)
+    }
+
+    /**
+     * 聞き始める（[Effect.Begin]）。聞いている間だけ、翻訳の CPU のスレッド数を詳細設定の値にし（音声認識と翻訳の CPU の取り合いを
+     * 測るため。戻すのは [Effect.Finish]）、音声認識を始め直してから音声を流す。[block] が音声を渡し終えたら（音声ファイルの終わり・
+     * 入力の失敗）止める（[Event.StopRequested]）。停止ボタンで止めたときは、[Effect.Flush] がこの作業を止めてから確定させる。
+     */
+    private fun begin() {
         val engine = asr ?: return
-        if (listenJob?.isActive == true) return
-        listenJob = viewModelScope.launch {
-            _state.update { it.copy(listening = true, error = null) }
-            val translateThreads = recognition.translateThreads
-            if (translateThreads > 0) configureTranslation(translateThreads)
+        val block = pendingInput ?: return
+        pendingInput = null
+        inputJob = viewModelScope.launch {
             try {
+                translateThreads = recognition.translateThreads
+                if (translateThreads > 0) configureTranslation(translateThreads)
                 engine.reset()
-                try {
-                    withContext(Dispatchers.IO) { block(engine) }
-                } finally {
-                    // 止めたときに話しかけだった分も訳す。取り消されても確定し終えるまで待つ
-                    withContext(NonCancellable) {
-                        val done = CompletableDeferred<Unit>()
-                        flushed = done
-                        engine.flush()
-                        done.await()
-                    }
-                }
+                withContext(Dispatchers.IO) { block(engine) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message ?: e.toString()) }
             } finally {
-                if (translateThreads > 0) withContext(NonCancellable) { configureTranslation(0) }
-                _state.update { it.copy(listening = false, level = 0f, lagSeconds = 0f) }
-                handle(Event.Stopped)
+                // 停止ボタンで止めたとき・画面を閉じたときは、もう止めている（制御は2回目を無視する）
+                handle(Event.StopRequested)
             }
         }
+    }
+
+    /**
+     * 聞き終えた（[Effect.Finish]）。音声の入力が残っていれば止め、聞いている間だけ変えた翻訳のスレッド数を戻す。画面を閉じたとき
+     * （[Event.Closed]）にも届くので、戻す処理は viewModelScope の外（[releaseScope]）で行う（エンジンは画面より長く生きる）。
+     */
+    private fun finish() {
+        inputJob?.cancel()
+        inputJob = null
+        _state.update { it.copy(level = 0f, lagSeconds = 0f) }
+        val threads = translateThreads
+        translateThreads = 0
+        if (threads > 0) releaseScope.launch { configureTranslation(0) }
     }
 
     /**
@@ -333,8 +348,8 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
 
     private fun onEvent(event: Event) {
         when (val speech = (event as? Event.Speech)?.event) {
-            is SpeechEvent.Partial -> logText { "途中 [${speech.lang}] ${speech.text}" }
-            is SpeechEvent.Final -> speech.utterance.let { u -> logText { "認識 [${u.lang}] ${u.text} 認識${u.recognizeMs}ms" } }
+            is SpeechEvent.CardText -> logText { "途中 [${speech.lang}] ${speech.text}" }
+            is SpeechEvent.CardFinished -> speech.utterance?.let { u -> logText { "認識 [${u.lang}] ${u.text} 認識${u.recognizeMs}ms" } }
             is SpeechEvent.Retranscribed -> speech.utterance.let { u -> logText { "書き起こし直し 発話${u.id} [${u.lang}] ${u.text} ${u.recognizeMs}ms" } }
             is SpeechEvent.RetranscribeFailed -> log("書き起こし直せなかった 発話${speech.id} ${speech.reason}")
             else -> Unit
@@ -360,6 +375,16 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
             // 音声認識が無ければ書き起こし直せない（カードはそのまま）
             is Effect.Retranscribe -> asr?.retranscribe(effect.utterance, effect.language)
                 ?: post(listOf(SpeechEvent.RetranscribeFailed(effect.utterance, RetranscribeFailure.UNAVAILABLE)))
+            // 音声の入力を止めてから確定させる（後に渡した音声は次のカードになる）。音声認識が無ければ止め終わりをその場で返す
+            Effect.Flush -> {
+                val input = inputJob
+                viewModelScope.launch {
+                    input?.cancelAndJoin()
+                    asr?.flush() ?: post(listOf(SpeechEvent.Flushed))
+                }
+            }
+            Effect.Begin -> begin()
+            Effect.Finish -> finish()
         }
     }
 
@@ -367,8 +392,9 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         // 音声認識が話し手の交代を見る言語は、会話の言語（自分か相手が中国語のときだけ、中国語と日本語を分ける）
         asr?.languages = session.speechLanguages
         _state.update {
-            it.copy(turns = session.turns, queued = session.queued, live = session.live, self = session.self, mode = session.mode, partner = session.partner,
-                partnerFound = session.partnerFound,
+            it.copy(
+                turns = session.turns, cards = session.listeningCards, listening = session.listening, canCut = session.canCut,
+                self = session.self, mode = session.mode, partner = session.partner, partnerFound = session.partnerFound,
             )
         }
     }
@@ -427,9 +453,8 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     override fun onCleared() {
-        listenJob?.cancel()
-        // 止め終えるのを待っている聞き取りを終わらせる（画面と一緒に消える）
-        flushed?.complete(Unit)
+        // 聞いていれば確定を待たずに聞き終える（音声の入力を止め、翻訳のスレッド数を戻す）
+        handle(Event.Closed)
         // 認識中のジョブが終わってから解放される（呼んだスレッドは待たない）
         asr?.close()
         asr = null

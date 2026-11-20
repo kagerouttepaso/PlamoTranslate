@@ -252,7 +252,7 @@ private fun UtteranceCard(
  * 相手側は相手が読むので、言語をその言語自身の名前で出す（例：한국어）。
  */
 @Composable
-internal fun LiveCard(live: LiveSpeech, reader: Reader?, level: Float, lagSeconds: Float, queued: Boolean = false) {
+internal fun LiveCard(live: LiveSpeech, reader: Reader?, level: Float, lagSeconds: Float, waiting: Boolean = false) {
     val d = live.direction
     val c = MaterialTheme.colorScheme
     val right = when {
@@ -272,17 +272,17 @@ internal fun LiveCard(live: LiveSpeech, reader: Reader?, level: Float, lagSecond
     }
     val seconds = ((now - live.startedAtMs) / 1000).coerceAtLeast(0)
     // 相手側は相手が読むので、言語に依らない書き方にする
-    val waiting = if (reader == Reader.PARTNER) "… ${seconds}s" else "書き起こし中… ${seconds}秒"
-    val original = live.text.ifEmpty { waiting }
+    val noText = if (reader == Reader.PARTNER) "… ${seconds}s" else "書き起こし中… ${seconds}秒"
+    val original = live.text.ifEmpty { noText }
     val translation = live.translation.ifEmpty { "…" }
-    val lag = if (!queued && lagSeconds >= 1f && reader != Reader.PARTNER) "認識が%.0f秒遅れています".format(lagSeconds) else null
+    val lag = if (!waiting && lagSeconds >= 1f && reader != Reader.PARTNER) "認識が%.0f秒遅れています".format(lagSeconds) else null
     val shownLevel by animateFloatAsState(level, label = "liveLevel")
     val accent = when {
         d == null -> c.outline
         d.mine -> c.primary
         else -> c.secondary
     }
-    val status = if (queued) queuedStatus(d, reader) else liveStatus(d, reader)
+    val status = if (waiting) waitingStatus(d, reader) else liveStatus(d, reader)
     val levelBar = @Composable {
         Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.surfaceVariant)) {
             Box(Modifier.fillMaxWidth(shownLevel).fillMaxHeight().background(accent))
@@ -296,7 +296,7 @@ internal fun LiveCard(live: LiveSpeech, reader: Reader?, level: Float, lagSecond
             shape = RoundedCornerShape(16.dp),
             color = c.surfaceContainerHigh,
             contentColor = c.onSurface,
-            border = BorderStroke(if (queued) 1.dp else 2.dp, if (queued) accent.copy(alpha = 0.6f) else accent),
+            border = BorderStroke(if (waiting) 1.dp else 2.dp, if (waiting) accent.copy(alpha = 0.6f) else accent),
         ) {
             if (reader == null) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -304,7 +304,7 @@ internal fun LiveCard(live: LiveSpeech, reader: Reader?, level: Float, lagSecond
                     Text(original, style = ConversationType.sub)
                     Text(translation, style = ConversationType.main)
                     lag?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = c.onSurfaceVariant) }
-                    if (!queued) levelBar()
+                    if (!waiting) levelBar()
                 }
             } else {
                 Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -312,7 +312,7 @@ internal fun LiveCard(live: LiveSpeech, reader: Reader?, level: Float, lagSecond
                     Text(if (originalFirst) original else translation, style = ConversationType.main)
                     Text(if (originalFirst) translation else original, style = ConversationType.faceSub, color = c.onSurfaceVariant)
                     lag?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = c.onSurfaceVariant) }
-                    if (!queued) levelBar()
+                    if (!waiting) levelBar()
                 }
             }
         }
@@ -320,16 +320,16 @@ internal fun LiveCard(live: LiveSpeech, reader: Reader?, level: Float, lagSecond
 }
 
 /**
- * 区切るボタンで区切ったが、まだ確定していないカード（書き起こし待ち）。話し中のカードと同じ形で、枠を細く薄くし、
- * 見出しを「書き起こし中」にする。押した時にカードが区切られたことを見せ、書き起こしが追いつくと確定したカードに置き換わる。
+ * 閉じたが、まだ確定していないカード（書き起こし待ち。区切る・話し終わり・話し手の交代などで閉じた）。話し中のカードと同じ形で、
+ * 枠を細く薄くし、見出しを「書き起こし中」にする。書き起こしが追いつくと確定したカードに置き換わる。
  */
 @Composable
-internal fun QueuedCard(card: LiveSpeech, reader: Reader?) = LiveCard(card, reader, level = 0f, lagSeconds = 0f, queued = true)
+internal fun WaitingCard(card: LiveSpeech, reader: Reader?) = LiveCard(card, reader, level = 0f, lagSeconds = 0f, waiting = true)
 
 /** 書き起こし待ちのカードの見出し。相手側は言語に依らない記号（⏳）にする。 */
-private fun queuedStatus(d: Direction?, reader: Reader?): String = when {
+private fun waitingStatus(d: Direction?, reader: Reader?): String = when {
     reader == Reader.PARTNER -> if (d == null) "⏳" else "⏳ ${ownName(d.source)}"
-    d == null -> "⏳ 区切りました・書き起こし中"
+    d == null -> "⏳ 書き起こし中"
     else -> "⏳ ${if (d.mine) "自分" else "相手"}・${d.source.label}・書き起こし中"
 }
 

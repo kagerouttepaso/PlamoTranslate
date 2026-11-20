@@ -5,6 +5,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
 import android.widget.Toast
+import app.plamotranslate.pipeline.conversation.LiveSpeech
 import app.plamotranslate.pipeline.conversation.PartnerMode
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -158,15 +159,13 @@ private fun ConversationScreen(state: ConversationUiState, model: ModelState, ac
                     // 自分向け：自分の言語を大きく出す
                     FollowingList(state, Modifier.weight(1f).fillMaxWidth()) {
                         items(state.turns, key = { it.id }) { FaceCard(it, reader = Reader.ME, onSwap = actions.swapLanguage) }
-                        items(state.queued, key = { "queued-${it.id}" }) { QueuedCard(it, Reader.ME) }
-                        state.live?.let { item(key = LIVE_KEY) { LiveCard(it, Reader.ME, state.level, state.lagSeconds) } }
+                        items(state.cards, key = ::cardKey) { ListeningCard(it, Reader.ME, state) }
                     }
                 }
                 ViewMode.SHARED -> {
                     FollowingList(state, Modifier.weight(1f).fillMaxWidth()) {
                         items(state.turns, key = { it.id }) { SharedCard(it, onSwap = actions.swapLanguage) }
-                        items(state.queued, key = { "queued-${it.id}" }) { QueuedCard(it, reader = null) }
-                        state.live?.let { item(key = LIVE_KEY) { LiveCard(it, reader = null, level = state.level, lagSeconds = state.lagSeconds) } }
+                        items(state.cards, key = ::cardKey) { ListeningCard(it, reader = null, state) }
                     }
                     Controls(state, model, actions)
                 }
@@ -175,7 +174,13 @@ private fun ConversationScreen(state: ConversationUiState, model: ModelState, ac
     }
 }
 
-private const val LIVE_KEY = "live"
+/** 聞き取り中のカードの一覧の鍵。話し中から書き起こし待ちになっても同じカードとして並べたままにする。 */
+private fun cardKey(card: LiveSpeech): String = "card-${card.card}"
+
+/** 聞き取り中のカード：話し中なら音量と認識の遅れも出し、閉じたカードは書き起こし待ちとして出す。 */
+@Composable
+private fun ListeningCard(card: LiveSpeech, reader: Reader?, state: ConversationUiState) =
+    if (card.open) LiveCard(card, reader, state.level, state.lagSeconds) else WaitingCard(card, reader)
 
 /**
  * 相手向けの半分。一覧ごと180°回すと、指を離したときの勢い（フリング）の向きがずれて急に止まる
@@ -187,8 +192,7 @@ private fun PartnerHalf(state: ConversationUiState, actions: ConversationActions
     // 背景は自分側と同じ地の色にする。別の色にすると、カードの色と混ざって見分けにくかった（2026-11-06、作者の指摘）
     FollowingList(state, modifier, reverse = true) {
         items(state.turns, key = { it.id }) { Box(Modifier.rotate(180f)) { FaceCard(it, reader = Reader.PARTNER, onSwap = actions.swapLanguage) } }
-        items(state.queued, key = { "queued-${it.id}" }) { Box(Modifier.rotate(180f)) { QueuedCard(it, Reader.PARTNER) } }
-        state.live?.let { item(key = LIVE_KEY) { Box(Modifier.rotate(180f)) { LiveCard(it, Reader.PARTNER, state.level, state.lagSeconds) } } }
+        items(state.cards, key = ::cardKey) { Box(Modifier.rotate(180f)) { ListeningCard(it, Reader.PARTNER, state) } }
     }
 }
 
@@ -207,7 +211,7 @@ private fun FollowingList(
     reverse: Boolean = false,
     content: LazyListScope.() -> Unit,
 ) {
-    val count = state.turns.size + state.queued.size + if (state.live != null) 1 else 0
+    val count = state.turns.size + state.cards.size
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = (count - 1).coerceAtLeast(0))
     var follow by remember { mutableStateOf(true) }
     LaunchedEffect(listState) {
@@ -217,7 +221,7 @@ private fun FollowingList(
             if (!scrolling) follow = !listState.canScrollForward
         }
     }
-    LaunchedEffect(count, state.turns.lastOrNull()?.translation?.length, state.live?.text, state.live?.translation) {
+    LaunchedEffect(count, state.turns.lastOrNull()?.translation?.length, state.cards.lastOrNull()?.text, state.cards.lastOrNull()?.translation) {
         if (follow && count > 0) listState.scrollToEnd(count)
     }
     LazyColumn(
