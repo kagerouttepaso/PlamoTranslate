@@ -49,8 +49,8 @@ class TranslationStream(
     /** 訳すのに使う部品。[origin] は訳すモデルで、キャッシュはその品質以上の訳だけを使う。[persistent] は永続キャッシュ（無ければ使わない）。 */
     class Backend(val engine: JobEngine, val origin: ModelOrigin, val persistent: PersistentCache? = null)
 
-    /** 訳した結果の数（ログ用）。 */
-    data class Stats(val pieces: Int, val memoryHits: Int, val storedHits: Int, val retried: Int, val stopped: Int)
+    /** 訳した結果の数（ログ用）。[model] は訳し始めたときのモデル（まだ訳し始めていなければ null）。 */
+    data class Stats(val pieces: Int, val memoryHits: Int, val storedHits: Int, val retried: Int, val stopped: Int, val model: ModelOrigin?)
 
     private val out = Channel<SegmentUpdate>(Channel.UNLIMITED)
 
@@ -165,7 +165,7 @@ class TranslationStream(
         out.close()
     }
 
-    val stats: Stats get() = synchronized(lock) { Stats(piecesTranslated, memoryHits, storedHits, retried, stopped) }
+    val stats: Stats get() = synchronized(lock) { Stats(piecesTranslated, memoryHits, storedHits, retried, stopped, origin) }
 
     private fun emit(update: SegmentUpdate) {
         out.trySend(update)

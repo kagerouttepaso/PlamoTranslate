@@ -1,5 +1,6 @@
 package app.plamotranslate.screen
 
+import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.pipeline.screen.SceneProfile
 import android.graphics.Bitmap
 import app.plamotranslate.llm.Language
@@ -85,8 +86,12 @@ internal class PageLayout(
 }
 
 /** 訳す工程の結果。[stats] はストリームを閉じるまで増える。 */
-internal class TranslationRun(val model: String, val startedAt: Long, private val stream: TranslationStream) {
+internal class TranslationRun(val startedAt: Long, private val stream: TranslationStream) {
     var stats: TranslationStream.Stats? = null
+
+    /** 訳したモデルの名前（ストリームが訳し始めたときのモデル。閉じた後に分かる）。 */
+    val model: String
+        get() = stats?.model?.let { origin -> TranslationModel.entries.firstOrNull { it.origin == origin }?.label } ?: "モデル不明"
 
     /** 閉じたか。閉じた後に届いた更新は、流し込む工程が捨てる。 */
     var closed = false

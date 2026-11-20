@@ -27,6 +27,7 @@ import app.plamotranslate.R
 import app.plamotranslate.log.Logs
 import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.models.TranslationModel
+import app.plamotranslate.pipeline.translation.ModelState
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.overlay.toBox
 import app.plamotranslate.pipeline.screen.SceneProfile
@@ -56,6 +57,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 
@@ -330,8 +332,7 @@ class ScreenTranslateService : Service() {
         overlay?.show(targets.map { it.slot }, "${targets.size}件を翻訳中…")
         val source = frame.choice.source
         scope.launch(w.job) {
-            val ready = EngineHolder.awaitEngine(this@ScreenTranslateService)?.second
-            if (ready == null) {
+            if (modelReady() == null) {
                 dispatch(SessionEvent.TranslationFailed(session, "翻訳モデルを読めません。アプリを開いて確認してください"))
                 return@launch
             }
@@ -340,7 +341,7 @@ class ScreenTranslateService : Service() {
             // メモリのキャッシュはサービスが持って翻訳どうしで共有し、永続キャッシュ（端末のデータベース）で次に始めたときも使う
             val persistent = SqlitePersistentCache.get(this@ScreenTranslateService)
             val stream = Translations.open(this, this@ScreenTranslateService, TranslationStream.Options(source, SCREEN_TARGET), memoryCache, persistent)
-            val run = TranslationRun(ready.model.label, SystemClock.uptimeMillis(), stream).also(w::translating)
+            val run = TranslationRun(SystemClock.uptimeMillis(), stream).also(w::translating)
             try {
                 stream.submit(targets.mapIndexed { i, t -> Segment(i.toLong(), t.sourceText) })
                 // 閉じた後もチャンネルに溜まっていた更新は届くので、閉じたら（訳し終えた・失敗した）読むのをやめる
@@ -558,6 +559,12 @@ class ScreenTranslateService : Service() {
         })
     }
 
+    /** 翻訳モデルの読み込みが終わるまで待って、使える状態を返す（エンジンは受け取らない）。ファイルが無い・失敗なら null。 */
+    private suspend fun modelReady(): ModelState.Ready<TranslationModel>? {
+        EngineHolder.ensureLoaded(this)
+        return EngineHolder.state.first { it !is ModelState.Loading } as? ModelState.Ready
+    }
+
     /** 翻訳モデルを切り替え、読み込みの進み具合をステータス表示に出す。訳している途中なら取り消す（古いエンジンは閉じられる）。 */
     private fun switchModel(model: TranslationModel) {
         dispatch(SessionEvent.ModelChanged)
@@ -565,7 +572,7 @@ class ScreenTranslateService : Service() {
         modelJob?.cancel()
         modelJob = scope.launch {
             overlay?.showStatus("${model.label}を読み込んでいます…")
-            val ready = EngineHolder.awaitEngine(this@ScreenTranslateService)?.second
+            val ready = modelReady()
             overlay?.showStatus(if (ready != null) "翻訳モデルを${ready.model.label}にしました" else "翻訳モデルを読めませんでした")
         }
     }
