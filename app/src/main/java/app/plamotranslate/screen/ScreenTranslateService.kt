@@ -195,9 +195,14 @@ class ScreenTranslateService : Service() {
             }
             is Effect.Translate -> translate(effect.session)
             is Effect.Finished -> workOf(effect.session)?.let(::finished)
-            is Effect.Failed -> overlay?.showStatus(if (effect.message.startsWith("画面")) effect.message else "翻訳に失敗しました: ${effect.message}")
+            is Effect.CaptureFailed -> overlay?.showStatus("画面を撮影できませんでした")
+            is Effect.Failed -> overlay?.showStatus("翻訳に失敗しました: ${effect.message}")
             is Effect.Peek -> peek(effect.session)
-            is Effect.Cancel -> cancel(effect.session)
+            is Effect.ShowBoxes -> if (workOf(effect.session) != null) overlay?.setBoxesVisible(true)
+            is Effect.Cancel -> {
+                Logs.i("画面翻訳: ${effect.reason}ので取り消した")
+                cancel(effect.session)
+            }
             Effect.ClearOverlay -> overlay?.clear()
             Effect.EndValidity -> validity.end()
             Effect.ResetStart -> startJudge.reset(SystemClock.uptimeMillis())
@@ -370,18 +375,19 @@ class ScreenTranslateService : Service() {
     /**
      * 自動で訳を出しているときに触れたら、触れた操作に画面が応えるのを待ってから、訳の枠を隠して枠の下を撮り、
      * 判定Bで原文が変わったかを見る（ゲームの台詞送り：変わるのは訳の枠の真下だけで、枠の外では気づけない）。
+     * 結果は [SessionEvent.Peeked] で状態遷移へ返し、取り消すか枠を戻すかは状態遷移が決める。のぞいている間に表示を
+     * やめれば、作業ごと取り消される（[Effect.Cancel]）。
      */
     private fun peek(session: Int) {
         val w = workOf(session) ?: return
-        if (w.peekJob?.isActive == true) return
-        val capturer = capturer ?: return
         val frames = profile.validity.peekFrames
         val interval = profile.validity.peekIntervalMs
-        w.peekJob = scope.launch(w.job) {
+        scope.launch(w.job) {
             delay(PEEK_DELAY_MS)
-            if (state.phase != Phase.Showing(session) || state.menuOpen) return@launch
-            val overlay = overlay ?: return@launch
-            val boxes = overlay.boxBounds.takeIf { it.isNotEmpty() } ?: return@launch
+            val capturer = capturer
+            val overlay = overlay
+            val boxes = overlay?.boxBounds.orEmpty()
+            if (capturer == null || overlay == null || boxes.isEmpty()) return@launch dispatch(SessionEvent.Peeked(session, invalid = null))
             hiding = true
             val thumbs = mutableListOf<Thumb>()
             try {
@@ -405,7 +411,7 @@ class ScreenTranslateService : Service() {
                 validity.peek(if (thumbs.size >= 3) ScreenChange.median(thumbs) else thumbs.last(), boxes.map { it.toBox() })
             }
             Logs.i("自動翻訳: 触れたので訳の枠の下を見た（$verdict）")
-            if (verdict is Validity.Invalid) dispatch(SessionEvent.Invalidated(verdict.reason)) else overlay.setBoxesVisible(true)
+            dispatch(SessionEvent.Peeked(session, (verdict as? Validity.Invalid)?.let { "${it.reason}（${"%.2f".format(it.amount)}）" }))
         }
     }
 
@@ -434,11 +440,8 @@ class ScreenTranslateService : Service() {
                 validity.active && thumb != null -> {
                     val own = overlay?.occupiedRects().orEmpty().map { it.toBox() } + listOfNotNull(button?.bounds?.toBox())
                     val boxes = overlay?.boxBounds.orEmpty().map { it.toBox() }
-                    val verdict = validity.feed(thumb, boxes, own, watchOutside = state.trigger == ScreenSession.Trigger.AUTO)
-                    if (verdict is Validity.Invalid) {
-                        Logs.i("画面翻訳: ${verdict.reason}（${"%.2f".format(verdict.amount)}）ので取り消した")
-                        dispatch(SessionEvent.Invalidated(verdict.reason))
-                    }
+                    val verdict = validity.feed(thumb, boxes, own, watchOutside = state.watchOutside)
+                    if (verdict is Validity.Invalid) dispatch(SessionEvent.Invalidated("${verdict.reason}（${"%.2f".format(verdict.amount)}）"))
                 }
             }
         }
@@ -454,15 +457,12 @@ class ScreenTranslateService : Service() {
 
     /** ほかのアプリの画面に触れたとき（[TouchWatcher]。自分のボタン・メニュー・表示への操作は除いてある）。 */
     private fun onScreenTouch() {
-        if (state.working) Logs.i("画面翻訳: 訳している途中に画面を操作したので取り消した")
         dispatch(SessionEvent.OutsideTouched)
     }
 
     /** ほかのアプリ・画面への切り替わり（ユーザー補助のイベント。アプリの切り替え・ホーム・最近使ったアプリ・別の画面）。 */
     private fun onWindowChanged() {
-        if (state.session == null) return
-        Logs.i("画面翻訳: ほかのアプリの画面が切り替わったので取り消した")
-        dispatch(SessionEvent.Invalidated("ほかの画面に切り替わった"))
+        dispatch(SessionEvent.Invalidated("ほかのアプリの画面が切り替わった"))
     }
 
     /**
@@ -471,8 +471,6 @@ class ScreenTranslateService : Service() {
      * 判定Bが遅いとき（動く画面のモードは画面全体の変化を見ず、外周を3回の中央値で比べる）に先に効く予備のシグナル（2026-11-12に実機で確かめた）。
      */
     private fun onScrolled() {
-        if (state.session == null) return
-        Logs.i("画面翻訳: スクロールしたので取り消した")
         dispatch(SessionEvent.Invalidated("スクロールした"))
     }
 

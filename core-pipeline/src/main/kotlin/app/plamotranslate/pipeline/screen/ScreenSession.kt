@@ -25,8 +25,11 @@ object ScreenSession {
         data class Recognizing(val session: Int) : Phase
         data class Translating(val session: Int, val total: Int, val done: Int) : Phase
 
-        /** 訳を出している（訳す文字が無かったときは、ステータス表示だけを出している）。 */
-        data class Showing(val session: Int) : Phase
+        /**
+         * 訳を出している（訳す文字が無かったときは、ステータス表示だけを出している）。[peeking] は、触れたので訳の枠を隠して
+         * 枠の下をのぞいている間（のぞき終えるまで、次ののぞきは始めない）。
+         */
+        data class Showing(val session: Int, val peeking: Boolean = false) : Phase
     }
 
     data class State(
@@ -49,6 +52,9 @@ object ScreenSession {
 
         /** 撮ってから訳し終わるまで（訳を出しているときは含まない）。 */
         val working: Boolean get() = phase is Phase.Capturing || phase is Phase.Recognizing || phase is Phase.Translating
+
+        /** 判定Bの規則3（自分の表示の外の画面が変わった）を使うか。自動で訳すときだけ（タップで訳すときは、触れたら消すので要らない）。 */
+        val watchOutside: Boolean get() = trigger == Trigger.AUTO
     }
 
     fun initial(trigger: Trigger): State =
@@ -74,6 +80,9 @@ object ScreenSession {
 
         /** ほかのアプリの画面に触れた（自分のウィンドウへの操作は除いてある）。 */
         data object OutsideTouched : SessionEvent
+
+        /** のぞき終えた（[Effect.Peek] の結果）。[invalid] は枠の下が変わっていたときの理由で、変わっていなければ null。 */
+        data class Peeked(val session: Int, val invalid: String?) : SessionEvent
         data object MenuOpened : SessionEvent
         data object MenuClosed : SessionEvent
         data object Rotated : SessionEvent
@@ -102,13 +111,21 @@ object ScreenSession {
 
         /** 全部の訳が確定した。 */
         data class Finished(val session: Int) : Effect
+
+        /** 画面を撮影できなかったと知らせる。 */
+        data class CaptureFailed(val session: Int) : Effect
+
+        /** 翻訳に失敗したと知らせる。 */
         data class Failed(val session: Int, val message: String) : Effect
 
-        /** 触れたので、訳の枠を隠して枠の下をのぞく。 */
+        /** 触れたので、訳の枠を隠して枠の下をのぞく。結果は [SessionEvent.Peeked] で戻る。 */
         data class Peek(val session: Int) : Effect
 
-        /** 撮影・文字認識・翻訳・のぞきを取り消す。 */
-        data class Cancel(val session: Int) : Effect
+        /** のぞいて変わっていなかったので、隠した訳の枠を戻す。 */
+        data class ShowBoxes(val session: Int) : Effect
+
+        /** 撮影・文字認識・翻訳・のぞきを取り消す。[reason] は取り消した理由（記録に書く）。 */
+        data class Cancel(val session: Int, val reason: String) : Effect
         data object ClearOverlay : Effect
         data object EndValidity : Effect
 
@@ -125,16 +142,16 @@ object ScreenSession {
     /** 出来事 [event] を受け取り、次の状態と作業を返す。 */
     fun reduce(state: State, event: SessionEvent): Pair<State, List<Effect>> = when (event) {
         SessionEvent.ButtonTapped -> when {
-            state.trigger == Trigger.AUTO && state.autoOn -> rest(state.copy(autoOn = false)).plus(
+            state.trigger == Trigger.AUTO && state.autoOn -> rest(state.copy(autoOn = false), "自動翻訳を止めた").plus(
                 Effect.ButtonActive(false), Effect.Notice("自動翻訳を止めました。もう一度押すと再開します"),
             )
-            state.trigger == Trigger.AUTO -> rest(state.copy(autoOn = true)).plus(Effect.ButtonActive(true))
-            state.session != null -> rest(state)
+            state.trigger == Trigger.AUTO -> rest(state.copy(autoOn = true), "自動翻訳を再開した").plus(Effect.ButtonActive(true))
+            state.session != null -> rest(state, "ボタンを押した")
             else -> capture(state)
         }
 
         is SessionEvent.TriggerChanged ->
-            rest(state.copy(trigger = event.trigger, autoOn = event.trigger == Trigger.AUTO)).plus(Effect.ButtonActive(true))
+            rest(state.copy(trigger = event.trigger, autoOn = event.trigger == Trigger.AUTO), "始め方を変えた").plus(Effect.ButtonActive(true))
 
         SessionEvent.Settled ->
             if (state.phase == Phase.Watching && !state.menuOpen) capture(state) else state to emptyList()
@@ -144,7 +161,7 @@ object ScreenSession {
                 state.copy(phase = Phase.Recognizing(event.session)) to
                     listOf(Effect.BeginValidity(event.session), Effect.Recognize(event.session))
             } else {
-                rest(state).plus(Effect.Failed(event.session, "画面を撮影できませんでした"))
+                rest(state, "画面を撮影できなかった").plus(Effect.CaptureFailed(event.session))
             }
         }
 
@@ -169,36 +186,48 @@ object ScreenSession {
             state.copy(phase = Phase.Showing(event.session)) to listOf(Effect.Failed(event.session, event.message))
         }
 
-        is SessionEvent.Invalidated -> if (state.session != null) rest(state) else state to emptyList()
+        is SessionEvent.Invalidated -> if (state.session != null) rest(state, event.reason) else state to emptyList()
 
         SessionEvent.OutsideTouched -> {
             val s = state.session
             when {
                 s == null -> state to emptyList()
                 // 撮って訳している途中なら全部取り消す（2026-11-12、作者の要望「訳している途中に画面を操作したら全処理をキャンセル」）
-                state.working -> rest(state)
+                state.working -> rest(state, "訳している途中に画面を操作した")
                 // タップで訳すとき：訳を出していれば消す（スクロールなどで画面が変わるので）
-                state.trigger == Trigger.TAP -> rest(state)
-                // 自動で訳すとき：訳の枠の下の文字が変わったかをのぞく（ゲームの台詞送り）
-                else -> state to listOf(Effect.Peek(s))
+                state.trigger == Trigger.TAP -> rest(state, "画面に触れた")
+                // 自動で訳すとき：訳の枠の下の文字が変わったかをのぞく（ゲームの台詞送り）。のぞいている間は重ねない
+                else -> ifPhase<Phase.Showing>(state, s) { p ->
+                    if (p.peeking) state to emptyList() else state.copy(phase = p.copy(peeking = true)) to listOf(Effect.Peek(s))
+                }
+            }
+        }
+
+        // のぞいて枠の下が変わっていれば取り消し、変わっていなければ枠を戻す。表示をやめる遷移はどれも rest を通り、
+        // のぞきの作業も Cancel で止まるので、のぞいている間に表示をやめたときの結果は届かない（届いても ifPhase で捨てる）
+        is SessionEvent.Peeked -> ifPhase<Phase.Showing>(state, event.session) { p ->
+            when {
+                !p.peeking -> state to emptyList()
+                event.invalid != null -> rest(state, event.invalid)
+                else -> state.copy(phase = p.copy(peeking = false)) to listOf(Effect.ShowBoxes(event.session))
             }
         }
 
         // 訳の枠はメニューより手前に出てメニューに触れなくなるので、開くときは訳を消し、訳している途中なら取り消す（2026-11-12、作者の指摘）
-        SessionEvent.MenuOpened -> rest(state.copy(menuOpen = true))
+        SessionEvent.MenuOpened -> rest(state.copy(menuOpen = true), "メニューを開いた")
         SessionEvent.MenuClosed -> {
             val next = state.copy(menuOpen = false)
             if (next.phase == Phase.Watching) next to listOf(Effect.ResetStart) else next to emptyList()
         }
-        SessionEvent.Rotated -> rest(state)
-        SessionEvent.ModelChanged -> rest(state)
-        SessionEvent.StatusTapped -> rest(state)
+        SessionEvent.Rotated -> rest(state, "画面を回した")
+        SessionEvent.ModelChanged -> rest(state, "翻訳モデルを変えた")
+        SessionEvent.StatusTapped -> rest(state, "ステータス表示に触れた")
     }
 
-    /** 後片付けをして待ちに戻る（取り消しはすべてここを通る）。 */
-    private fun rest(state: State): Pair<State, List<Effect>> {
+    /** 後片付けをして待ちに戻る（取り消しはすべてここを通る）。[reason] は取り消した理由。 */
+    private fun rest(state: State, reason: String): Pair<State, List<Effect>> {
         val effects = mutableListOf<Effect>()
-        state.session?.let { effects += Effect.Cancel(it) }
+        state.session?.let { effects += Effect.Cancel(it, reason) }
         effects += Effect.ClearOverlay
         effects += Effect.EndValidity
         val watching = state.trigger == Trigger.AUTO && state.autoOn

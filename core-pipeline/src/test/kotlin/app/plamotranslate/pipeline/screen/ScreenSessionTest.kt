@@ -48,7 +48,7 @@ class ScreenSessionTest {
         // 2026-11-12の不具合：Discordで訳し始めと同時に戻ったのに、訳し終わった前の画面の訳がチャンネル一覧の上に出た
         val (s, effects) = run(translatingAuto(), SessionEvent.Invalidated("画面が切り替わった"))
         assertEquals(Phase.Watching, s.phase)
-        assertEquals(listOf(Effect.Cancel(1), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), effects)
+        assertEquals(listOf(Effect.Cancel(1, ""), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), effects.anyReason())
     }
 
     @Test
@@ -70,7 +70,7 @@ class ScreenSessionTest {
         )
         for (e in events) {
             val (_, effects) = run(translatingAuto(), e)
-            assertEquals("$e", listOf(Effect.Cancel(1), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), effects)
+            assertEquals("$e", listOf(Effect.Cancel(1, ""), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), effects.anyReason())
         }
     }
 
@@ -78,7 +78,7 @@ class ScreenSessionTest {
     fun 自動で訳を出しているときに触れたら枠の下をのぞく() {
         val showing = run(translatingAuto(), SessionEvent.SegmentDone(1), SessionEvent.SegmentDone(1)).first
         val (s, effects) = run(showing, SessionEvent.OutsideTouched)
-        assertEquals(Phase.Showing(1), s.phase)
+        assertEquals(Phase.Showing(1, peeking = true), s.phase)
         assertEquals(listOf(Effect.Peek(1)), effects)
     }
 
@@ -90,7 +90,7 @@ class ScreenSessionTest {
         val showing = run(s1, SessionEvent.Captured(1, true), SessionEvent.Recognized(1, 1), SessionEvent.SegmentDone(1)).first
         val (s2, e2) = run(showing, SessionEvent.ButtonTapped)
         assertEquals(Phase.Idle, s2.phase)
-        assertEquals(listOf(Effect.Cancel(1), Effect.ClearOverlay, Effect.EndValidity), e2)
+        assertEquals(listOf(Effect.Cancel(1, ""), Effect.ClearOverlay, Effect.EndValidity), e2.anyReason())
     }
 
     @Test
@@ -139,7 +139,7 @@ class ScreenSessionTest {
     fun 撮れなければ知らせて待ちに戻る() {
         val (s, effects) = run(auto, SessionEvent.Settled, SessionEvent.Captured(1, ok = false))
         assertEquals(Phase.Watching, s.phase)
-        assertTrue(effects.contains(Effect.Failed(1, "画面を撮影できませんでした")))
+        assertTrue(effects.contains(Effect.CaptureFailed(1)))
     }
 
     @Test
@@ -153,12 +153,12 @@ class ScreenSessionTest {
         // 2026-11-12、作者の要望「訳している途中に画面を操作したら全処理をキャンセル」
         val (autoState, autoEffects) = run(translatingAuto(), SessionEvent.OutsideTouched)
         assertEquals(Phase.Watching, autoState.phase)
-        assertEquals(listOf(Effect.Cancel(1), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), autoEffects)
+        assertEquals(listOf(Effect.Cancel(1, ""), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), autoEffects.anyReason())
 
         val tapWorking = run(tap, SessionEvent.ButtonTapped, SessionEvent.Captured(1, true)).first
         val (tapState, tapEffects) = run(tapWorking, SessionEvent.OutsideTouched)
         assertEquals(Phase.Idle, tapState.phase)
-        assertEquals(listOf(Effect.Cancel(1), Effect.ClearOverlay, Effect.EndValidity), tapEffects)
+        assertEquals(listOf(Effect.Cancel(1, ""), Effect.ClearOverlay, Effect.EndValidity), tapEffects.anyReason())
     }
 
     @Test
@@ -166,7 +166,7 @@ class ScreenSessionTest {
         val showing = run(translatingAuto(), SessionEvent.SegmentDone(1), SessionEvent.SegmentDone(1)).first
         val (opened, openEffects) = run(showing, SessionEvent.MenuOpened)
         assertTrue(opened.menuOpen)
-        assertEquals(listOf(Effect.Cancel(1), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), openEffects)
+        assertEquals(listOf(Effect.Cancel(1, ""), Effect.ClearOverlay, Effect.EndValidity, Effect.ResetStart), openEffects.anyReason())
         val (closed, closeEffects) = run(opened, SessionEvent.MenuClosed)
         assertEquals(false, closed.menuOpen)
         assertEquals(listOf(Effect.ResetStart), closeEffects)
@@ -179,7 +179,7 @@ class ScreenSessionTest {
     fun 始め方を変えると訳を消して新しい始め方で待つ() {
         val (toTap, effects) = run(translatingAuto(), SessionEvent.TriggerChanged(Trigger.TAP))
         assertEquals(Phase.Idle, toTap.phase)
-        assertEquals(listOf(Effect.Cancel(1), Effect.ClearOverlay, Effect.EndValidity, Effect.ButtonActive(true)), effects)
+        assertEquals(listOf(Effect.Cancel(1, ""), Effect.ClearOverlay, Effect.EndValidity, Effect.ButtonActive(true)), effects.anyReason())
         val (toAuto, autoEffects) = run(tap, SessionEvent.TriggerChanged(Trigger.AUTO))
         assertEquals(Phase.Watching, toAuto.phase)
         assertTrue(autoEffects.contains(Effect.ResetStart))
@@ -192,5 +192,48 @@ class ScreenSessionTest {
         assertEquals(listOf(Effect.Failed(1, "翻訳モデルを読めません")), effects)
         // 古いセッションの失敗は捨てる
         assertEquals(emptyList<Effect>(), run(s, SessionEvent.TranslationFailed(0, "古い")).second)
+    }
+
+    /** 取り消しの理由は記録のためのもので、後片付けの作業は同じ。比べるときは理由を外す。 */
+    private fun List<Effect>.anyReason() = map { if (it is Effect.Cancel) it.copy(reason = "") else it }
+
+    @Test
+    fun 取り消しの作業は取り消した理由を持つ() {
+        val (_, effects) = run(translatingAuto(), SessionEvent.Invalidated("スクロールした"))
+        assertEquals(Effect.Cancel(1, "スクロールした"), effects.first())
+    }
+
+    @Test
+    fun のぞいている間は重ねてのぞかず_変わっていなければ枠を戻す() {
+        val showing = run(translatingAuto(), SessionEvent.SegmentDone(1), SessionEvent.SegmentDone(1)).first
+        val (peeking, first) = run(showing, SessionEvent.OutsideTouched)
+        assertEquals(Phase.Showing(1, peeking = true), peeking.phase)
+        assertEquals(listOf(Effect.Peek(1)), first)
+        assertEquals(emptyList<Effect>(), run(peeking, SessionEvent.OutsideTouched).second)
+        val (back, effects) = run(peeking, SessionEvent.Peeked(1, invalid = null))
+        assertEquals(Phase.Showing(1), back.phase)
+        assertEquals(listOf(Effect.ShowBoxes(1)), effects)
+    }
+
+    @Test
+    fun のぞいて枠の下が変わっていれば取り消す() {
+        val showing = run(translatingAuto(), SessionEvent.SegmentDone(1), SessionEvent.SegmentDone(1), SessionEvent.OutsideTouched).first
+        val (s, effects) = run(showing, SessionEvent.Peeked(1, invalid = "訳の枠の下が変わった"))
+        assertEquals(Phase.Watching, s.phase)
+        assertEquals(Effect.Cancel(1, "訳の枠の下が変わった"), effects.first())
+    }
+
+    @Test
+    fun のぞいている間に取り消した後に届いたのぞきの結果は捨てる() {
+        val peeking = run(translatingAuto(), SessionEvent.SegmentDone(1), SessionEvent.SegmentDone(1), SessionEvent.OutsideTouched).first
+        val (s, effects) = run(peeking, SessionEvent.MenuOpened, SessionEvent.Peeked(1, invalid = null))
+        assertEquals(Phase.Watching, s.phase)
+        assertTrue(effects.none { it is Effect.ShowBoxes })
+    }
+
+    @Test
+    fun 画面全体の変化で取り消すのは自動で訳すときだけ() {
+        assertTrue(auto.watchOutside)
+        assertEquals(false, tap.watchOutside)
     }
 }

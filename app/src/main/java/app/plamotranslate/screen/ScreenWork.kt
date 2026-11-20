@@ -14,7 +14,6 @@ import app.plamotranslate.pipeline.screen.ScreenSettings
 import app.plamotranslate.pipeline.screen.Thumb
 import app.plamotranslate.pipeline.translation.TranslationStream
 import kotlinx.coroutines.CompletableJob
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 
 /*
@@ -107,9 +106,6 @@ internal class Work(val session: Int) {
         private set
     var run: TranslationRun? = null
         private set
-
-    /** 触れたときののぞき。 */
-    var peekJob: Job? = null
 
     /** 撮る工程の結果を置く。 */
     fun captured(image: Bitmap, frame: ScreenFrame) {
