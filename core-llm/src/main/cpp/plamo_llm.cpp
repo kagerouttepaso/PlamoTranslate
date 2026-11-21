@@ -1,11 +1,17 @@
 // llama.cppのJNIラッパー（docs/設計/翻訳コア.md）。
 // Kotlin側の LlamaNative から呼ぶ。1つのハンドルを同時に複数スレッドから使わないこと（Kotlin側で直列化する）。
+#if defined(__ANDROID__)
 #include <android/log.h>
 #include <android/performance_hint.h>
 #include <dirent.h>
 #include <dlfcn.h>
-#include <jni.h>
 #include <unistd.h>
+#elif defined(_WIN32)
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+#include <jni.h>
 
 #include <algorithm>
 #include <cstdarg>
@@ -23,11 +29,21 @@
 #include "llama.h"
 
 #define TAG "PlamoTranslate"
-#define LOGI(...) plamo_log(ANDROID_LOG_INFO, __VA_ARGS__)
-#define LOGW(...) plamo_log(ANDROID_LOG_WARN, __VA_ARGS__)
-#define LOGE(...) plamo_log(ANDROID_LOG_ERROR, __VA_ARGS__)
+#define LOGI(...) plamo_log(LOG_PRIORITY_INFO, __VA_ARGS__)
+#define LOGW(...) plamo_log(LOG_PRIORITY_WARN, __VA_ARGS__)
+#define LOGE(...) plamo_log(LOG_PRIORITY_ERROR, __VA_ARGS__)
 
 namespace {
+
+#if defined(__ANDROID__)
+constexpr int LOG_PRIORITY_INFO = ANDROID_LOG_INFO;
+constexpr int LOG_PRIORITY_WARN = ANDROID_LOG_WARN;
+constexpr int LOG_PRIORITY_ERROR = ANDROID_LOG_ERROR;
+#else
+constexpr int LOG_PRIORITY_INFO = 4;
+constexpr int LOG_PRIORITY_WARN = 5;
+constexpr int LOG_PRIORITY_ERROR = 6;
+#endif
 
 // ロガー（docs/設計/アーキテクチャ.md「ログ」）。ネイティブのログも Kotlin の Logs を通し、アプリのファイルにも残す。
 // JNI_OnLoad で Java のコールバック（LlamaNative.onNativeLog）を覚えておき、JVM につながっているスレッドからはそこへ渡す。
@@ -53,7 +69,11 @@ void emit_log(int priority, const char *text) {
         if (!env->ExceptionCheck()) return;
         env->ExceptionClear();
     }
+#if defined(__ANDROID__)
     __android_log_write(priority, TAG, text);  // logcat へのフォールバック
+#else
+    std::fprintf(stderr, "%s: %s\n", TAG, text);
+#endif
 }
 
 void plamo_log(int priority, const char *format, ...) {
@@ -85,12 +105,15 @@ struct Engine {
     std::vector<int32_t> worker_tids;
     // 性能ヒント（ADPF）。別アプリが前面でもCPUの周波数・配置を上げてもらう
     bool boost = true;
+#if defined(__ANDROID__)
     APerformanceHintSession *hint = nullptr;
     pid_t hint_caller = 0;
+#endif
     // 初回推論だけ段階とメモリを残し、通常の翻訳のログ量と処理負荷を増やさない。
     bool first_run = true;
 };
 
+#if defined(__ANDROID__)
 std::set<int32_t> list_threads() {
     std::set<int32_t> tids;
     if (DIR *dir = opendir("/proc/self/task")) {
@@ -160,24 +183,36 @@ void report_hint(Engine *e, int64_t nanos) {
     if (e->hint) APerformanceHint_reportActualWorkDuration(e->hint, nanos);
 }
 
+bool has_hint(Engine *e) { return e->hint != nullptr; }
+#else
+void startup_stage(const char *stage) { LOGI("起動診断: %s", stage); }
+std::string cpu_state() { return {}; }
+void ensure_hint(Engine *) {}
+bool has_hint(Engine *) { return false; }
+#endif
+
 // llama_decode を実行し、かかった時間を性能ヒントへ伝える
 int decode(Engine *e, llama_batch batch) {
+#if defined(__ANDROID__)
     const int64_t t0 = ggml_time_us();
     const int rc = llama_decode(e->ctx, batch);
     report_hint(e, (ggml_time_us() - t0) * 1000);
     return rc;
+#else
+    return llama_decode(e->ctx, batch);
+#endif
 }
 
 void log_callback(ggml_log_level level, const char *text, void *) {
     // llama.cppの情報ログは量が多いので、警告以上だけlogcatへ出す
     if (level == GGML_LOG_LEVEL_ERROR) {
-        emit_log(ANDROID_LOG_ERROR, text);
+        emit_log(LOG_PRIORITY_ERROR, text);
     } else if (level == GGML_LOG_LEVEL_WARN) {
-        emit_log(ANDROID_LOG_WARN, text);
+        emit_log(LOG_PRIORITY_WARN, text);
     } else if (level == GGML_LOG_LEVEL_INFO &&
                (strstr(text, "ggml_opencl: OpenCL device:") || strstr(text, "ggml_opencl: OpenCL driver:"))) {
         // 端末による失敗の切り分けに必要な識別情報だけを、既存のログ経路へ渡す。
-        emit_log(ANDROID_LOG_INFO, text);
+        emit_log(LOG_PRIORITY_INFO, text);
     }
 }
 
@@ -207,9 +242,21 @@ void find_cpu_functions() {
 }
 
 std::string to_std_string(JNIEnv *env, jstring s) {
+#if defined(_WIN32)
+    const auto length = env->GetStringLength(s);
+    if (length == 0) return {};
+    const jchar *chars = env->GetStringChars(s, nullptr);
+    if (!chars) return {};
+    const auto *wide = reinterpret_cast<const wchar_t *>(chars);
+    const int size = WideCharToMultiByte(CP_UTF8, 0, wide, length, nullptr, 0, nullptr, nullptr);
+    std::string result(size, '\0');
+    if (size > 0) WideCharToMultiByte(CP_UTF8, 0, wide, length, result.data(), size, nullptr, nullptr);
+    env->ReleaseStringChars(s, chars);
+#else
     const char *chars = env->GetStringUTFChars(s, nullptr);
     std::string result(chars);
     env->ReleaseStringUTFChars(s, chars);
+#endif
     return result;
 }
 
@@ -274,11 +321,14 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_app_plamotranslate_llm_LlamaNative_nativeInit(JNIEnv *env, jobject, jstring jlib_dir, jboolean load_gpu,
                                                    jstring jcpu_variant) {
     const std::string lib_dir = to_std_string(env, jlib_dir);
+#if defined(__ANDROID__)
     // 空なら自動。ファイル名（libggml-cpu-*.so）を指定すると、その版だけを候補にする（設定の「性能」の「CPU向けの処理の版」）
     const std::string cpu_variant = to_std_string(env, jcpu_variant);
+#endif
     std::call_once(g_backend_once, [&] {
         llama_log_set(log_callback, nullptr);
         startup_stage("バックエンド初期化 開始");
+#if defined(__ANDROID__)
         if (load_gpu) {
             // OpenCLの無い端末では libggml-opencl.so の読み込みだけが失敗し、CPUの部分は読み込まれる
             ggml_backend_load_all_from_path(lib_dir.c_str());
@@ -313,9 +363,16 @@ Java_app_plamotranslate_llm_LlamaNative_nativeInit(JNIEnv *env, jobject, jstring
                 LOGE("CPUのバックエンドを読み込めませんでした: %s", lib_dir.c_str());
             }
         }
+#else
+        ggml_backend_load_all_from_path(lib_dir.c_str());
+#endif
         llama_backend_init();
         find_cpu_functions();
+#if defined(__ANDROID__)
         g_has_gpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) != nullptr;
+#else
+        g_has_gpu = llama_supports_gpu_offload();
+#endif
         LOGI("計算のバックエンド: デバイス%zu個、GPU%s", ggml_backend_dev_count(), g_has_gpu ? "あり" : "なし");
         startup_stage("バックエンド初期化 完了");
     });
@@ -327,7 +384,12 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
                                                    jint n_gpu_layers, jint poll, jboolean use_pool, jboolean use_mmap,
                                                    jboolean boost, jint n_seq_max) {
     const std::string path = to_std_string(env, jpath);
-    LOGI("起動診断: model=%s gpu_layers=%d n_ctx=%d", path.substr(path.find_last_of('/') + 1).c_str(), n_gpu_layers, n_ctx);
+#if defined(_WIN32)
+    const auto separator = path.find_last_of("/\\");
+#else
+    const auto separator = path.find_last_of('/');
+#endif
+    LOGI("起動診断: model=%s gpu_layers=%d n_ctx=%d", path.substr(separator + 1).c_str(), n_gpu_layers, n_ctx);
     startup_stage("モデル読込 開始");
     llama_model_params mparams = llama_model_default_params();
     // false なら、モデルをメモリマップ（mmap）ではなくメモリへ読み込む
@@ -370,7 +432,9 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
     engine->boost = boost;
 
     // スレッドプールを先に作って常駐させ、増えたスレッドを性能ヒントの対象として覚える
+#if defined(__ANDROID__)
     const auto before = list_threads();
+#endif
     ggml_threadpool_params tp_params = ggml_threadpool_params_default(n_threads);
     // use_pool が false なら作らず、llama.cppが推論のたびにスレッドを用意する既定の動きにする。
     // poll は処理を待つ間のスピン待機の度合い（0は眠って待つ、既定50）
@@ -378,9 +442,11 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
     engine->threadpool = use_pool && g_threadpool_new ? g_threadpool_new(&tp_params) : nullptr;
     if (engine->threadpool) {
         llama_attach_threadpool(ctx, engine->threadpool, engine->threadpool);
+#if defined(__ANDROID__)
         for (int32_t tid : list_threads()) {
             if (!before.count(tid)) engine->worker_tids.push_back(tid);
         }
+#endif
     }
     engine->sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
     llama_sampler_chain_add(engine->sampler, llama_sampler_init_greedy());  // 温度0
@@ -408,7 +474,9 @@ extern "C" JNIEXPORT void JNICALL
 Java_app_plamotranslate_llm_LlamaNative_nativeFree(JNIEnv *, jobject, jlong handle) {
     auto *engine = reinterpret_cast<Engine *>(handle);
     if (!engine) return;
+#if defined(__ANDROID__)
     if (engine->hint) APerformanceHint_closeSession(engine->hint);
+#endif
     llama_sampler_free(engine->sampler);
     llama_free(engine->ctx);
     if (engine->threadpool && g_threadpool_free) g_threadpool_free(engine->threadpool);
@@ -483,6 +551,9 @@ Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject
     };
 
     const int64_t t_start = ggml_time_us();
+#if defined(_WIN32)
+    int64_t first_token_us = 0;
+#endif
     int64_t t_decode = 0;
     int total = 0;
     int n_prompt = 0;
@@ -510,6 +581,9 @@ Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject
             }
             ++q.n_generated;
             ++total;
+#if defined(_WIN32)
+            if (n_slots == 1 && total == 1) first_token_us = ggml_time_us();
+#endif
             q.pending += token_to_piece(vocab, token);
             const size_t ready = complete_utf8_length(q.pending);
             if (ready > 0) {
@@ -607,7 +681,12 @@ Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject
     LOGI("翻訳（同時%d本）: %d件、プロンプト %d トークン、生成 %d トークン、%.0fms（合計 %.1f トークン/秒、最大%d本が同時） ヒント=%s threads=%d %s",
          n_slots, n_jobs, n_prompt, total, (t_end - t_start) / 1000.0,
          t_end > t_start ? (n_prompt + total) * 1e6 / (double) (t_end - t_start) : 0.0, n_max_busy,
-         engine->hint ? "有" : "無", llama_n_threads(engine->ctx), cpu_state().c_str());
+         has_hint(engine) ? "有" : "無", llama_n_threads(engine->ctx), cpu_state().c_str());
+#if defined(_WIN32)
+    if (n_jobs == 1 && total > 1 && first_token_us > 0 && t_end > first_token_us) {
+        LOGI("生成: %.1f トークン/秒（最初の生成トークンから終了まで）", (total - 1) * 1e6 / (t_end - first_token_us));
+    }
+#endif
     return total;
 }
 
