@@ -45,6 +45,59 @@ flowchart LR
 - **音声認識**：中核のインターフェース（`VoiceActivity`・`SpeechRecognizer`）の実装を、sherpa-onnx の JVM 版で置く。PC のリプレイ（`docs/手順/開発環境.md`）で Silero VAD・Qwen3-ASR が Windows で動くことは確かめてある。
 - **データの置き場**：モデルと設定は `%LOCALAPPDATA%` の下に置く。
 
+## GUIの構成
+
+GUI は Kotlin で書き、Compose Multiplatform Desktop（JVM の上で動き、Windows では普通のウィンドウのアプリになる）で描く。C++ は、速さが要る部品と OS の機能（翻訳エンジン・音声の取り込み・PDF の描画）にだけ使う。
+
+| 案 | 採るか | 理由 |
+| --- | --- | --- |
+| Compose Desktop（Kotlin） | 採る | 中核（`core-pipeline`）を同じプロセスでそのまま呼べる。Android と同じ書き方・色の決まりを使える |
+| C++ の GUI（Qt・WinUI 3 など） | 捨てる | 中核が Kotlin なので、判断を C++ に書き直すか、別プロセスとやり取りする必要がある。Qt は LGPL・GPL の条件が付く |
+| Web の画面（Tauri・Electron） | 捨てる | 同じく中核との間に別プロセスのやり取りが要る。Electron は配る大きさとメモリが大きい |
+
+```mermaid
+flowchart TB
+    subgraph 画面["画面（Composable）"]
+        MW["メインウィンドウ<br/>左の切り替え：音声・PDF・テキスト・設定"]
+        SW["字幕ウィンドウ<br/>常に手前・小さく・半透明"]
+    end
+    subgraph 画面の状態["画面ごとの状態（Presenter）"]
+        TP[テキスト翻訳]
+        VP[音声翻訳]
+        PP[PDF翻訳]
+    end
+    subgraph サービス["アプリのサービス（プロセスに1つ）"]
+        MS["モデル<br/>ModelHost＋PC用 EngineLoader"]
+        TE["翻訳の入口<br/>Translations.open 相当"]
+        ST[設定の保存]
+    end
+    subgraph 中核["core-pipeline"]
+        TS[TranslationStream]
+        CS[ConversationSession]
+    end
+    subgraph アダプター
+        LL[翻訳エンジン JNI]
+        AU[音声の取り込み JNI]
+        PD[PDFium JNI]
+    end
+    MW --> TP & VP & PP
+    SW --> VP
+    TP & VP & PP --> TE
+    VP --> CS
+    VP --> AU
+    PP --> PD
+    TE --> TS --> LL
+    MS --> LL
+```
+
+- **画面は状態を描くだけにする**：Composable は Presenter の `StateFlow` を描き、操作を返り値の無い命令として Presenter に渡す。画面の中で判断しない。
+- **Presenter は機能ごとに1つ**：画面の状態を組み立て、命令を中核とサービスに渡す。判断（訳す順番・区切り・どのページを先に訳すか）は中核に置き、単体テストで確かめる。PDF の「どの段落を次に訳すか」も中核の判定として作る（カメラ翻訳の `TranslationPlan` と同じ形）。
+- **サービスはプロセスに1つ**：モデル・翻訳の入口・設定を、起動時に1か所（組み立ての関数）で作り、Presenter に渡す。DI のライブラリは使わない。翻訳エンジンはウィンドウを閉じても作り直さない。
+- **スレッド**：画面は Swing の UI スレッド（`kotlinx-coroutines-swing` の `Dispatchers.Main`）、翻訳・音声・PDF の描画はそれぞれの部品の中のスレッドで動く。
+- **ウィンドウ**：メインウィンドウ1つに機能を並べる。音声翻訳は、動画や会議の画面の上に出す字幕ウィンドウ（常に手前、半透明、位置と大きさを覚える）を持つ。画面翻訳は手順5で、クリックを下のアプリへ通す透明なウィンドウを足す（Compose だけでは通せないので、Win32 の設定を JNI で効かせる）。
+- **PDF の画面**：ページは PDFium で画像に描き、その上に訳を Compose で重ねる。訳の段落にマウスを乗せると、原文の範囲を光らせる（訳と原文の対応）。原文と訳の並べ表示にも切り替えられる。ページの画像は先の数ページ分を描いておく。
+- **Android との共有**：初めは画面を共有しない。色の決まり（`docs/設計/デザイン言語.md`）は PC にも使い、色の値を PC 用のテーマに写す。同じ画面を両方で使いたくなったら、その Composable だけを共有のモジュールへ出す。
+
 ## 技術の選択
 
 | 用途 | 選ぶもの | 理由と捨てた案 |
