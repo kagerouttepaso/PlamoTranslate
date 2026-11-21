@@ -31,6 +31,7 @@ class AudioPresenterTest {
         val engine = FakeTranslationEngine()
         val presenter = AudioPresenter(
             backgroundScope, FakeCapture(), { speech }, engine::open,
+            initialSelection = AudioSelection(partner = Language.EN, partnerSpeaking = false),
             io = StandardTestDispatcher(testScheduler),
         )
         presenter.start()
@@ -100,6 +101,27 @@ class AudioPresenterTest {
         presenter.close()
     }
 
+    @Test
+    fun `マイクの自動判定で相手の言語が決まり自分への訳を作る`() = runTest {
+        val speech = FakeSpeech(detected = "en")
+        val engine = FakeTranslationEngine()
+        val presenter = AudioPresenter(
+            backgroundScope, FakeCapture(), { speech }, engine::open,
+            io = StandardTestDispatcher(testScheduler),
+        )
+        presenter.start()
+        runCurrent()
+        assertEquals(null, speech.languages.specified)
+        presenter.stop()
+        runCurrent()
+        val state = presenter.state.value
+        assertEquals(Language.EN, state.detectedPartner)
+        assertEquals(false, state.cards.single().mine)
+        assertEquals(listOf(Language.EN to Language.JA), engine.directions.distinct())
+        assertTrue(state.canExport)
+        presenter.close()
+    }
+
     private class FakeCapture : AudioCapture {
         var source: AudioSource? = null
         var stopped = false
@@ -116,18 +138,18 @@ class AudioPresenterTest {
         }
     }
 
-    private class FakeSpeech : SpeechEngine {
+    private class FakeSpeech(private val detected: String? = null) : SpeechEngine {
         override var languages = SpeechLanguages.ANY
         override var listener: (SpeechEvent) -> Unit = {}
         override var loadListener: (RecognitionLoad) -> Unit = {}
         private var card = 0L
 
         private fun recognize(final: Boolean): Recognition =
-            if (final) Recognition("A complete sentence.", null) else Recognition("A partial sentence.", null)
+            Recognition(if (final) "A complete sentence." else "A partial sentence.", detected)
 
         override fun accept(samples: FloatArray) {
             listener(SpeechEvent.CardOpened(card))
-            listener(SpeechEvent.CardText(card, recognize(final = false).text, null))
+            listener(SpeechEvent.CardText(card, recognize(final = false).text, detected))
         }
 
         override fun flush() {

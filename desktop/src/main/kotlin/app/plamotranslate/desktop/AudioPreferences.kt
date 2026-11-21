@@ -1,8 +1,8 @@
 package app.plamotranslate.desktop
 
 import app.plamotranslate.llm.Language
-import app.plamotranslate.llm.sameAs
 import app.plamotranslate.log.Logs
+import app.plamotranslate.pipeline.speech.SpeechModel
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
@@ -18,24 +18,41 @@ internal class AudioPreferences(directory: Path) {
     fun loadSelection(): AudioSelection {
         val properties = read(selectionFile)
         val defaults = AudioSelection()
-        val self = properties.language("self")?.takeIf { it in spokenLanguages } ?: defaults.self
-        val partner = properties.language("partner")?.takeIf { it in spokenLanguages && !it.sameAs(self) }
-            ?: defaults.partner.takeUnless { it.sameAs(self) }
-            ?: spokenLanguages.first { !it.sameAs(self) }
-        val from = properties.language("playbackFrom")?.takeIf { it in spokenLanguages } ?: defaults.playbackFrom
-        val to = properties.language("playbackTo")?.takeUnless { it.sameAs(from) }
-            ?: Language.entries.first { !it.sameAs(from) }
-        val source = AudioSource.entries.find { it.name == properties.getProperty("source") } ?: defaults.source
-        return AudioSelection(source, self, partner, from, to)
+        val recognition = defaults.recognition
+        return AudioSelection(
+            source = AudioSource.entries.find { it.name == properties.getProperty("source") } ?: defaults.source,
+            self = properties.language("self") ?: defaults.self,
+            partner = properties.language("partner"),
+            playbackFrom = properties.language("playbackFrom") ?: defaults.playbackFrom,
+            playbackTo = properties.language("playbackTo") ?: defaults.playbackTo,
+            partnerSpeaking = properties.getProperty("partnerSpeaking")?.toBooleanStrictOrNull(),
+            faceToFace = properties.getProperty("faceToFace").toBoolean(),
+            recognition = recognition.copy(
+                model = SpeechModel.entries.find { it.name == properties.getProperty("recognitionModel") } ?: recognition.model,
+                transcribeThreads = properties.getProperty("transcribeThreads")?.toIntOrNull()?.takeIf { it in 0..16 } ?: recognition.transcribeThreads,
+                identifyThreads = properties.getProperty("identifyThreads")?.toIntOrNull()?.takeIf { it in 1..8 } ?: recognition.identifyThreads,
+                cardLanguageSeconds = properties.number("cardLanguageSeconds")?.takeIf { it in 0.3f..3f } ?: recognition.cardLanguageSeconds,
+                vadThreshold = properties.number("vadThreshold")?.takeIf { it in 0.1f..0.9f } ?: recognition.vadThreshold,
+                vadMinSpeechSeconds = properties.number("vadMinSpeechSeconds")?.takeIf { it in 0.05f..1f } ?: recognition.vadMinSpeechSeconds,
+            ),
+        ).validLanguages()
     }
 
     fun saveSelection(selection: AudioSelection) {
         save(selectionFile, Properties().apply {
             setProperty("source", selection.source.name)
             setProperty("self", selection.self.code)
-            setProperty("partner", selection.partner.code)
+            selection.partner?.let { setProperty("partner", it.code) }
             setProperty("playbackFrom", selection.playbackFrom.code)
             setProperty("playbackTo", selection.playbackTo.code)
+            selection.partnerSpeaking?.let { setProperty("partnerSpeaking", it.toString()) }
+            setProperty("faceToFace", selection.faceToFace.toString())
+            setProperty("recognitionModel", selection.recognition.model.name)
+            setProperty("transcribeThreads", selection.recognition.transcribeThreads.toString())
+            setProperty("identifyThreads", selection.recognition.identifyThreads.toString())
+            setProperty("cardLanguageSeconds", selection.recognition.cardLanguageSeconds.toString())
+            setProperty("vadThreshold", selection.recognition.vadThreshold.toString())
+            setProperty("vadMinSpeechSeconds", selection.recognition.vadMinSpeechSeconds.toString())
         })
     }
 

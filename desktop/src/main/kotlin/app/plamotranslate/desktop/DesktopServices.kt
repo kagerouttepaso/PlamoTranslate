@@ -17,6 +17,8 @@ import app.plamotranslate.pipeline.translation.translateOne
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.nio.file.Files
 import java.nio.file.Path
@@ -29,6 +31,12 @@ internal class DesktopSettings(private val directory: Path) {
     private val file = directory.resolve("settings.properties")
     val modelDirectory: Path = directory.resolve("models")
     val defaultModel: Path = DesktopModelCatalog.SMALL.path(modelDirectory)
+    private val selectedTranslationTarget = MutableStateFlow(Language.JA)
+    val translationTarget = selectedTranslationTarget.asStateFlow()
+
+    fun selectTranslationTarget(target: Language) {
+        selectedTranslationTarget.value = target
+    }
 
     @Volatile private var properties = Properties()
     val model: Path get() = properties.getProperty("model")?.let { Path.of(it) } ?: defaultModel

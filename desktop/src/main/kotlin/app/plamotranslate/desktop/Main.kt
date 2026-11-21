@@ -9,6 +9,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import app.plamotranslate.llm.TranslationEngine
+import app.plamotranslate.llm.Language
 import app.plamotranslate.log.LogSink
 import app.plamotranslate.log.Logs
 import app.plamotranslate.pipeline.translation.ModelHost
@@ -18,11 +19,14 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.awt.Dimension
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
+import java.nio.file.Files
 import java.nio.file.Path
 import javax.swing.JFileChooser
+import javax.swing.JOptionPane
 import javax.swing.filechooser.FileNameExtensionFilter
 import kotlin.system.exitProcess
 
@@ -67,12 +71,30 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
     )
     val translations = DesktopTranslations(models)
     val pdfCache = DesktopPdfCache(directory.resolve("cache/pdf-translations/v1"))
+    val text = TextPresenter(scope, models.state, translations) { value ->
+        Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(value), null)
+    }
+    val pdf = PdfPresenter(
+        scope, DesktopPdfReader(scope), { childScope, options -> translations.open(childScope, options, pdfCache) },
+    ) {
+        val chooser = JFileChooser().apply {
+            dialogTitle = "PDF を開く"
+            isAcceptAllFileFilterUsed = false
+            fileFilter = FileNameExtensionFilter("PDF (*.pdf)", "pdf")
+        }
+        if (chooser.showOpenDialog(owner()) == JFileChooser.APPROVE_OPTION) chooser.selectedFile.toPath() else null
+    }
+    scope.launch {
+        settings.translationTarget.collect { target ->
+            if (text.state.value.target != target) text.selectTarget(target)
+            pdf.selectTarget(target)
+        }
+    }
     val audioPreferences = AudioPreferences(directory)
+    val asr = DesktopAsr(directory.resolve("models/asr").toFile())
     return DesktopComponents(
         NavigationPresenter(),
-        TextPresenter(scope, models.state, translations) { text ->
-            Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
-        },
+        text,
         SettingsPresenter(scope, settings, models) { current ->
             val chooser = JFileChooser(current.parent.toFile()).apply {
                 dialogTitle = "翻訳モデルを選ぶ"
@@ -84,21 +106,32 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
             } else null
         },
         AudioPresenter(
-            scope, WindowsAudio, DesktopAsr(directory.resolve("models/asr").toFile())::load, translations::open,
+            scope, WindowsAudio, asr::load, translations::open,
             initialSelection = audioPreferences.loadSelection(), saveSelection = audioPreferences::saveSelection,
+            supportsAutomatic = asr::supportsAutomatic,
+            chooseLog = { filename -> chooseConversationLog(filename, owner()) },
+            copyText = { text -> Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null) },
         ),
-        PdfPresenter(
-            scope, DesktopPdfReader(scope), { childScope, options -> translations.open(childScope, options, pdfCache) },
-        ) {
-            val chooser = JFileChooser().apply {
-                dialogTitle = "PDF を開く"
-                isAcceptAllFileFilterUsed = false
-                fileFilter = FileNameExtensionFilter("PDF (*.pdf)", "pdf")
-            }
-            if (chooser.showOpenDialog(owner()) == JFileChooser.APPROVE_OPTION) chooser.selectedFile.toPath() else null
-        },
+        pdf,
         audioPreferences,
+        settings::selectTranslationTarget,
     )
+}
+
+private fun chooseConversationLog(filename: String, owner: java.awt.Window?): Path? {
+    val chooser = JFileChooser().apply {
+        dialogTitle = "会話の記録を保存"
+        fileFilter = FileNameExtensionFilter("Markdown (*.md)", "md")
+        selectedFile = java.io.File(currentDirectory, filename)
+    }
+    if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION) return null
+    val selected = chooser.selectedFile
+    val path = if (selected.name.endsWith(".md", ignoreCase = true)) selected.toPath()
+        else selected.toPath().resolveSibling("${selected.name}.md")
+    return path.takeIf {
+        !Files.exists(it) || JOptionPane.showConfirmDialog(owner, "${it.fileName} を上書きしますか？",
+            "上書きの確認", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION
+    }
 }
 
 internal class DesktopComponents(
@@ -108,6 +141,7 @@ internal class DesktopComponents(
     val audio: AudioPresenter,
     val pdf: PdfPresenter,
     val audioPreferences: AudioPreferences,
+    val selectTranslationTarget: (Language) -> Unit,
 )
 
 internal enum class Page(val label: String) {

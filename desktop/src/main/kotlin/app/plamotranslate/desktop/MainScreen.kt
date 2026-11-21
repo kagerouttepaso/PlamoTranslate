@@ -59,11 +59,14 @@ internal fun MainScreen(components: DesktopComponents) {
                 when (page) {
                     Page.TEXT -> {
                         val text by components.text.state.collectAsState()
-                        TextScreen(text, components.text) { components.navigation.select(Page.SETTINGS) }
+                        TextScreen(text, components.text, components.selectTranslationTarget) {
+                            components.navigation.select(Page.SETTINGS)
+                        }
                     }
                     Page.SETTINGS -> {
                         val settings by components.settings.state.collectAsState()
-                        SettingsScreen(settings, components.settings)
+                        val audio by components.audio.state.collectAsState()
+                        SettingsScreen(settings, components.settings) { RecognitionSettings(audio, components.audio) }
                     }
                     Page.AUDIO -> {
                         val audio by components.audio.state.collectAsState()
@@ -76,7 +79,7 @@ internal fun MainScreen(components: DesktopComponents) {
                             onDispose { components.pdf.setVisible(false) }
                         }
                         val pdf by components.pdf.state.collectAsState()
-                        PdfScreen(pdf, components.pdf)
+                        PdfScreen(pdf, components.pdf, components.selectTranslationTarget)
                     }
                 }
             }
@@ -85,7 +88,9 @@ internal fun MainScreen(components: DesktopComponents) {
 }
 
 @Composable
-private fun TextScreen(state: TranslationState, presenter: TextPresenter, openSettings: () -> Unit) {
+private fun TextScreen(
+    state: TranslationState, presenter: TextPresenter, selectTarget: (Language) -> Unit, openSettings: () -> Unit,
+) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             ModelSummary(state.modelStatus, Modifier.weight(1f), compact = true)
@@ -93,7 +98,7 @@ private fun TextScreen(state: TranslationState, presenter: TextPresenter, openSe
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             LanguageMenu("原文: ${state.sourceLabel}", listOf(null) + Language.entries, presenter::selectSource)
-            LanguageMenu("訳す先: ${state.target.label}", Language.entries, presenter::selectTarget)
+            LanguageMenu("訳す先: ${state.target.label}", Language.entries, selectTarget)
         }
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             OutlinedTextField(
@@ -148,7 +153,7 @@ internal fun <T : Language?> LanguageMenu(
 }
 
 @Composable
-private fun SettingsScreen(state: SettingsState, presenter: SettingsPresenter) {
+private fun SettingsScreen(state: SettingsState, presenter: SettingsPresenter, recognition: @Composable () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.medium) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
@@ -177,12 +182,13 @@ private fun SettingsScreen(state: SettingsState, presenter: SettingsPresenter) {
             }
             state.tuningStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            recognition()
         }
     }
 }
 
 @Composable
-private fun CountMenu(
+internal fun CountMenu(
     label: String,
     selected: Int?,
     automatic: String,

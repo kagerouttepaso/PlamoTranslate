@@ -57,7 +57,7 @@ import app.plamotranslate.pipeline.pdf.PdfState
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
 @Composable
-internal fun PdfScreen(state: PdfState<PdfPageImage>, presenter: PdfPresenter) {
+internal fun PdfScreen(state: PdfState<PdfPageImage>, presenter: PdfPresenter, selectTarget: (Language) -> Unit) {
     val dropTarget = remember(presenter) {
         object : DragAndDropTarget {
             override fun onDrop(event: DragAndDropEvent): Boolean {
@@ -71,7 +71,7 @@ internal fun PdfScreen(state: PdfState<PdfPageImage>, presenter: PdfPresenter) {
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = presenter::choose) { Text("PDF を開く") }
-            LanguageMenu("訳す先: ${state.target.label}", Language.entries, presenter::selectTarget)
+            LanguageMenu("訳す先: ${state.target.label}", Language.entries, selectTarget)
             OutlinedButton(onClick = presenter::switchView, enabled = state.pageCount > 0) {
                 Text(if (state.sideBySide) "重ねて表示" else "並べて表示")
             }
