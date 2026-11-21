@@ -213,6 +213,10 @@ void log_callback(ggml_log_level level, const char *text, void *) {
                (strstr(text, "ggml_opencl: OpenCL device:") || strstr(text, "ggml_opencl: OpenCL driver:"))) {
         // 端末による失敗の切り分けに必要な識別情報だけを、既存のログ経路へ渡す。
         emit_log(LOG_PRIORITY_INFO, text);
+#if defined(_WIN32)
+    } else if (level == GGML_LOG_LEVEL_INFO && strstr(text, "loaded CPU backend from ")) {
+        emit_log(LOG_PRIORITY_INFO, text);
+#endif
     }
 }
 
