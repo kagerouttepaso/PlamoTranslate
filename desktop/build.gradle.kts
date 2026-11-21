@@ -33,6 +33,8 @@ tasks.withType<JavaExec>().matching { it.name == "run" }.configureEach {
     systemProperty("java.library.path", nativeDir.absolutePath)
     systemProperty("mockingword.native.dir", nativeDir.absolutePath)
     systemProperty("mockingword.cpuOnly", providers.gradleProperty("desktopCpuOnly").getOrElse("false"))
+    // Gradle が UTF-8 で読み取る子プロセスの出力をそろえる。
+    systemProperty("stdout.encoding", "UTF-8")
     systemProperty("stderr.encoding", "UTF-8")
     environment("PATH", nativeDir.absolutePath + File.pathSeparator + System.getenv("PATH").orEmpty())
 }
