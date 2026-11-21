@@ -75,7 +75,8 @@
 | `core-pipeline` | 中核（Kotlin/JVM、Androidに依存しない）。翻訳の契約 `TranslationStream` とコア、画面翻訳の状態遷移 `ScreenSession`・判定器・場面の設定、カメラ翻訳の `CameraSession`、音声の区切り `SpeechSegmenter` と会話の訳す順番 `ConversationSession`、言語の型・PFML3プロンプトの組み立て。単体テストはここで書く |
 | `core-llm` | llama.cppのJNIラッパーと、中核のエンジンのインターフェース（`JobEngine`）の実装 |
 | `core-ocr` | 文字認識のインターフェースと実装（ML Kit、漫画用OCR）、行の選択とブロックの組み立て |
-| `core-asr` | 音声認識の中核のインターフェース（VAD・認識）の実装（sherpa-onnxでSilero VAD・SenseVoice・Qwen3-ASR・Whisper tiny の言語の識別）と組み立て |
+| `core-asr` | Android の音声認識の組み立て、SenseVoice の書き起こし、Whisper tiny の言語の識別 |
+| `core-asr-sherpa` | Silero VAD と Qwen3-ASR の実装（Kotlin/JVM、Android と Windows で共有） |
 | `core-tts` | 読み上げのインターフェースと実装（sherpa-onnxでSupertonic 3、Androidの読み上げエンジン） |
 | `core-log` | ロガー（`Logs`、Kotlin/JVM）。どのモジュールのログもここを通し、出力先（logcat とプロセスごとのファイル）は `app` が渡す。原文・訳などの利用者の文は、「詳しい記録を残す」がオンのとき（デバッグ版の既定はオン、正式版は詳細設定で選ぶ）だけ書く |
 | `third_party/` | git submodule：llama.cpp、OpenCL-Headers、OpenCL-ICD-Loader。`sherpa-onnx/` はAAR（Gitに入れず、`tools/get-sherpa-onnx.ps1` で取得） |

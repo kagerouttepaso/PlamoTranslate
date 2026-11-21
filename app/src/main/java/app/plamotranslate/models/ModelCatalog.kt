@@ -222,7 +222,7 @@ object ModelCatalog {
     /**
      * 音声認識 Qwen3-ASR 0.6B int8 と、言語の識別 Whisper tiny int8（[ModelBundle.QWEN3_ASR]）。sherpa-onnx の配布物
      * （GitHubのリリース `asr-models` の tar と同じファイル）を Hugging Face のコミットで固定して取る。
-     * 置き場と並びの正本は core-asr の `Qwen3Recognizer`・`WhisperLanguageIdentifier`。
+     * 置き場と並びは `Qwen3Recognizer`（core-asr-sherpa）と `WhisperLanguageIdentifier`（core-asr）に従う。
      */
     private const val QWEN3 = "$HF/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a"
     private const val WHISPER = "$HF/csukuangfj/sherpa-onnx-whisper-tiny/resolve/65176e2deb88badc814a94058666cadccc29b61c"

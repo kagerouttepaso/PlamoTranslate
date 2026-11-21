@@ -24,6 +24,7 @@ include(":core-llm-jvm")
 include(":desktop")
 include(":core-ocr")
 include(":core-asr")
+include(":core-asr-sherpa")
 include(":core-tts")
 // 機能テスト用のアプリ（配布しない。docs/資料/端末の能力.md）
 include(":featurelab")
