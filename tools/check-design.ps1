@@ -63,11 +63,12 @@ foreach ($hit in Grep @('-E', '\bSingleRequest\b', '--', '*.kt')) {
 $awaitEngineAllowed = @(
     'app/src/main/java/app/plamotranslate/EngineHolder.kt',                       # 定義
     'app/src/main/java/app/plamotranslate/translation/Translations.kt',           # ストリームの入口
+    'desktop/src/main/kotlin/app/plamotranslate/desktop/DesktopServices.kt',      # PC版のストリームの入口
     'app/src/main/java/app/plamotranslate/EngineBenchmark.kt',                    # 速さの計測
     'app/src/main/java/app/plamotranslate/conversation/ConversationViewModel.kt', # スレッド数を変える口
     'app/src/main/java/app/plamotranslate/screen/ScreenTranslateService.kt'       # DEBUG_CONFIG（デバッグ版のスレッド数）
 )
-foreach ($hit in Grep @('-E', '\bawaitEngine\b', '--', 'app/*.kt')) {
+foreach ($hit in Grep @('-E', '\bawaitEngine\b', '--', 'app/*.kt', 'desktop/*.kt')) {
     $file = ($hit -split ':', 2)[0]
     if (-not ($awaitEngineAllowed | Where-Object { $file -eq $_ })) {
         $errors.Add("翻訳エンジンそのものを受け取っている：$hit")

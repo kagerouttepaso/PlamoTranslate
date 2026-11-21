@@ -205,7 +205,7 @@ foreach ($hit in @(git -C $root -c core.quotepath=false grep -n -I -E $privatePa
 
 # 文書が示す識別子がコードにあるか。部品を説明する文書（設計・現在地・バックログ・要件・CLAUDE.md）の `…` の中の CamelCase・camelCase の語が、
 # コード・スクリプト・設定のどこにも無ければ、名前を変えたか消したのに文書を直していない（設計書がコードから離れた兆候）
-$codeFiles = @(git -C $root -c core.quotepath=false ls-files -- app 'core-*' featurelab tools gradle .githooks .claude '*.kts' 2>$null |
+$codeFiles = @(git -C $root -c core.quotepath=false ls-files -- app 'core-*' featurelab desktop desktop-native tools gradle .githooks .claude '*.kts' 2>$null |
         Where-Object { $_ -match '\.(kt|kts|java|cpp|h|c|xml|py|ps1|toml|pro|txt|json|sh)$|(^|/)pre-commit$' })
 $codeWords = [System.Collections.Generic.HashSet[string]]::new()
 foreach ($rel in $codeFiles) {
