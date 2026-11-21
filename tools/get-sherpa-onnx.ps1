@@ -5,13 +5,14 @@
 .DESCRIPTION
   1. sherpa-onnxのAAR（ONNX Runtimeを静的に組み込んだ版）を third_party/sherpa-onnx/ へ置く。ビルドに要る
   2. -Models を付けると、SenseVoice Small（int8）とSilero VADを models/asr/ へ置く。端末へはadbで送る
+  3. -Windows を付けると、同じ版の Windows x64 JNI と依存 DLL を third_party/sherpa-onnx/ へ展開する
 
   どれもGitに入れない（.gitignore）。版は gradle/libs.versions.toml の sherpa-onnx に合わせる。
 
 .EXAMPLE
   ./tools/get-sherpa-onnx.ps1 -Models
 #>
-param([switch]$Models)
+param([switch]$Models, [switch]$Windows)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -31,6 +32,16 @@ $version = "2.0.1"
 $aar = "sherpa-onnx-static-link-onnxruntime-$version.aar"
 Get-Verified "$base/v$version/$aar" (Join-Path $repo "third_party\sherpa-onnx\$aar") "07E042D97F3A6BD5B7FE74D4EEF0513DC01A714B16C15A903250095ABA43A575"
 "AAR: third_party\sherpa-onnx\$aar"
+
+if ($Windows) {
+    $jni = "sherpa-onnx-v$version-win-x64-jni"
+    $directory = Join-Path $repo "third_party\sherpa-onnx"
+    $archive = Join-Path $directory "$jni.tar.bz2"
+    Get-Verified "$base/v$version/$jni.tar.bz2" $archive "B0A7E63F776ADB5BE2CB90D13DD0246DD05A4DCAECA8B2CBA26F5AE9E3CF6C73"
+    tar.exe -xjf $archive -C $directory
+    if ($LASTEXITCODE -ne 0) { throw "sherpa-onnx の Windows DLL を展開できません: $archive" }
+    "Windows DLL: third_party\sherpa-onnx\$jni\lib"
+}
 
 if ($Models) {
     $asr = Join-Path $repo "models\asr"

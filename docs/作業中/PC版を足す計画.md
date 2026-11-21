@@ -16,6 +16,7 @@ flowchart LR
         CP[core-pipeline]
         CL[core-log]
         LLMK["core-llm の Kotlin 側<br/>JobEngine の実装"]
+        SHERPA["core-asr-sherpa<br/>Silero VAD・Qwen3-ASR"]
     end
     subgraph Android
         APP[app]
@@ -27,7 +28,6 @@ flowchart LR
     subgraph PC["PC（新）"]
         DAPP["desktop<br/>Compose Desktop の画面・ViewModel"]
         DN["desktop-native（C++ JNI）<br/>llama.cpp（Vulkan/CPU）・WASAPI・PDFium"]
-        DASR["desktop の音声認識<br/>sherpa-onnx の JVM 版"]
     end
     APP --> CP
     APP --> LLMA
@@ -35,14 +35,16 @@ flowchart LR
     DAPP --> CP
     DAPP --> LLMK
     DAPP --> DN
-    DAPP --> DASR
+    DAPP --> SHERPA
+    ASR --> SHERPA
+    SHERPA --> CP
     LLMK --> CP
 ```
 
 - **`desktop`（新）**：Compose Multiplatform Desktop のアプリ。画面と ViewModel は、Android の `AndroidViewModel` に依存するので、初めは PC 用に別に持つ。共通にしたくなった画面だけ、状態とコールバックを受ける Composable を共有のモジュールへ出す。
 - **翻訳エンジン**：`core-llm` の `plamo_llm.cpp` と Kotlin の `JobEngine` の実装を、Android と PC で同じものにする。Android 固有の部分（logcat、`APerformanceHint`、OpenCL の設定、`/proc`）は、ビルドの条件で分ける。Kotlin 側を Kotlin/JVM のモジュールに出すかは、手順1で JNI の読み込み方の違いを見て決める。
 - **`desktop-native`（新）**：PC 用の C++ をまとめる。llama.cpp は今の固定版を使い、GPU は Vulkan で始める（CUDA は配る大きさが数百MB増えるので、Vulkan で速さが足りないときだけ比べる）。
-- **音声認識**：中核のインターフェース（`VoiceActivity`・`SpeechRecognizer`）の実装を、sherpa-onnx の JVM 版で置く。PC のリプレイ（`docs/手順/開発環境.md`）で Silero VAD・Qwen3-ASR が Windows で動くことは確かめてある。
+- **音声認識**：中核のインターフェース（`VoiceActivity`・`SpeechRecognizer`）を実装する Silero VAD と Qwen3-ASR は、`core-asr-sherpa`（Kotlin/JVM）で共有する。Windows は PC のリプレイと同じ sherpa-onnx の Kotlin API と Windows x64 JNI を使う。Android の組み立て、SenseVoice、Whisper tiny は `core-asr` に置く。
 - **データの置き場**：モデルと設定は `%LOCALAPPDATA%` の下に置く。
 
 ## GUIの構成
@@ -123,6 +125,7 @@ flowchart TB
 ## 先に確かめること
 
 - **ネイティブのライブラリの衝突**：sherpa-onnx と ONNX Runtime の JVM 版が、同じ名前の `onnxruntime.dll` を持つ。ONNX Runtime の JVM 版は、Whisper の言語の判定と文字認識で要る。手順2では言語を指定して始め、JVM 版を読み込まない。読み込む段になったら、sherpa-onnx を ONNX Runtime を静的に組み込んでビルドする案から試す。
+- **指定した言語の受け渡し**：利用者が発話言語を指定したときは、`SpeechLanguages.specified` を渡してその言語で直接書き起こす。`ConversationSession` も明示された発話者の言語から翻訳方向を決める。言語候補の数と利用者の指定は別に扱う。Android の既存の呼び出しはこれまでと同じ候補と言語判定を使う。
 - **CPU だけの速さ**：`-PdesktopCpuOnly=true` で起動し、Qwen3-ASR と翻訳を同時に回して字幕が遅れ続けないかを測る。自動で選ばれたスレッド数、モデルごとの「速さを調整」の結果、計測に使った「同時に訳す数」を記録する。Vulkan でも同じ条件を記録し、字幕の遅れを比較する。
 - **PDF の読む順**：段組み・縦書き・表で、文字の位置から段落を正しく組めるか。手順3で、作者の読みたい PDF で確かめる。
 - **PDF 翻訳の動作確認に使う資料**：作者が用意した、USB の CAN インターフェース（Kvaser 製）の英語の取扱説明書2冊（20ページと26ページ。どちらも文字を取り出せる PDF で、1冊は独自の符号化の Type1 フォントを使う）。著作物なので Git に入れず、作者の手元に置く。手順3では、この2冊で、開いてから最初のページが出るまで・訳がそろうまでの時間と、表・箇条書き・図の説明の段落の組み方を確かめる。
@@ -155,3 +158,9 @@ flowchart TB
 1. 2つの GGUF を `ModelCatalog.kt` の固定 URL から取得し、`Get-FileHash -Algorithm SHA256` で照合して Git の外に置く。`docs/手順/開発環境.md`「Windows版のビルドと実行」の手順で DLL を1回作る。Vulkan は既定の設定で起動し、CPU は `-PdesktopCpuOnly=true` を付けて起動する。
 2. 「設定」でモデルを選び、使用中のバックエンドを確認する。CPU 用 DLL の版と Vulkan のデバイス名を起動ログから記録する。モデルを読み込むたびに、本計測とは別の文を1回訳して初回の準備を済ませる。Vulkan の欄に記録するのは GPU で実行できた測定に限る。
 3. 原文「明日の朝は雨が降るので傘を持っていこう。」を日本語から英語へ3回訳す。起動した端末の `翻訳完了: … ms（キャッシュ=false）` から依頼から確定までの時間を、`生成: … トークン/秒` から最初の生成トークン以降の速度を採り、条件ごとの中央値を記録する。前者にモデルの読み込み時間は含めない。1件で終わらない場合は生成速度の測定条件を見直す。
+
+## 手順2の実装と確認
+
+- マイクは利用者が発話側を選んで開始し、同じ言語の組で開始し直すと前のカードを残す。再生音は指定した原文言語から一方向に訳す。取り込み、認識、翻訳、字幕ウィンドウの構成は `docs/設計/会話翻訳.md`「Windows 版の音声翻訳」。
+- Vulkan 版に音声取り込み用の JNI を追加して Visual Studio 2026 でビルドし、`:desktop:run` のウィンドウが開くことを確認した。Windows の実モデルで別プロセスから英語の合成音声を再生し、書き起こし、日本語の確定訳、字幕用の原文と訳の組を確認した。マイクは開始・停止と PCM の受信を確認した。マイクへの発話と字幕ウィンドウの復元の確認は `docs/バックログ.md` に残す。
+- Windows のシステム DLL と sherpa-onnx の ONNX Runtime の衝突は、配布物の DLL を絶対パスで先に読み込んで解消した。別プロセスの Qwen3-ASR 録音リプレイと、中核・共有認識・Presenter の単体試験が通る。音声翻訳の性能は未計測。

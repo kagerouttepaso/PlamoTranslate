@@ -34,3 +34,8 @@ add_library(plamo-llm SHARED "${REPO_ROOT}/core-llm/src/main/cpp/plamo_llm.cpp")
 target_include_directories(plamo-llm PRIVATE ${JNI_INCLUDE_DIRS})
 target_compile_options(plamo-llm PRIVATE /utf-8)
 target_link_libraries(plamo-llm PRIVATE llama ggml)
+
+add_library(mockingword-audio SHARED wasapi_capture.cpp)
+target_include_directories(mockingword-audio PRIVATE ${JNI_INCLUDE_DIRS})
+target_compile_options(mockingword-audio PRIVATE /utf-8)
+target_link_libraries(mockingword-audio PRIVATE mmdevapi ole32)

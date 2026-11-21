@@ -1,6 +1,8 @@
 package app.plamotranslate.desktop
 
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -27,23 +29,30 @@ import kotlin.system.exitProcess
 fun main() {
     application {
         val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
+        val owner = remember { java.util.concurrent.atomic.AtomicReference<java.awt.Window>() }
+        val components = remember { assemble(scope) { owner.get() } }
+        val audio by components.audio.state.collectAsState()
         Window(
             onCloseRequest = {
+                components.audio.close()
                 scope.cancel()
                 exitApplication()
             },
             state = rememberWindowState(width = 1080.dp, height = 700.dp),
             title = "Mockingword",
         ) {
-            LaunchedEffect(window) { window.minimumSize = Dimension(760, 480) }
-            val components = remember(window) { assemble(scope, window) }
+            LaunchedEffect(window) {
+                owner.set(window)
+                window.minimumSize = Dimension(760, 480)
+            }
             DesktopTheme { MainScreen(components) }
         }
+        SubtitleWindow(audio, components.audioPreferences) { components.audio.showSubtitle(false) }
     }
     exitProcess(0)
 }
 
-private fun assemble(scope: CoroutineScope, owner: java.awt.Window): DesktopComponents {
+private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): DesktopComponents {
     Logs.install(listOf(LogSink { level, tag, message, error ->
         System.err.println("$tag $level: $message")
         error?.printStackTrace(System.err)
@@ -57,6 +66,7 @@ private fun assemble(scope: CoroutineScope, owner: java.awt.Window): DesktopComp
         { TranslationEngine.DEFAULT_PARALLEL },
     )
     val translations = DesktopTranslations(models)
+    val audioPreferences = AudioPreferences(directory)
     return DesktopComponents(
         NavigationPresenter(),
         TextPresenter(scope, models.state, translations) { text ->
@@ -68,10 +78,15 @@ private fun assemble(scope: CoroutineScope, owner: java.awt.Window): DesktopComp
                 isAcceptAllFileFilterUsed = false
                 fileFilter = FileNameExtensionFilter("GGUF モデル (*.gguf)", "gguf")
             }
-            if (chooser.showOpenDialog(owner) == JFileChooser.APPROVE_OPTION) {
+            if (chooser.showOpenDialog(owner()) == JFileChooser.APPROVE_OPTION) {
                 chooser.selectedFile.toPath().toAbsolutePath().normalize()
             } else null
         },
+        AudioPresenter(
+            scope, WindowsAudio, DesktopAsr(directory.resolve("models/asr").toFile())::load, translations::open,
+            initialSelection = audioPreferences.loadSelection(), saveSelection = audioPreferences::saveSelection,
+        ),
+        audioPreferences,
     )
 }
 
@@ -79,6 +94,8 @@ internal class DesktopComponents(
     val navigation: NavigationPresenter,
     val text: TextPresenter,
     val settings: SettingsPresenter,
+    val audio: AudioPresenter,
+    val audioPreferences: AudioPreferences,
 )
 
 internal enum class Page(val label: String) {

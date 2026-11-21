@@ -64,7 +64,12 @@ internal fun MainScreen(components: DesktopComponents) {
                         val settings by components.settings.state.collectAsState()
                         SettingsScreen(settings, components.settings)
                     }
-                    Page.AUDIO, Page.PDF -> Text("準備中")
+                    Page.AUDIO -> {
+                        val audio by components.audio.state.collectAsState()
+                        val settings by components.settings.state.collectAsState()
+                        AudioScreen(audio, settings.modelStatus, components.audio) { components.navigation.select(Page.SETTINGS) }
+                    }
+                    Page.PDF -> Text("準備中")
                 }
             }
         }
@@ -113,13 +118,19 @@ private fun TextScreen(state: TranslationState, presenter: TextPresenter, openSe
 }
 
 @Composable
-private fun <T : Language?> LanguageMenu(label: String, options: List<T>, select: (T) -> Unit) {
+internal fun <T : Language?> LanguageMenu(
+    label: String,
+    options: List<T>,
+    select: (T) -> Unit,
+    enabled: Boolean = true,
+    optionLabel: (T) -> String = { it?.label ?: "自動" },
+) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        OutlinedButton(onClick = { expanded = true }) { Text(label) }
+        OutlinedButton(onClick = { expanded = true }, enabled = enabled) { Text(label) }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 320.dp)) {
             options.forEach { item ->
-                DropdownMenuItem(text = { Text(item?.label ?: "自動") }, onClick = {
+                DropdownMenuItem(text = { Text(optionLabel(item)) }, onClick = {
                     expanded = false
                     select(item)
                 })
@@ -192,7 +203,7 @@ private fun CountMenu(
 }
 
 @Composable
-private fun ModelSummary(status: ModelStatus, modifier: Modifier = Modifier, compact: Boolean = false) {
+internal fun ModelSummary(status: ModelStatus, modifier: Modifier = Modifier, compact: Boolean = false) {
     Column(modifier) {
         Text(status.label, color = if (status.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
         status.detail?.let {
