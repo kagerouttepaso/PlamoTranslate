@@ -20,7 +20,7 @@ internal data class TranslationState(
     val model: ModelState<Path> = ModelState.Loading,
     val input: String = "",
     val source: Language? = null,
-    val target: Language = Language.EN,
+    val target: Language = Language.JA,
     val output: String = "",
     val translating: Boolean = false,
     val error: String? = null,
