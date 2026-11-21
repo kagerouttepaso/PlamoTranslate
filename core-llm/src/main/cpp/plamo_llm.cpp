@@ -216,6 +216,8 @@ void log_callback(ggml_log_level level, const char *text, void *) {
 #if defined(_WIN32)
     } else if (level == GGML_LOG_LEVEL_INFO && strstr(text, "loaded CPU backend from ")) {
         emit_log(LOG_PRIORITY_INFO, text);
+    } else if (level == GGML_LOG_LEVEL_INFO && strstr(text, "using device Vulkan")) {
+        emit_log(LOG_PRIORITY_INFO, text);
 #endif
     }
 }

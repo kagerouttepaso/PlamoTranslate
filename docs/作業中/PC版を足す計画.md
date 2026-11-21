@@ -114,7 +114,7 @@ flowchart TB
 
 区切りは「PCに入れて触れる版」。各手順の終わりで、作者の PC（`docs/要件.md`「PC版」）で触って確かめる。
 
-1. **土台とテキスト翻訳**：`desktop` を作り、llama.cpp を PC 向けにビルドして、入力欄に入れた文を訳す。CPU で通してから Vulkan を足し、0.8B と 2B の速さを測る。テキスト翻訳は、土台を端から端まで通すための最小の画面として作る。
+1. **土台とテキスト翻訳**：`desktop` を作り、llama.cpp を PC 向けにビルドして、入力欄に入れた文を訳す。CPU と Vulkan のバックエンドを同じビルドに入れる。テキスト翻訳は、土台を端から端まで通すための最小の画面として作る。
 2. **音声翻訳**：マイクと再生音を取り込み、書き起こしと訳を出し続ける。マイクは `ConversationSession` をそのまま使う。再生音は相手の言語を指定した一方向の字幕として始め、字幕の画面を作る。読み上げは、ここで速さを測ってから入れるかを決める。
 3. **PDF翻訳**：PDFium でページを描き、文字の位置から段落を組み、見ているページから訳して重ねる。訳は翻訳のストリームで並べて訳し、次のページを先に訳しておく。訳は永続のキャッシュ（`PersistentCache`）に残し、開き直したときに訳し直さない。
 4. **テキスト翻訳の仕上げ**：Android 版のテキスト翻訳の機能（言語の選択・読み上げ・コピー）をそろえる。モデルのダウンロードとアプリの更新の確認を PC に移す。
@@ -137,13 +137,13 @@ flowchart TB
 
 - `core-llm` は Android の JNI ビルドと難読化設定を持つ。Kotlin の `TranslationEngine`・`LlamaNative` は `core-llm-jvm` に移し、元のパッケージとクラス名を保った。同じ JNI 名で両 OS から呼べ、Android 側も推論の契約を Android SDK なしで試験できる。`core-pipeline`・`core-log` に PC 版の分岐は入れない。
 - `desktop-native` は独立した CMake プロジェクトにした。Android の Gradle ビルドに PC 用の C++ ツールを要求せず、`desktop` の起動にはビルド済みの DLL だけを渡せる。
-- Visual Studio Community 2026（18.12.1）、CMake 3.31.6、Ninja で Windows x64 の CPU 版をビルドした。JDK 21 で起動し、CPU バックエンドの読み込み、空の GGUF の拒否、ウィンドウを閉じた後の正常終了を確かめた。実モデルの翻訳は未確認。Vulkan 版のビルドと確認は未実施。
+- Visual Studio Community 2026（18.12.1）、CMake 3.31.6、Ninja で CPU 向け DLL 9種と Vulkan 向け DLL を同時にビルドした。Core i3-12100 で `ggml-cpu-alderlake.dll` が選ばれ、Vulkan0 は NVIDIA GeForce RTX 4060 として認識された。`:desktop:run` の検証用エントリーポイントから 0.8B を Vulkan で読み込み、製品のテキスト翻訳処理で英語1文を日本語に訳せた。
 - `desktop` の偽エンジンで、途中訳から確定訳への更新、コピー、取り消し、モデル未配置時の状態を確かめた。`core-llm-jvm` と `core-pipeline` の単体試験も通過した。
 - Android 用の CMake は変更していない。共有 JNI の差分では、Android で有効な行がログ定数、性能ヒントの有無、ファイル名抽出の等価な書き換えを除き従来と同じであることを確かめた。Android APK のビルドは未実施。`docs/手順/開発環境.md` の Android 開発環境で `.\gradlew.bat :app:assembleDebug` を実行して確かめる。
 
 ### PCの翻訳速度（未計測）
 
-測定条件は Windows 11 x64、Core i3-12100、RTX 4060、メモリ 32 GB。同じ llama.cpp と Q4_K_M の GGUF で CPU と Vulkan を比較する。
+音声翻訳と PDF 翻訳を実装した状態で、CPU と Vulkan を比較する。測定条件は Windows 11 x64、Core i3-12100、RTX 4060、メモリ 32 GB。同じ llama.cpp と Q4_K_M の GGUF を使う。
 
 | モデル | バックエンド | 翻訳完了（ms） | 生成速度（token/s） |
 | --- | --- | --- | --- |
@@ -152,6 +152,6 @@ flowchart TB
 | 2B | CPU | 未計測 | 未計測 |
 | 2B | Vulkan | 未計測 | 未計測 |
 
-1. 2つの GGUF を `ModelCatalog.kt` の固定 URL から取得し、`Get-FileHash -Algorithm SHA256` で照合して Git の外に置く。ビルドと起動は `docs/手順/開発環境.md`「Windows版のビルドと実行」に従い、CPU 版で測ってから Vulkan を有効にする。CPU の命令セット設定 `MOCKINGWORD_AVX2` は両方でそろえ、測定条件に記録する。
-2. 「設定」でモデルを選び、使用中のバックエンドを確認する。モデルを読み込むたびに、本計測とは別の文を1回訳して初回の準備を済ませる。Vulkan を選んでも CPU に戻った場合は、Vulkan の測定値にはしない。
+1. 2つの GGUF を `ModelCatalog.kt` の固定 URL から取得し、`Get-FileHash -Algorithm SHA256` で照合して Git の外に置く。`docs/手順/開発環境.md`「Windows版のビルドと実行」の手順で DLL を1回作る。Vulkan は既定の設定で起動し、CPU は `-PdesktopCpuOnly=true` を付けて起動する。
+2. 「設定」でモデルを選び、使用中のバックエンドを確認する。CPU 用 DLL の版と Vulkan のデバイス名を起動ログから記録する。モデルを読み込むたびに、本計測とは別の文を1回訳して初回の準備を済ませる。Vulkan の欄に記録するのは GPU で実行できた測定に限る。
 3. 原文「明日の朝は雨が降るので傘を持っていこう。」を日本語から英語へ3回訳す。起動した端末の `翻訳完了: … ms（キャッシュ=false）` から依頼から確定までの時間を、`生成: … トークン/秒` から最初の生成トークン以降の速度を採り、条件ごとの中央値を記録する。前者にモデルの読み込み時間は含めない。1件で終わらない場合は生成速度の測定条件を見直す。
