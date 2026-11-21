@@ -66,6 +66,7 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
         { TranslationEngine.DEFAULT_PARALLEL },
     )
     val translations = DesktopTranslations(models)
+    val pdfCache = DesktopPdfCache(directory.resolve("cache/pdf-translations/v1"))
     val audioPreferences = AudioPreferences(directory)
     return DesktopComponents(
         NavigationPresenter(),
@@ -86,6 +87,16 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
             scope, WindowsAudio, DesktopAsr(directory.resolve("models/asr").toFile())::load, translations::open,
             initialSelection = audioPreferences.loadSelection(), saveSelection = audioPreferences::saveSelection,
         ),
+        PdfPresenter(
+            scope, DesktopPdfReader(scope), { childScope, options -> translations.open(childScope, options, pdfCache) },
+        ) {
+            val chooser = JFileChooser().apply {
+                dialogTitle = "PDF を開く"
+                isAcceptAllFileFilterUsed = false
+                fileFilter = FileNameExtensionFilter("PDF (*.pdf)", "pdf")
+            }
+            if (chooser.showOpenDialog(owner()) == JFileChooser.APPROVE_OPTION) chooser.selectedFile.toPath() else null
+        },
         audioPreferences,
     )
 }
@@ -95,6 +106,7 @@ internal class DesktopComponents(
     val text: TextPresenter,
     val settings: SettingsPresenter,
     val audio: AudioPresenter,
+    val pdf: PdfPresenter,
     val audioPreferences: AudioPreferences,
 )
 

@@ -23,6 +23,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,7 +70,14 @@ internal fun MainScreen(components: DesktopComponents) {
                         val settings by components.settings.state.collectAsState()
                         AudioScreen(audio, settings.modelStatus, components.audio) { components.navigation.select(Page.SETTINGS) }
                     }
-                    Page.PDF -> Text("準備中")
+                    Page.PDF -> {
+                        DisposableEffect(components.pdf) {
+                            components.pdf.setVisible(true)
+                            onDispose { components.pdf.setVisible(false) }
+                        }
+                        val pdf by components.pdf.state.collectAsState()
+                        PdfScreen(pdf, components.pdf)
+                    }
                 }
             }
         }
