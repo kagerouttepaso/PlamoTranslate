@@ -37,11 +37,7 @@ android {
 }
 
 dependencies {
-    // 中核（言語の型・翻訳の依頼・プロンプト・エンジンのインターフェース）。app からも見えるよう api にする
-    api(project(":core-pipeline"))
-    implementation(project(":core-log"))
-    implementation(libs.kotlinx.coroutines.android)
-    testImplementation(libs.junit)
+    api(project(":core-llm-jvm"))
 }
 
 // JDK 21で動かし、Java 17相当のバイトコードを出す（JDK 17は入れていない）

@@ -20,6 +20,7 @@ include(":core-pipeline")
 // ロガー：どのモジュールのログもここを通す（docs/設計/アーキテクチャ.md「ログ」）
 include(":core-log")
 include(":core-llm")
+include(":core-llm-jvm")
 include(":core-ocr")
 include(":core-asr")
 include(":core-tts")

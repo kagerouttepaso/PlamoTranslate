@@ -9,7 +9,7 @@
     - 中核（core-pipeline）が Android や端末の部品に依存する
     - SingleRequest（翻訳の契約を通らずにエンジンを使う）を、許した場所の外で使う
     - 翻訳エンジンそのもの（EngineHolder.awaitEngine）を、許した場所の外で受け取る
-    - llama.cpp の JNI（LlamaNative）を core-llm の外で使う
+    - llama.cpp の JNI（LlamaNative）を core-llm-jvm の外で使う
     - ロガー（core-log の Logs）を通さずに logcat へ書く
     - モジュールが、docs/設計/アーキテクチャ.md「層とモジュール」の表に無いモジュールに依存する
   注意（終了コードは変えない）：構造を見直す兆候
@@ -74,9 +74,9 @@ foreach ($hit in Grep @('-E', '\bawaitEngine\b', '--', 'app/*.kt')) {
     }
 }
 
-# 約束3：llama.cpp の JNI は core-llm の中だけ
-foreach ($hit in Grep @('-E', '\bLlamaNative\b', '--', '*.kt', ':(exclude)core-llm')) {
-    $errors.Add("core-llm の外で JNI を使っている：$hit")
+# 約束3：llama.cpp の JNI は core-llm-jvm の中だけ
+foreach ($hit in Grep @('-E', '\bLlamaNative\b', '--', '*.kt', ':(exclude)core-llm-jvm')) {
+    $errors.Add("core-llm-jvm の外で JNI を使っている：$hit")
 }
 
 # 約束4：ログはすべてロガー（core-log の Logs）を通す。logcat へ直接書いてよいのは、出力先の実装とネイティブのフォールバックだけ
