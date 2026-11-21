@@ -38,6 +38,30 @@ class ConversationSessionTest {
     private val ConversationSession.live: LiveSpeech? get() = listeningCards.lastOrNull { it.open }
 
     @Test
+    fun 途中と確定は認識器の言語より指定した発話者の言語を使う() {
+        val session = ConversationSession(PartnerMode.ENGLISH)
+        session.speak()
+        val draft = session.handle(partial("123").copy(specifiedLanguage = Language.EN))
+            .filterIsInstance<Effect.TranslatePartial>().single()
+        assertEquals(Language.EN, draft.source)
+        assertEquals(Language.JA, draft.target)
+        val done = session.handle(final("123", id = card).copy(specifiedLanguage = Language.EN))
+            .filterIsInstance<Effect.TranslateFinal>().single()
+        assertEquals(Direction(Language.EN, Language.JA, mine = false), done.turn.direction)
+    }
+
+    @Test
+    fun 自動で相手が未定なら指定された言語で相手を確定する() {
+        val session = ConversationSession()
+        session.speak()
+        session.handle(partial("123").copy(specifiedLanguage = Language.EN))
+        assertFalse(session.partnerFound)
+        session.handle(final("123", id = card).copy(specifiedLanguage = Language.EN))
+        assertTrue(session.partnerFound)
+        assertEquals(Language.EN, session.partner)
+    }
+
+    @Test
     fun 確定訳は話した順に1件ずつ渡す() {
         val s = ConversationSession(PartnerMode.KOREAN)
         val first = s.handle(final("こんにちは")).filterIsInstance<Effect.TranslateFinal>()

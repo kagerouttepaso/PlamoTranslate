@@ -114,7 +114,12 @@ class LanguageRouter(
         get() = SpeechLanguages(conversation.mapTo(HashSet()) { speechGroup(it) }, separateChinese = chinese, primary = speechGroup(self))
 
     /** 確定した発話の方向を決める。自動で相手不明なら、相手の発話の言語を相手にする。 */
-    fun route(text: String, langCode: String?): Direction = preview(text, langCode).also {
+    fun route(text: String, langCode: String?): Direction = confirm(preview(text, langCode))
+
+    /** 明示された発話者の言語で確定する。 */
+    internal fun routeChosen(language: Language): Direction = confirm(chosen(language))
+
+    private fun confirm(direction: Direction): Direction = direction.also {
         if (mode.auto && found == null && !it.mine) found = it.source
     }
 

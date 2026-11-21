@@ -72,6 +72,39 @@ class SpeechSegmenterTest {
 
     private val profile = SegmentationProfile.CONVERSATION
 
+    @Test
+    fun 指定された言語は識別を待たずに途中と確定を書き起こす() {
+        val requested = mutableListOf<String?>()
+        val recognizer = object : SpeechRecognizer {
+            override fun recognize(samples: FloatArray): Recognition = error("識別せずに言語を指定する")
+            override fun recognizeAs(samples: FloatArray, language: String?): Recognition {
+                requested += language
+                return Recognition("A sample speech.", null)
+            }
+            override fun close() = Unit
+        }
+        val speech = Harness(recognizer, profile, heavy = true, languages = SpeechLanguages(specified = "en"))
+        repeat(30) { speech.accept(FloatArray(FRAME) { Sound.EN.value }) }
+        assertTrue(speech.events.filterIsInstance<SpeechEvent.CardText>().any { it.text.isNotEmpty() && it.lang == "en" })
+        speech.flush()
+        assertEquals("en", speech.events.filterIsInstance<SpeechEvent.CardFinished>().single().utterance?.lang)
+        assertTrue(requested.size >= 2)
+        assertTrue(requested.all { it == "en" })
+        assertTrue(speech.languagePurposes.isEmpty())
+    }
+
+    @Test
+    fun 候補が中国語の一組でも利用者の指定が無ければ識別する() {
+        val speech = Harness(
+            FakeRecognizer(::soundOf), profile, heavy = false,
+            languages = SpeechLanguages(setOf("zh"), separateChinese = true, primary = "zh"),
+        )
+        repeat(30) { speech.accept(FloatArray(FRAME) { Sound.ZH.value }) }
+        speech.flush()
+        assertTrue(speech.languagePurposes.isNotEmpty())
+        assertEquals("zh", speech.events.filterIsInstance<SpeechEvent.CardFinished>().single().utterance?.lang)
+    }
+
     /**
      * 区切りと、認識のワーカーの代わり。ジョブは待ち行列（[RecognitionQueue]）から取ってその場で処理し（言語の判定を先に）、
      * 書き起こしの結果は [latencyChunks] 個の音声（0.1秒ずつ）を渡した後に返す（0ならその場で返す）。言語の判定は速いので、

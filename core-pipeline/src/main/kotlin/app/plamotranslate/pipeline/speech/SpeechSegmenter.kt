@@ -129,7 +129,7 @@ class SpeechSegmenter(
     )
 
     /** カード。[start] は聞き始めからの位置。 */
-    private class Card(val id: Long, val start: Long, minTurn: Long) {
+    private class Card(val id: Long, val start: Long, minTurn: Long, val fixedLanguage: String?) {
         /** 文の書き起こしと途中結果。 */
         val text = CardTranscript(start)
         var closing: Closing? = null
@@ -302,10 +302,11 @@ class SpeechSegmenter(
         lastPartialStart = 0
     }
 
-    private fun openCard(): Card = Card(nextCard++, bufferStart, minTurnSamples).also {
+    private fun openCard(): Card = Card(nextCard++, bufferStart, minTurnSamples, languages.specified).also {
         events.opened(it.id)
         open = it
         emit(SpeechEvent.CardOpened(it.id))
+        it.fixedLanguage?.let { lang -> setCardLang(it, lang, sure = true) }
     }
 
     /** 決められない音声に使う言語：カードの言語、前の話し手、自分の言語の順。 */
@@ -318,9 +319,9 @@ class SpeechSegmenter(
     private fun phraseEnded(card: Card, end: Int, lang: String? = null) {
         val from = stitchedEnd(card)
         if (end - from < MIN_PARTIAL_SAMPLES) return
-        val phrase = Phrase(abs(from), abs(end), lang, capture(from, end))
+        val phrase = Phrase(abs(from), abs(end), lang ?: card.fixedLanguage, capture(from, end))
         card.text.add(phrase)
-        if (lang != null) {
+        if (phrase.lang != null) {
             transcribePhrase(card, phrase, null)
             return
         }
@@ -378,6 +379,7 @@ class SpeechSegmenter(
      * 話し始めから長く話してもカードの言語が決まらなければ、前の話し手の言語を仮に使う（決まらないと途中結果を出せない）。
      */
     private fun watchLanguage(card: Card) {
+        if (card.fixedLanguage != null) return
         if (buffer.size < speechStart + cardLangSamples) return
         if (card.watchPending || card.seamPending) return
         handoff.provisional(card.track, buffer.size - speechStart, languages)?.let { setCardLang(card, it, sure = false) }

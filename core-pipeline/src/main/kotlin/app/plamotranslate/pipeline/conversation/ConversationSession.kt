@@ -98,7 +98,8 @@ class ConversationSession(
 ) {
     sealed interface Event {
         /** 音声認識の出来事。 */
-        data class Speech(val event: SpeechEvent) : Event
+        /** 利用者が発話者の言語を指定した場合は、その言語で翻訳方向を決める。 */
+        data class Speech(val event: SpeechEvent, val specifiedLanguage: Language? = null) : Event
 
         /** 確定訳の途中（トークンごと）。 */
         data class FinalProgress(val turnId: Long, val text: String) : Event
@@ -238,7 +239,7 @@ class ConversationSession(
     fun handle(event: Event): List<Effect> {
         val effects = mutableListOf<Effect>()
         when (event) {
-            is Event.Speech -> onSpeech(event.event, effects)
+            is Event.Speech -> onSpeech(event.event, event.specifiedLanguage, effects)
             is Event.FinalProgress -> if (!isStaleFinal(event.turnId)) updateTurn(event.turnId) { it.copy(translation = event.text) }
             is Event.FinalDone -> {
                 if (!isStaleFinal(event.turnId)) updateTurn(event.turnId) {
@@ -287,20 +288,20 @@ class ConversationSession(
         return effects
     }
 
-    private fun onSpeech(event: SpeechEvent, effects: MutableList<Effect>) {
+    private fun onSpeech(event: SpeechEvent, specifiedLanguage: Language?, effects: MutableList<Effect>) {
         when (event) {
             // 止めた後に開いたカードも、止める前に渡した音声のものなので、確定まで出す
             is SpeechEvent.CardOpened -> if (phase != Phase.IDLE) {
                 listeningCards = listeningCards + LiveSpeech(event.card, "", null, startedAtMs = clock())
             }
-            is SpeechEvent.CardText -> onCardText(event)
+            is SpeechEvent.CardText -> onCardText(event, specifiedLanguage)
             is SpeechEvent.CardClosed -> updateCard(event.card) { it.copy(open = false) }
             is SpeechEvent.CardFinished -> {
                 listeningCards = listeningCards.filterNot { it.card == event.card }
                 event.utterance?.let { utterance ->
                     // 確定訳を優先する：途中訳は止める
                     partialRunning?.let { effects += Effect.CancelPartial(it.id) }
-                    onUtterance(utterance)
+                    onUtterance(utterance, specifiedLanguage)
                 }
             }
             // 止めて、話していた分を確定し終えた
@@ -316,10 +317,10 @@ class ConversationSession(
      * 文字の無い途中結果は言語の知らせ（カードの向きだけ決める）で、訳すものは無い。相手不明の自分の発話は訳さない。
      * 止めた後に届いた途中の文字は出さない（話していた分は確定で出る）。
      */
-    private fun onCardText(event: SpeechEvent.CardText) {
+    private fun onCardText(event: SpeechEvent.CardText, specifiedLanguage: Language?) {
         if (phase != Phase.LISTENING) return
         val card = listeningCards.firstOrNull { it.card == event.card && it.open } ?: return
-        val direction = router.preview(event.text, event.lang)
+        val direction = specifiedLanguage?.let(router::chosen) ?: router.preview(event.text, event.lang)
         val keep = card.translation.takeIf { card.direction == direction }.orEmpty()
         updateCard(event.card) { it.copy(text = event.text, direction = direction, translation = keep) }
         val target = direction.target
@@ -339,8 +340,8 @@ class ConversationSession(
         listeningCards = listeningCards.map { if (it.card == card) change(it) else it }
     }
 
-    private fun onUtterance(utterance: Utterance) {
-        val direction = router.route(utterance.text, utterance.lang)
+    private fun onUtterance(utterance: Utterance, specifiedLanguage: Language?) {
+        val direction = specifiedLanguage?.let(router::routeChosen) ?: router.route(utterance.text, utterance.lang)
         val turn = Turn(
             id = nextTurnId++,
             direction = direction,

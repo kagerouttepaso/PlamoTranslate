@@ -9,7 +9,7 @@ class RecognitionRunner(private val recognizer: SpeechRecognizer) {
     fun run(job: RecognitionJob): RecognitionOutput = when (job) {
         is RecognitionJob.Transcribe -> RecognitionOutput.Transcribed(
             // 話し手の言語が分かっていれば、識別を省いてその言語として書き起こす
-            if (job.language != null && recognizer.identifies) {
+            if (job.language != null && (recognizer.identifies || job.languages.specified != null)) {
                 recognizer.recognizeAs(job.samples, job.language)
             } else {
                 recognizer.recognize(job.samples, job.languages, job.fallback)

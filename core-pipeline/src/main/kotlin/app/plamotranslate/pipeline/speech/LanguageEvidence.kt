@@ -4,9 +4,15 @@ package app.plamotranslate.pipeline.speech
  * 会話の言語（話し手の交代の根拠に使う言語）。[groups] は [LanguageEvidence.group] の組（"ja"・"ko"・"en"・"zh"）で、
  * null なら言語を絞らない。[separateChinese] は、中国語・広東語を日本語と別の言語として扱うか（自分か相手が中国語のとき）。
  * [primary] は、言語の手がかりが何も無いときに使う言語（会話翻訳では自分の言語の組）。言語を指定せずに書き起こすと、
- * 会話に無い言語（タイ語など）の文を作り出すことがあるため。
+ * 会話に無い言語（タイ語など）の文を作り出すことがあるため。[specified] は利用者が指定した発話の言語。
+ * 指定された場合は音声から識別せず、その言語で書き起こす。
  */
-data class SpeechLanguages(val groups: Set<String>? = null, val separateChinese: Boolean = false, val primary: String? = null) {
+data class SpeechLanguages(
+    val groups: Set<String>? = null,
+    val separateChinese: Boolean = false,
+    val primary: String? = null,
+    val specified: String? = null,
+) {
     companion object {
         val ANY = SpeechLanguages()
     }
