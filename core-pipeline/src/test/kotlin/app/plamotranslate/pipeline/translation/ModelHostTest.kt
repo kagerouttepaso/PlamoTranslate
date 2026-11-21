@@ -30,6 +30,8 @@ class ModelHostTest {
         var gate: CompletableDeferred<Unit>? = null
         val missingModels = mutableSetOf<String>()
         val failingModels = mutableSetOf<String>()
+        val gpuModels = mutableSetOf<String>()
+        val preferredParallels = mutableMapOf<Pair<String, Boolean>, Int>()
 
         override fun missing(model: String) = if (model in missingModels) "/models/$model" else null
 
@@ -41,7 +43,10 @@ class ModelHostTest {
             return FakeEngine(model).also { it.parallel = parallel; engines += it }
         }
 
-        override fun usesGpu(engine: FakeEngine) = false
+        override fun usesGpu(engine: FakeEngine) = engine.model in gpuModels
+
+        override fun preferredParallel(model: String, gpu: Boolean, default: Int) = preferredParallels[model to gpu] ?: default
+
         override fun setParallel(engine: FakeEngine, parallel: Int) {
             engine.parallel = parallel
         }
@@ -60,6 +65,23 @@ class ModelHostTest {
     private fun TestScope.host() = ModelHost(this, loader, { selected }, { parallel })
 
     private fun ModelHost<String, FakeEngine>.ready() = state.value as ModelState.Ready<String>
+
+    @Test
+    fun `読み込み後に実行先に合う保存済みの並列数を使う`() = runTest {
+        val host = host()
+        loader.preferredParallels["small" to false] = 2
+        loader.preferredParallels["small" to true] = 8
+        host.ensureLoaded()
+        runCurrent()
+        assertEquals(2, host.ready().parallel)
+        assertEquals(2, loader.engines.last().parallel)
+
+        loader.gpuModels += "small"
+        host.reload()
+        runCurrent()
+        assertEquals(8, host.ready().parallel)
+        assertEquals(8, loader.engines.last().parallel)
+    }
 
     @Test
     fun `同じモデルを選んでも読み直さず、別のモデルは前のエンジンを閉じてから読む`() = runTest {

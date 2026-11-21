@@ -476,6 +476,31 @@ Java_app_plamotranslate_llm_LlamaNative_nativeCpuBackend(JNIEnv *env, jobject) {
     return env->NewStringUTF(g_cpu_backend.c_str());
 }
 
+#if defined(_WIN32)
+extern "C" JNIEXPORT jintArray JNICALL
+Java_app_plamotranslate_llm_LlamaNative_nativeWindowsCoreClasses(JNIEnv *env, jobject) {
+    DWORD size = 0;
+    GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &size);
+    if (size == 0) return nullptr;
+
+    std::vector<unsigned char> buffer(size);
+    auto *info = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *>(buffer.data());
+    if (!GetLogicalProcessorInformationEx(RelationProcessorCore, info, &size)) return nullptr;
+
+    // レコードは物理コアごとに1つ。GroupMask の論理プロセッサ数は数えない。
+    std::vector<jint> classes;
+    for (DWORD offset = 0; offset < size;) {
+        const auto *core = reinterpret_cast<const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *>(buffer.data() + offset);
+        classes.push_back(core->Processor.EfficiencyClass);
+        offset += core->Size;
+    }
+    const auto count = static_cast<jsize>(classes.size());
+    auto result = env->NewIntArray(count);
+    if (result && count > 0) env->SetIntArrayRegion(result, 0, count, classes.data());
+    return result;
+}
+#endif
+
 extern "C" JNIEXPORT void JNICALL
 Java_app_plamotranslate_llm_LlamaNative_nativeFree(JNIEnv *, jobject, jlong handle) {
     auto *engine = reinterpret_cast<Engine *>(handle);

@@ -19,8 +19,7 @@ class TranslationException(message: String) : Exception(message)
  */
 data class CpuOptions(
     /**
-     * 0なら自動（[TranslationEngine.defaultThreads]）。コアの最高周波数で、小さいコアがコアの半分以下なら大きいコアの数、
-     * そうでなければ（周波数が読めない端末も）コア数−2。どちらも2〜6に収める。
+     * 0なら自動（[TranslationEngine.defaultThreads]）。Android はコアの周波数、Windows は物理コアの構成から決める。
      */
     val threads: Int = 0,
     /** 性能ヒント（ADPF）で周波数・配置を上げてもらう。 */
@@ -180,8 +179,22 @@ class TranslationEngine private constructor(
             TranslationEngine(handle, gpu)
         }
 
-        /** CPUのスレッド数の既定。端末のコアの最高周波数から決める（[threadsFor]）。 */
-        fun defaultThreads(): Int = threadsFor(coreMaxFrequencies())
+        private val windowsThreads by lazy {
+            threadsForWindows(LlamaNative.nativeWindowsCoreClasses() ?: intArrayOf())
+        }
+
+        /** CPUのスレッド数の既定。Windows は物理コアの構成、Android はコアの最高周波数から決める。 */
+        fun defaultThreads(): Int = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+            windowsThreads
+        } else {
+            threadsFor(coreMaxFrequencies())
+        }
+
+        /** 異種コアでは性能クラスが最も高い物理コアだけを数える。同じクラスなら全物理コアを使う。 */
+        internal fun threadsForWindows(efficiencyClasses: IntArray): Int {
+            val highest = efficiencyClasses.maxOrNull() ?: return 1
+            return efficiencyClasses.count { it == highest }
+        }
 
         /**
          * 最高周波数が一番低いクラスター（小さいコア）がコアの半分以下なら、それ以外のコア（大きいコア）の数にする。

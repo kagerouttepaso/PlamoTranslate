@@ -6,6 +6,23 @@ import org.junit.Test
 /** CPUのスレッド数の既定（[TranslationEngine.threadsFor]）。周波数はkHz。 */
 class ThreadCountTest {
     @Test
+    fun `Windows の均一な CPU は物理コアを全部使う`() {
+        assertEquals(4, TranslationEngine.threadsForWindows(intArrayOf(0, 0, 0, 0)))
+        assertEquals(12, TranslationEngine.threadsForWindows(IntArray(12)))
+    }
+
+    @Test
+    fun `Windows の異種コア CPU は最も性能の高いコアを使う`() {
+        assertEquals(2, TranslationEngine.threadsForWindows(intArrayOf(1, 0, 0, 1, 0, 0)))
+        assertEquals(1, TranslationEngine.threadsForWindows(intArrayOf(3, 2, 1, 1)))
+    }
+
+    @Test
+    fun `Windows で物理コアを取得できないときは1スレッドで動く`() {
+        assertEquals(1, TranslationEngine.threadsForWindows(intArrayOf()))
+    }
+
+    @Test
     fun 小さいコアが半分なら大きいコアの数にする() {
         // 15T Pro（Dimensity 9400+）：2.4GHz×4、3.3GHz×3、3.73GHz×1
         val freqs = List(4) { 2_400_000L } + List(3) { 3_300_000L } + 3_730_000L

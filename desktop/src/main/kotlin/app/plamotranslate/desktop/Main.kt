@@ -6,6 +6,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.log.LogSink
 import app.plamotranslate.log.Logs
 import app.plamotranslate.pipeline.translation.ModelHost
@@ -50,15 +51,18 @@ private fun assemble(scope: CoroutineScope, owner: java.awt.Window): DesktopComp
     val directory = Path.of(checkNotNull(System.getenv("LOCALAPPDATA")), "Mockingword")
     val nativeDir = checkNotNull(System.getProperty("mockingword.native.dir"))
     val settings = DesktopSettings(directory)
-    val loader = DesktopEngineLoader(nativeDir, preferGpu = !java.lang.Boolean.getBoolean("mockingword.cpuOnly"))
-    val models = ModelHost(CoroutineScope(scope.coroutineContext + Dispatchers.Default), loader, { settings.model }, { 1 })
+    val loader = DesktopEngineLoader(nativeDir, !java.lang.Boolean.getBoolean("mockingword.cpuOnly"), settings)
+    val models = ModelHost(
+        CoroutineScope(scope.coroutineContext + Dispatchers.Default), loader, { settings.model },
+        { TranslationEngine.DEFAULT_PARALLEL },
+    )
     val translations = DesktopTranslations(models)
     return DesktopComponents(
         NavigationPresenter(),
         TextPresenter(scope, models.state, translations) { text ->
             Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
         },
-        SettingsPresenter(scope, settings, models.state, models::ensureLoaded, models::select, models::reload) { current ->
+        SettingsPresenter(scope, settings, models) { current ->
             val chooser = JFileChooser(current.parent.toFile()).apply {
                 dialogTitle = "翻訳モデルを選ぶ"
                 isAcceptAllFileFilterUsed = false

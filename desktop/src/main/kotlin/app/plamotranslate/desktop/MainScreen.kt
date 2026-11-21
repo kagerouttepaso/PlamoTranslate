@@ -33,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.plamotranslate.llm.Language
+import app.plamotranslate.llm.TranslationEngine
+import app.plamotranslate.pipeline.translation.ModelState
 
 @Composable
 internal fun MainScreen(components: DesktopComponents) {
@@ -143,7 +145,48 @@ private fun SettingsScreen(state: SettingsState, presenter: SettingsPresenter) {
                 Button(onClick = presenter::choose, enabled = !state.busy) { Text("GGUF ファイルを選ぶ") }
                 OutlinedButton(onClick = presenter::reload, enabled = !state.busy) { Text("読み込み直す") }
             }
+            Text("性能", style = MaterialTheme.typography.titleLarge)
+            val automaticThreads = state.automaticThreads?.let { "自動（$it）" } ?: "自動"
+            val threadChoices = (listOf(1, 2, 4, 6, 8) + listOfNotNull(state.automaticThreads, state.threads.takeIf { it > 0 }))
+                .distinct().sorted()
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CountMenu(
+                    "スレッド数", state.threads.takeIf { it > 0 }, automaticThreads, threadChoices,
+                    !state.busy && state.model !is ModelState.Loading, { presenter.setThreads(it ?: 0) },
+                )
+                CountMenu(
+                    "同時に訳す数", state.manualParallel, "自動（${state.automaticParallel}）", 1..TranslationEngine.MAX_PARALLEL,
+                    !state.busy && state.model is ModelState.Ready, presenter::setParallel,
+                )
+            }
+            OutlinedButton(onClick = presenter::tuneParallel, enabled = !state.busy && state.model is ModelState.Ready) {
+                Text("速さを調整")
+            }
+            state.tuningStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+    }
+}
+
+@Composable
+private fun CountMenu(
+    label: String,
+    selected: Int?,
+    automatic: String,
+    choices: Iterable<Int>,
+    enabled: Boolean,
+    select: (Int?) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { expanded = true }, enabled = enabled) {
+            Text("$label ${selected ?: automatic}")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 320.dp)) {
+            DropdownMenuItem(text = { Text(automatic) }, onClick = { expanded = false; select(null) })
+            choices.forEach { count ->
+                DropdownMenuItem(text = { Text(count.toString()) }, onClick = { expanded = false; select(count) })
+            }
         }
     }
 }

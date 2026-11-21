@@ -34,6 +34,9 @@ interface EngineLoader<M, E : JobEngine> {
 
     fun usesGpu(engine: E): Boolean
 
+    /** 実際に選ばれたバックエンドに保存済みの設定があれば、その並列数を返す。 */
+    fun preferredParallel(model: M, gpu: Boolean, default: Int): Int = default
+
     /** 同時に訳す数を変える（読み直さずに効く）。 */
     fun setParallel(engine: E, parallel: Int)
 
@@ -189,9 +192,9 @@ class ModelHost<M, E : JobEngine>(
             loading = false
             // 読み込んでいる間に変わった同時に訳す数を効かせる
             val ready = next as? ModelState.Ready
-            val count = parallel()
-            if (loaded != null && ready != null && ready.parallel != count) {
-                loader.setParallel(loaded, count)
+            if (loaded != null && ready != null) {
+                val count = loader.preferredParallel(ready.model, ready.gpu, parallel())
+                if (ready.parallel != count) loader.setParallel(loaded, count)
                 _state.value = ready.copy(parallel = count)
             } else {
                 _state.value = next

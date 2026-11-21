@@ -33,6 +33,9 @@ internal object LlamaNative {
     /** 読み込んだCPUバックエンドのファイル名（libggml-cpu-*.so）。GPUの端末で自動選択したときは空。 */
     external fun nativeCpuBackend(): String
 
+    /** Windows 専用。物理コアごとの EfficiencyClass。取得できなければ null。 */
+    external fun nativeWindowsCoreClasses(): IntArray?
+
     /** 失敗したら 0 を返す。 */
     external fun nativeLoad(
         path: String, nCtx: Int, nThreads: Int, nGpuLayers: Int,
