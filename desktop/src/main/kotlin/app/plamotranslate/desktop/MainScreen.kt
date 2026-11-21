@@ -148,15 +148,9 @@ private fun SettingsScreen(state: SettingsState, presenter: SettingsPresenter) {
         ) {
             Text("翻訳モデル", style = MaterialTheme.typography.titleLarge)
             ModelSummary(state.modelStatus)
-            Text("選択したファイル", style = MaterialTheme.typography.labelLarge)
-            Text(state.selectedPath.toString())
-            Text("既定の場所", style = MaterialTheme.typography.labelLarge)
-            Text(state.defaultPath.toString())
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = presenter::choose, enabled = !state.busy) { Text("GGUF ファイルを選ぶ") }
-                OutlinedButton(onClick = presenter::reload, enabled = !state.busy) { Text("読み込み直す") }
-            }
+            ModelSettings(state, presenter)
             Text("性能", style = MaterialTheme.typography.titleLarge)
+            BackendSettings(state, presenter)
             val automaticThreads = state.automaticThreads?.let { "自動（$it）" } ?: "自動"
             val threadChoices = (listOf(1, 2, 4, 6, 8) + listOfNotNull(state.automaticThreads, state.threads.takeIf { it > 0 }))
                 .distinct().sorted()

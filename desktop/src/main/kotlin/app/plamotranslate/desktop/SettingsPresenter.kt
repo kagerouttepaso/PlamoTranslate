@@ -8,6 +8,8 @@ import app.plamotranslate.pipeline.translation.ParallelTuner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -26,6 +28,10 @@ internal data class SettingsState(
     val manualParallel: Int? = null,
     val automaticParallel: Int = TranslationEngine.DEFAULT_PARALLEL,
     val tuningStatus: String? = null,
+    val catalogStatus: Map<DesktopModelCatalog, Long> = emptyMap(),
+    val download: ModelDownloadProgress? = null,
+    val cpuOnly: Boolean = false,
+    val gpuFallback: String? = null,
 ) {
     val modelStatus get() = model.toStatus()
 }
@@ -46,6 +52,8 @@ internal class SettingsPresenter(
     private val chooseModel: (Path) -> Path?,
 ) {
     private val benchmark = DesktopTranslationBenchmark(models)
+    private val downloads = DesktopModelDownloads(settings.modelDirectory)
+    private var downloadJob: Job? = null
     private val mutableState = MutableStateFlow(SettingsState(models.state.value, settings.defaultModel))
     val state = mutableState.asStateFlow()
 
@@ -69,6 +77,49 @@ internal class SettingsPresenter(
 
     fun reload() {
         if (!state.value.busy) models.reload()
+    }
+
+    fun selectModel(model: DesktopModelCatalog) {
+        if (state.value.busy || state.value.model is ModelState.Loading) return
+        val path = model.path(settings.modelDirectory)
+        mutableState.update {
+            it.copy(busy = true, error = null, download = ModelDownloadProgress(model, it.catalogStatus[model] ?: 0))
+        }
+        downloadJob = scope.launch {
+            try {
+                withContext(Dispatchers.IO) { downloads.prepare(model) { progress -> mutableState.update { it.copy(download = progress) } } }
+                if (updateSettings("モデルの選択を保存できませんでした。") { settings.save(path) }) {
+                    models.select()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Logs.w("モデルを準備できませんでした。", error)
+                mutableState.update { it.copy(error = error.message ?: "モデルを準備できませんでした。") }
+            } finally {
+                val status = withContext(NonCancellable + Dispatchers.IO) { runCatching { downloads.status() }.getOrDefault(emptyMap()) }
+                mutableState.update { it.copy(download = null, busy = false, catalogStatus = status) }
+            }
+        }
+    }
+
+    fun cancelDownload() {
+        downloadJob?.cancel()
+    }
+
+    fun setCpuOnly(enabled: Boolean) {
+        if (state.value.cpuOnly == enabled) return
+        changeBackend { settings.saveCpuOnly(enabled) }
+    }
+
+    fun retryGpu() = changeBackend(settings::retryGpu)
+
+    private fun changeBackend(save: () -> Unit) {
+        if (state.value.busy || state.value.model is ModelState.Loading) return
+        mutableState.update { it.copy(busy = true) }
+        scope.launch {
+            if (updateSettings("実行先を保存できませんでした。", save)) models.reload()
+        }
     }
 
     fun setThreads(count: Int) {
@@ -144,13 +195,19 @@ internal class SettingsPresenter(
             automaticThreads = if (ready == null) state.automaticThreads else TranslationEngine.defaultThreads(),
             manualParallel = ready?.let { settings.manualParallel(it.model, it.gpu) },
             automaticParallel = ready?.let { settings.automaticParallel(it.model, it.gpu) } ?: TranslationEngine.DEFAULT_PARALLEL,
+            cpuOnly = settings.cpuOnly,
+            gpuFallback = settings.gpuFallback,
         )
     }
 
     private suspend fun updateSettings(message: String, operation: () -> Unit): Boolean = try {
-        withContext(Dispatchers.IO) { operation() }
+        val catalogStatus = withContext(Dispatchers.IO) {
+            operation()
+            runCatching { downloads.status() }.getOrDefault(emptyMap())
+        }
         mutableState.update {
-            withModel(it, models.state.value).copy(selectedPath = settings.model, threads = settings.threads, busy = false, error = null)
+            withModel(it, models.state.value).copy(selectedPath = settings.model, threads = settings.threads,
+                catalogStatus = catalogStatus, busy = it.download != null, error = null)
         }
         true
     } catch (cancelled: CancellationException) {

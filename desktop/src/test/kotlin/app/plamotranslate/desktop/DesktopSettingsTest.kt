@@ -2,7 +2,9 @@ package app.plamotranslate.desktop
 
 import app.plamotranslate.llm.TranslationEngine
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -10,6 +12,24 @@ import java.nio.file.Files
 
 class DesktopSettingsTest {
     @get:Rule val folder = TemporaryFolder()
+
+    @Test
+    fun `Vulkanの準備が二度途切れると明示的に再試行するまでCPUを使う`() {
+        val directory = folder.root.toPath()
+        val file = directory.resolve("settings.properties")
+        Files.writeString(file, "gpuLoadingPid=0\n")
+        assertTrue(DesktopSettings(directory).apply { read() }.beginGpuLoad())
+        Files.writeString(file, Files.readString(file).replace(Regex("gpuLoadingPid=\\d+"), "gpuLoadingPid=0"))
+
+        val restarted = DesktopSettings(directory).apply { read() }
+        assertFalse(restarted.beginGpuLoad())
+        assertTrue(restarted.gpuFallback.orEmpty().contains("2回"))
+        assertFalse(DesktopSettings(directory).apply { read() }.beginGpuLoad())
+        restarted.retryGpu()
+        assertTrue(restarted.beginGpuLoad())
+        restarted.endGpuLoad()
+        assertNull(DesktopSettings(directory).apply { read() }.gpuFallback)
+    }
 
     @Test
     fun `既存のモデル設定を読み取りスレッドと並列数を保存できる`() {

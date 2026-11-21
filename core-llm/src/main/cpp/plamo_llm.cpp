@@ -10,6 +10,7 @@
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <filesystem>
 #endif
 #include <jni.h>
 
@@ -232,6 +233,31 @@ threadpool_free_fn g_threadpool_free = nullptr;
 
 // GPU（OpenCL）のデバイスが使えるようになったか。読み込めない端末では false
 bool g_has_gpu = false;
+#if defined(_WIN32)
+std::once_flag g_vulkan_once;
+
+void load_windows_cpu(const std::string & lib_dir) {
+    namespace fs = std::filesystem;
+    const auto directory = fs::u8path(lib_dir);
+    fs::path best = directory / "ggml-cpu.dll";
+    int best_score = 0;
+    std::error_code ec;
+    for (fs::directory_iterator entry(directory, ec), end; entry != end && !ec; entry.increment(ec)) {
+        const auto path = entry->path();
+        if (path.extension() != L".dll" || path.filename().native().rfind(L"ggml-cpu-", 0) != 0) continue;
+        const auto handle = LoadLibraryW(path.c_str());
+        if (!handle) continue;
+        const auto score = reinterpret_cast<int (*)()>(GetProcAddress(handle, "ggml_backend_score"));
+        const int value = score ? score() : 0;
+        FreeLibrary(handle);
+        if (value > best_score) {
+            best_score = value;
+            best = path;
+        }
+    }
+    ggml_backend_load(best.u8string().c_str());
+}
+#endif
 
 // 読み込んだCPUバックエンドのファイル名（設定の画面に出す）
 std::string g_cpu_backend;
@@ -369,6 +395,8 @@ Java_app_plamotranslate_llm_LlamaNative_nativeInit(JNIEnv *env, jobject, jstring
                 LOGE("CPUのバックエンドを読み込めませんでした: %s", lib_dir.c_str());
             }
         }
+#elif defined(_WIN32)
+        load_windows_cpu(lib_dir);
 #else
         ggml_backend_load_all_from_path(lib_dir.c_str());
 #endif
@@ -376,12 +404,20 @@ Java_app_plamotranslate_llm_LlamaNative_nativeInit(JNIEnv *env, jobject, jstring
         find_cpu_functions();
 #if defined(__ANDROID__)
         g_has_gpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) != nullptr;
-#else
+#elif !defined(_WIN32)
         g_has_gpu = llama_supports_gpu_offload();
 #endif
         LOGI("計算のバックエンド: デバイス%zu個、GPU%s", ggml_backend_dev_count(), g_has_gpu ? "あり" : "なし");
         startup_stage("バックエンド初期化 完了");
     });
+#if defined(_WIN32)
+    if (!load_gpu) return JNI_FALSE;
+    std::call_once(g_vulkan_once, [&] {
+        ggml_backend_load((std::filesystem::u8path(lib_dir) / "ggml-vulkan.dll").u8string().c_str());
+        g_has_gpu = llama_supports_gpu_offload();
+        LOGI("Vulkan: GPU%s", g_has_gpu ? "あり" : "なし");
+    });
+#endif
     return g_has_gpu ? JNI_TRUE : JNI_FALSE;
 }
 

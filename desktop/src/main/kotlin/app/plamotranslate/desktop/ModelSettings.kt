@@ -1,0 +1,73 @@
+package app.plamotranslate.desktop
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import app.plamotranslate.pipeline.translation.ModelState
+
+@Composable
+internal fun ModelSettings(state: SettingsState, presenter: SettingsPresenter) {
+    val enabled = !state.busy && state.model !is ModelState.Loading
+    DesktopModelCatalog.entries.forEach { model ->
+        val bytes = state.catalogStatus[model] ?: 0L
+        val selected = state.selectedPath == model.path(state.defaultPath.parent)
+        val action = when {
+            bytes == model.size -> "使う"
+            bytes > 0 -> "ダウンロードを再開"
+            else -> "ダウンロードして使う"
+        }
+        Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(12.dp), Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(model.title + if (selected) "（選択中）" else "")
+                val size = "${model.size / 1_000_000} MB"
+                Text(if (bytes in 1 until model.size) "${bytes / 1_000_000} / $size" else size,
+                    style = MaterialTheme.typography.bodySmall)
+            }
+            OutlinedButton(onClick = { presenter.selectModel(model) }, enabled = enabled) { Text(action) }
+        }
+    }
+    state.download?.let { progress ->
+        val fraction = (progress.bytes.toDouble() / progress.model.size).toFloat().coerceIn(0f, 1f)
+        val label = if (progress.verifying) "SHA-256 を照合中" else "ダウンロード中 ${(fraction * 100).toInt()}%"
+        Text("${progress.model.title}：$label")
+        LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+        OutlinedButton(onClick = presenter::cancelDownload) { Text("取り消す") }
+    }
+    var details by remember { mutableStateOf(false) }
+    TextButton(onClick = { details = !details }) { Text(if (details) "詳細を閉じる" else "モデルの詳細") }
+    if (details) {
+        Text(state.selectedPath.toString(), style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = presenter::choose, enabled = enabled) { Text("GGUF ファイルを選ぶ") }
+            OutlinedButton(onClick = presenter::reload, enabled = enabled) { Text("読み込み直す") }
+        }
+    }
+}
+
+@Composable
+internal fun BackendSettings(state: SettingsState, presenter: SettingsPresenter) {
+    val enabled = !state.busy && state.model !is ModelState.Loading
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = { presenter.setCpuOnly(false) }, enabled = enabled && state.cpuOnly) { Text("Vulkan を優先") }
+        OutlinedButton(onClick = { presenter.setCpuOnly(true) }, enabled = enabled && !state.cpuOnly) { Text("CPU だけで動かす") }
+    }
+    Text("実行先の設定：${if (state.cpuOnly) "CPU" else "Vulkan 優先"}", style = MaterialTheme.typography.bodySmall)
+    state.gpuFallback?.let {
+        Text("CPU に切り替えました：$it")
+        OutlinedButton(onClick = presenter::retryGpu, enabled = enabled) { Text("GPU をもう一度試す") }
+    }
+}

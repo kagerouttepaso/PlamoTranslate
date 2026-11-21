@@ -1,15 +1,23 @@
 package app.plamotranslate.desktop
 
 import app.plamotranslate.llm.CpuOptions
+import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.ParallelTranslationBenchmark
 import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.log.Logs
+import app.plamotranslate.pipeline.diagnostics.GpuStartupPolicy
 import app.plamotranslate.pipeline.translation.EngineLoader
 import app.plamotranslate.pipeline.translation.JobEngine
 import app.plamotranslate.pipeline.translation.ModelHost
 import app.plamotranslate.pipeline.translation.ModelOrigin
+import app.plamotranslate.pipeline.translation.PersistentCache
+import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
+import app.plamotranslate.pipeline.translation.translateOne
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -19,11 +27,14 @@ import kotlin.io.path.isRegularFile
 
 internal class DesktopSettings(private val directory: Path) {
     private val file = directory.resolve("settings.properties")
-    val defaultModel: Path = directory.resolve("models/plamo-3-translate-0.8b-Q4_K_M.gguf")
+    val modelDirectory: Path = directory.resolve("models")
+    val defaultModel: Path = DesktopModelCatalog.SMALL.path(modelDirectory)
 
     @Volatile private var properties = Properties()
     val model: Path get() = properties.getProperty("model")?.let { Path.of(it) } ?: defaultModel
     val threads: Int get() = properties.getProperty("threads")?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+    val cpuOnly: Boolean get() = properties.getProperty("cpuOnly").toBoolean()
+    val gpuFallback: String? get() = properties.getProperty("gpuFallback")
 
     @Synchronized
     fun read() {
@@ -38,6 +49,46 @@ internal class DesktopSettings(private val directory: Path) {
     fun save(path: Path) = update { setProperty("model", path.toString()) }
 
     fun saveThreads(count: Int) = update { setProperty("threads", count.toString()) }
+
+    fun saveCpuOnly(enabled: Boolean) = update { setProperty("cpuOnly", enabled.toString()) }
+
+    fun retryGpu() = update {
+        remove("cpuOnly")
+        remove("gpuFallback")
+        remove("gpuLoadingPid")
+        remove("gpuInterruptions")
+    }
+
+    @Synchronized
+    fun beginGpuLoad(): Boolean {
+        val pid = ProcessHandle.current().pid()
+        val previous = properties.getProperty("gpuLoadingPid")?.toLongOrNull()
+        if (previous != null && previous != pid && ProcessHandle.of(previous).map { it.isAlive }.orElse(false)) return false
+        val interruptions = properties.getProperty("gpuInterruptions")?.toIntOrNull() ?: 0
+        val decision = GpuStartupPolicy.decide(gpuFallback != null, previous != null, interruptions,
+            abnormal = false, intended = false, exitLabel = "終了理由の記録なし")
+        if (decision == GpuStartupPolicy.Decision.KeepCpu) return false
+        update {
+            when (decision) {
+                is GpuStartupPolicy.Decision.Disable -> {
+                    setProperty("gpuFallback", decision.reason)
+                    remove("gpuLoadingPid")
+                    remove("gpuInterruptions")
+                }
+                else -> {
+                    setProperty("gpuLoadingPid", pid.toString())
+                    if (decision is GpuStartupPolicy.Decision.Retry) setProperty("gpuInterruptions", decision.interruptions.toString())
+                }
+            }
+        }
+        return decision !is GpuStartupPolicy.Decision.Disable
+    }
+
+    fun endGpuLoad(failure: String? = null) = update {
+        remove("gpuLoadingPid")
+        remove("gpuInterruptions")
+        if (failure != null) setProperty("gpuFallback", failure)
+    }
 
     fun manualParallel(model: Path, gpu: Boolean): Int? = parallelValue(parallelKey("manual", model, gpu))
 
@@ -88,13 +139,50 @@ internal class DesktopEngineLoader(
 ) : EngineLoader<Path, TranslationEngine> {
     override fun missing(model: Path): String? = model.toString().takeUnless { model.isRegularFile() }
 
-    override suspend fun load(model: Path, parallel: Int): TranslationEngine = try {
-        TranslationEngine.load(model.toFile(), nativeDir, preferGpu, cpu = CpuOptions(threads = settings.threads)).also {
+    override suspend fun load(model: Path, parallel: Int): TranslationEngine = withContext(Dispatchers.IO) {
+        DesktopModelCatalog.entries.firstOrNull { it.path(settings.modelDirectory) == model }?.let { entry ->
+            check(DesktopModelDownloads.verify(model, entry)) { "モデルを照合できません。設定からモデルを選び直してください。" }
+        }
+        val gpu = preferGpu && !settings.cpuOnly && settings.beginGpuLoad()
+        try {
+            val engine = loadEngine(model, gpu, parallel)
+            if (gpu && engine.usesGpu) {
+                try {
+                    warmUp(engine)
+                } catch (error: Exception) {
+                    engine.close()
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    Logs.w("GPUでの準備用の推論に失敗しました。CPUで動かします。", error)
+                    settings.endGpuLoad("GPUでの準備用の推論に失敗しました")
+                    return@withContext loadEngine(model, false, parallel)
+                }
+            }
+            if (gpu) settings.endGpuLoad()
+            engine
+        } catch (error: LinkageError) {
+            if (gpu) settings.endGpuLoad()
+            Logs.e("Windows の翻訳ライブラリを読み込めませんでした", error)
+            throw IllegalStateException("翻訳ライブラリを読み込めません。DLL の配置を確認して再起動してください。", error)
+        } catch (error: Exception) {
+            if (gpu) settings.endGpuLoad()
+            throw error
+        }
+    }
+
+    private suspend fun loadEngine(model: Path, gpu: Boolean, parallel: Int): TranslationEngine =
+        TranslationEngine.load(model.toFile(), nativeDir, gpu, cpu = CpuOptions(threads = settings.threads)).also {
             it.parallel = parallel
         }
-    } catch (error: LinkageError) {
-        Logs.e("Windows の翻訳ライブラリを読み込めませんでした", error)
-        throw IllegalStateException("翻訳ライブラリを読み込めません。DLL の配置を確認して再起動してください。", error)
+
+    private suspend fun warmUp(engine: TranslationEngine) = coroutineScope {
+        val stream = TranslationStream(this, { TranslationStream.Backend(engine, ModelOrigin("warmup", 0)) },
+            TranslationStream.Options(Language.KO, Language.JA, maxTokens = 8))
+        try {
+            val result = stream.translateOne("안녕하세요")
+            if (result is SegmentUpdate.Failed) error(result.message)
+        } finally {
+            stream.close()
+        }
     }
 
     override fun usesGpu(engine: TranslationEngine): Boolean = engine.usesGpu
@@ -119,9 +207,13 @@ internal class DesktopTranslationBenchmark(private val models: ModelHost<Path, T
 
 internal class DesktopTranslations(private val models: ModelHost<Path, out JobEngine>) {
     fun open(scope: CoroutineScope, options: TranslationStream.Options): TranslationStream =
+        open(scope, options, persistent = null)
+
+    fun open(scope: CoroutineScope, options: TranslationStream.Options, persistent: PersistentCache?): TranslationStream =
         TranslationStream(scope, {
             models.awaitEngine()?.let { (engine, ready) ->
-                TranslationStream.Backend(engine, ModelOrigin(ready.model.toString(), 0))
+                val origin = DesktopModelCatalog.entries.firstOrNull { it.filename == ready.model.fileName.toString() }?.origin
+                TranslationStream.Backend(engine, origin ?: ModelOrigin(ready.model.toString(), 0), persistent)
             }
         }, options)
 }
