@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.awt.Dimension
 import java.awt.Toolkit
+import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
 import java.nio.file.Files
 import java.nio.file.Path
@@ -71,9 +72,17 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
     )
     val translations = DesktopTranslations(models)
     val pdfCache = DesktopPdfCache(directory.resolve("cache/pdf-translations/v1"))
-    val text = TextPresenter(scope, models.state, translations) { value ->
+    val audioPreferences = AudioPreferences(directory)
+    val asr = DesktopAsr(directory.resolve("models/asr").toFile())
+    val copy: (String) -> Unit = { value ->
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(value), null)
     }
+    val text = TextPresenter(scope, models.state, translations::open,
+        paste = {
+            val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+            if (clipboard.isDataFlavorAvailable(DataFlavor.stringFlavor)) clipboard.getData(DataFlavor.stringFlavor) as? String else null
+        }, copy = copy, voiceInput = DesktopTextVoice(WindowsAudio, asr::load),
+        recognition = { audioPreferences.loadSelection().recognition }, saveTarget = settings::selectTranslationTarget)
     val pdf = PdfPresenter(
         scope, DesktopPdfReader(scope), { childScope, options -> translations.open(childScope, options, pdfCache) },
     ) {
@@ -90,8 +99,6 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
             pdf.selectTarget(target)
         }
     }
-    val audioPreferences = AudioPreferences(directory)
-    val asr = DesktopAsr(directory.resolve("models/asr").toFile())
     return DesktopComponents(
         NavigationPresenter(),
         text,
@@ -110,7 +117,7 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
             initialSelection = audioPreferences.loadSelection(), saveSelection = audioPreferences::saveSelection,
             supportsAutomatic = asr::supportsAutomatic,
             chooseLog = { filename -> chooseConversationLog(filename, owner()) },
-            copyText = { text -> Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null) },
+            copyText = copy,
         ),
         pdf,
         audioPreferences,

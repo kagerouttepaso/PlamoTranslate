@@ -24,7 +24,7 @@ class TextPresenterTest {
     fun `翻訳中は途中訳を表示し確定した訳だけをコピーする`() = runTest {
         var copied = ""
         val model = host(backgroundScope)
-        val presenter = TextPresenter(backgroundScope, model.state, DesktopTranslations(model)) { copied = it }
+        val presenter = presenter(backgroundScope, model) { copied = it }
         model.ensureLoaded()
         runCurrent()
         assertFalse(presenter.state.value.canTranslate)
@@ -48,7 +48,7 @@ class TextPresenterTest {
     @Test
     fun `取り消すと古い翻訳の結果は表示されない`() = runTest {
         val model = host(backgroundScope)
-        val presenter = TextPresenter(backgroundScope, model.state, DesktopTranslations(model)) {}
+        val presenter = presenter(backgroundScope, model) {}
         model.ensureLoaded()
         runCurrent()
         presenter.edit("今日は天気がいいですね。")
@@ -66,7 +66,7 @@ class TextPresenterTest {
     @Test
     fun `モデルが無ければ原文を入力しても翻訳を開始しない`() = runTest {
         val model = host(backgroundScope, missing = true)
-        val presenter = TextPresenter(backgroundScope, model.state, DesktopTranslations(model)) {}
+        val presenter = presenter(backgroundScope, model) {}
         model.ensureLoaded()
         runCurrent()
         presenter.edit("今日は天気がいいですね。")
@@ -76,6 +76,11 @@ class TextPresenterTest {
         assertFalse(presenter.state.value.canTranslate)
         assertFalse(presenter.state.value.translating)
     }
+
+    private fun presenter(scope: CoroutineScope, model: ModelHost<Path, FakeEngine>, copy: (String) -> Unit) =
+        TextPresenter(scope, model.state, DesktopTranslations(model)::open, { null }, copy,
+            DesktopTextVoice(AudioCapture { _, _, _ -> error("unexpected capture") }, { error("unexpected ASR") }),
+            { DesktopRecognitionSettings() }, {})
 
     private fun host(scope: CoroutineScope, missing: Boolean = false): ModelHost<Path, FakeEngine> =
         ModelHost(scope, object : EngineLoader<Path, FakeEngine> {

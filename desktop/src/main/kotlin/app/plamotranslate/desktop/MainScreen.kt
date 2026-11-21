@@ -3,6 +3,7 @@ package app.plamotranslate.desktop
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -58,6 +59,7 @@ internal fun MainScreen(components: DesktopComponents) {
                 Text(page.label, style = MaterialTheme.typography.headlineSmall)
                 when (page) {
                     Page.TEXT -> {
+                        DisposableEffect(components.text) { onDispose(components.text::leave) }
                         val text by components.text.state.collectAsState()
                         TextScreen(text, components.text, components.selectTranslationTarget) {
                             components.navigation.select(Page.SETTINGS)
@@ -91,19 +93,22 @@ internal fun MainScreen(components: DesktopComponents) {
 private fun TextScreen(
     state: TranslationState, presenter: TextPresenter, selectTarget: (Language) -> Unit, openSettings: () -> Unit,
 ) {
+    val canEdit = state.voice == TextVoicePhase.IDLE
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             ModelSummary(state.modelStatus, Modifier.weight(1f), compact = true)
             TextButton(onClick = openSettings) { Text("モデルの設定") }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            LanguageMenu("原文: ${state.sourceLabel}", listOf(null) + Language.entries, presenter::selectSource)
-            LanguageMenu("訳す先: ${state.target.label}", Language.entries, selectTarget)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LanguageMenu("原文: ${state.sourceLabel}", listOf(null) + Language.entries, presenter::selectSource, canEdit)
+            OutlinedButton(onClick = presenter::swap, enabled = state.canSwap) { Text("入れ替え") }
+            LanguageMenu("訳す先: ${state.target.label}", Language.entries, selectTarget, canEdit)
         }
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             OutlinedTextField(
                 value = state.input,
                 onValueChange = presenter::edit,
+                readOnly = !canEdit,
                 label = { Text("原文") },
                 placeholder = { Text("訳したい文を入力") },
                 modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -121,11 +126,26 @@ private fun TextScreen(
             )
         }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Button(onClick = presenter::translate, enabled = state.canTranslate) { Text("翻訳する") }
-            OutlinedButton(onClick = presenter::cancel, enabled = state.translating) { Text("取り消す") }
-            OutlinedButton(onClick = presenter::copyOutput, enabled = state.canCopy) { Text("訳文をコピー") }
-            if (state.translating) Text("翻訳中…", style = MaterialTheme.typography.bodySmall)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = presenter::pasteAndTranslate, enabled = canEdit) { Text("貼り付けて翻訳") }
+            OutlinedButton(onClick = presenter::clear, enabled = canEdit && state.input.isNotEmpty()) { Text("消去") }
+            OutlinedButton(onClick = if (canEdit) presenter::startVoice else presenter::stopVoice,
+                enabled = canEdit && !state.translating || state.voice == TextVoicePhase.LISTENING) {
+                Text(when (state.voice) {
+                    TextVoicePhase.IDLE -> "マイク入力"
+                    TextVoicePhase.LOADING -> "マイクを準備中…"
+                    TextVoicePhase.LISTENING -> "聞き取りを停止"
+                    TextVoicePhase.FINISHING -> "書き起こしを確定中…"
+                })
+            }
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = presenter::translate, enabled = state.canTranslate) {
+                Text(if (state.canCopy) "翻訳し直す" else "翻訳する")
+            }
+            if (state.translating) OutlinedButton(onClick = presenter::cancel) { Text("翻訳を取り消す") }
+            TextButton(onClick = presenter::copyInput, enabled = state.input.isNotBlank() && canEdit) { Text("原文をコピー") }
+            TextButton(onClick = presenter::copyOutput, enabled = state.canCopy) { Text("訳文をコピー") }
         }
     }
 }

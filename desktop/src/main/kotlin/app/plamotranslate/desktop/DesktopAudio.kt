@@ -12,6 +12,7 @@ import app.plamotranslate.pipeline.speech.SpeechPipeline
 import app.plamotranslate.pipeline.speech.UtteranceRetention
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -35,21 +36,28 @@ internal data class DesktopRecognitionSettings(
 
 internal object WindowsAudio : AudioCapture {
     private val library by lazy { System.loadLibrary("mockingword-audio") }
+    private val microphone = Mutex()
 
     override suspend fun capture(source: AudioSource, started: () -> Unit, accept: (FloatArray) -> Unit) {
-        // COM の初期化・読み取り・解放を同じスレッドで行う。このブロック内では中断しない。
-        withContext(Dispatchers.IO) {
-            library
-            val handle = open(source == AudioSource.PLAYBACK)
-            try {
-                if (isActive) started()
-                while (isActive) {
-                    val samples = read(handle)
-                    if (samples != null && isActive) accept(samples)
+        val mic = source == AudioSource.MICROPHONE
+        check(!mic || microphone.tryLock()) { "マイクは音声翻訳で使用中です。先に停止してください。" }
+        try {
+            // COM の初期化・読み取り・解放を同じスレッドで行う。このブロック内では中断しない。
+            withContext(Dispatchers.IO) {
+                library
+                val handle = open(!mic)
+                try {
+                    if (isActive) started()
+                    while (isActive) {
+                        val samples = read(handle)
+                        if (samples != null && isActive) accept(samples)
+                    }
+                } finally {
+                    close(handle)
                 }
-            } finally {
-                close(handle)
             }
+        } finally {
+            if (mic) microphone.unlock()
         }
     }
 
