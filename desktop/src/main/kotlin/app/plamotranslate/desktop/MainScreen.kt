@@ -203,6 +203,15 @@ private fun SettingsScreen(state: SettingsState, presenter: SettingsPresenter, r
             state.tuningStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             recognition()
+            Text("ログ", style = MaterialTheme.typography.titleLarge)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.Switch(
+                    checked = state.detailedLogs, onCheckedChange = presenter::setDetailedLogs, enabled = !state.busy,
+                )
+                Text("詳しい記録を残す")
+            }
+            Text("オンにすると、テキスト・音声翻訳の原文と訳文をこの PC に記録します。オフにしても以前の記録は消えません。")
+            Text("保存先: %LOCALAPPDATA%\\Mockingword\\logs", style = MaterialTheme.typography.bodySmall)
         }
     }
 }

@@ -14,6 +14,19 @@ class DesktopSettingsTest {
     @get:Rule val folder = TemporaryFolder()
 
     @Test
+    fun `詳しいログは既定でオフになり選択を保存できる`() {
+        val directory = folder.root.toPath()
+        val first = DesktopSettings(directory).apply { read() }
+        assertFalse(first.detailedLogs)
+        first.saveDetailedLogs(true)
+
+        val reloaded = DesktopSettings(directory).apply { read() }
+        assertTrue(reloaded.detailedLogs)
+        reloaded.saveDetailedLogs(false)
+        assertFalse(DesktopSettings(directory).apply { read() }.detailedLogs)
+    }
+
+    @Test
     fun `Vulkanの準備が二度途切れると明示的に再試行するまでCPUを使う`() {
         val directory = folder.root.toPath()
         val file = directory.resolve("settings.properties")

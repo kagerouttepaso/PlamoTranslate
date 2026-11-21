@@ -108,6 +108,7 @@ internal class TextPresenter(
                     is SegmentUpdate.Final -> {
                         mutableState.update { it.copy(output = result.text, translating = false) }
                         Logs.i("翻訳完了: ${result.millis} ms（キャッシュ=${result.cached}）")
+                        Logs.text { "テキスト翻訳: ${request.input.take(4000)} → ${result.text.take(4000)}" }
                     }
                     is SegmentUpdate.Failed -> mutableState.update {
                         it.copy(output = "", translating = false, error = result.message)

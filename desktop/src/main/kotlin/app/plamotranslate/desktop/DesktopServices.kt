@@ -43,6 +43,7 @@ internal class DesktopSettings(private val directory: Path) {
     val threads: Int get() = properties.getProperty("threads")?.toIntOrNull()?.coerceAtLeast(0) ?: 0
     val cpuOnly: Boolean get() = properties.getProperty("cpuOnly").toBoolean()
     val gpuFallback: String? get() = properties.getProperty("gpuFallback")
+    val detailedLogs: Boolean get() = properties.getProperty("detailedLogs").toBoolean()
 
     @Synchronized
     fun read() {
@@ -59,6 +60,8 @@ internal class DesktopSettings(private val directory: Path) {
     fun saveThreads(count: Int) = update { setProperty("threads", count.toString()) }
 
     fun saveCpuOnly(enabled: Boolean) = update { setProperty("cpuOnly", enabled.toString()) }
+
+    fun saveDetailedLogs(enabled: Boolean) = update { setProperty("detailedLogs", enabled.toString()) }
 
     fun retryGpu() = update {
         remove("cpuOnly")

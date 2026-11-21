@@ -385,7 +385,10 @@ internal class AudioPresenter(
                 handle(current, Event.FinalProgress(turn.id, it))
             }
             done = when (result) {
-                is SegmentUpdate.Final -> Event.FinalDone(turn.id, result.text, result.millis)
+                is SegmentUpdate.Final -> {
+                    Logs.text { "音声翻訳: ${turn.original.take(4000)} → ${result.text.take(4000)}" }
+                    Event.FinalDone(turn.id, result.text, result.millis)
+                }
                 is SegmentUpdate.Failed -> done.copy(failure = result.message)
                 is SegmentUpdate.Partial -> done
             }

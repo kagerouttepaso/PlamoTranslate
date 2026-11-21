@@ -58,11 +58,11 @@ fun main() {
 }
 
 private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): DesktopComponents {
+    val directory = Path.of(checkNotNull(System.getenv("LOCALAPPDATA")), "Mockingword")
     Logs.install(listOf(LogSink { level, tag, message, error ->
         System.err.println("$tag $level: $message")
         error?.printStackTrace(System.err)
-    }), userText = false)
-    val directory = Path.of(checkNotNull(System.getenv("LOCALAPPDATA")), "Mockingword")
+    }, DesktopLogFile(directory.resolve("logs"))), userText = false)
     val nativeDir = checkNotNull(System.getProperty("mockingword.native.dir"))
     val settings = DesktopSettings(directory)
     val loader = DesktopEngineLoader(nativeDir, !java.lang.Boolean.getBoolean("mockingword.cpuOnly"), settings)

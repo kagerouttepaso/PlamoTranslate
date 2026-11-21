@@ -32,6 +32,7 @@ internal data class SettingsState(
     val download: ModelDownloadProgress? = null,
     val cpuOnly: Boolean = false,
     val gpuFallback: String? = null,
+    val detailedLogs: Boolean = false,
 ) {
     val modelStatus get() = model.toStatus()
 }
@@ -60,7 +61,10 @@ internal class SettingsPresenter(
     init {
         scope.launch { models.state.collect { current -> mutableState.update { withModel(it, current) } } }
         scope.launch {
-            updateSettings("設定を読み込めませんでした。") { settings.read() }
+            updateSettings("設定を読み込めませんでした。") {
+                settings.read()
+                Logs.allowUserText(settings.detailedLogs)
+            }
             models.ensureLoaded()
         }
     }
@@ -113,6 +117,17 @@ internal class SettingsPresenter(
     }
 
     fun retryGpu() = changeBackend(settings::retryGpu)
+
+    fun setDetailedLogs(enabled: Boolean) {
+        if (state.value.busy || state.value.detailedLogs == enabled) return
+        mutableState.update { it.copy(busy = true) }
+        scope.launch {
+            updateSettings("ログの設定を保存できませんでした。") {
+                settings.saveDetailedLogs(enabled)
+                Logs.allowUserText(enabled)
+            }
+        }
+    }
 
     private fun changeBackend(save: () -> Unit) {
         if (state.value.busy || state.value.model is ModelState.Loading) return
@@ -197,6 +212,7 @@ internal class SettingsPresenter(
             automaticParallel = ready?.let { settings.automaticParallel(it.model, it.gpu) } ?: TranslationEngine.DEFAULT_PARALLEL,
             cpuOnly = settings.cpuOnly,
             gpuFallback = settings.gpuFallback,
+            detailedLogs = settings.detailedLogs,
         )
     }
 
