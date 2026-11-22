@@ -22,12 +22,15 @@ import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import org.apache.pdfbox.pdmodel.font.PDType1Font
 import org.apache.pdfbox.pdmodel.font.PDType3Font
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts
+import org.apache.pdfbox.pdmodel.graphics.color.PDColor
+import org.apache.pdfbox.pdmodel.graphics.color.PDICCBased
 import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject
 import org.apache.pdfbox.pdmodel.interactive.action.PDActionURI
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageXYZDestination
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem
+import org.apache.pdfbox.rendering.PDFRenderer
 import org.apache.pdfbox.util.Matrix
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -39,6 +42,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.awt.Color
+import java.awt.color.ColorSpace
+import java.awt.color.ICC_Profile
 import java.io.ByteArrayOutputStream
 
 class PdfDocumentTest {
@@ -216,6 +221,59 @@ class PdfDocumentTest {
                 assertTrue(saved.search(0, "ご案内").isNotEmpty())
                 assertTrue(saved.search(0, "Form notice").isNotEmpty())
                 assertFalse(before.contentEquals(saved.render(0, 300, 300)))
+            }
+        }
+    }
+
+    @Test fun `ページの書き換えで元の ICC 色の背景と罫線を保つ`() = runBlocking {
+        val source = PDDocument().use { document ->
+            val page = PDPage(PDRectangle(160f, 120f)).also(document::addPage)
+            val colorSpace = PDICCBased(document).also { color ->
+                color.pdStream.cosObject.setInt(COSName.N, 3)
+                color.pdStream.createOutputStream().use {
+                    it.write(ICC_Profile.getInstance(ColorSpace.CS_sRGB).data)
+                }
+            }
+            PDPageContentStream(document, page).use { content ->
+                content.setNonStrokingColor(PDColor(floatArrayOf(0.9f, 0.92f, 0.94f), colorSpace))
+                content.addRect(0f, 0f, 160f, 120f)
+                content.fill()
+                content.setStrokingColor(PDColor(floatArrayOf(0.12f, 0.35f, 0.67f), colorSpace))
+                content.setLineWidth(4f)
+                content.moveTo(10f, 20f)
+                content.lineTo(150f, 20f)
+                content.stroke()
+                content.setNonStrokingColor(Color.BLACK)
+                content.beginText()
+                content.setFont(PDType1Font(Standard14Fonts.FontName.HELVETICA), 14f)
+                content.newLineAtOffset(20f, 70f)
+                content.showText("English source")
+                content.endText()
+            }
+            ByteArrayOutputStream().also(document::save).toByteArray()
+        }
+        withPdf(source) { pdf ->
+            val before = pdf.render(0, 160, 120)
+            val paragraphs = PdfParagraphs.page(pdf.pageText(0))
+            val translations = mapOf(paragraphs.single().text to "日本語の訳文")
+            assertEquals(PdfWriteResult(1, 0, 0), pdf.writePage(0, paragraphs, translations, PdfFonts.load()))
+            val after = pdf.render(0, 160, 120)
+            val background = 10 * 160 + 10
+            val rule = 100 * 160 + 80
+            assertTrue(Color.BLACK.rgb != before[background])
+            assertTrue(before[background] != before[rule])
+            assertEquals(before[background], after[background])
+            assertEquals(before[rule], after[rule])
+            val snapshot = pdf.snapshot()
+            withPdf(snapshot.bytes) { reopened ->
+                assertArrayEquals(after, reopened.render(0, 160, 120))
+                assertTrue(reopened.search(0, "日本語の訳文").isNotEmpty())
+                assertTrue(reopened.search(0, "English source").isEmpty())
+            }
+            Loader.loadPDF(snapshot.bytes).use { saved ->
+                val image = PDFRenderer(saved).renderImage(0)
+                assertEquals(after[background], image.getRGB(10, 10))
+                assertEquals(after[rule], image.getRGB(80, 100))
             }
         }
     }

@@ -742,6 +742,48 @@ struct MemoryWriter : FPDF_FILEWRITE {
 };
 }
 
+namespace {
+void preserve_solid_paint(FPDF_DOCUMENT doc, FPDF_PAGEOBJECT object, bool fill, bool stroke) {
+    Color color;
+    if (fill && FPDFPageObj_GetFillColor(object, &color.red, &color.green, &color.blue, &color.alpha) &&
+        (color.red || color.green || color.blue)) {
+        Bitmap pattern(FPDFPageObj_GetRenderedFillPattern(doc, object), FPDFBitmap_Destroy);
+        if (!pattern) color.apply(object);
+    }
+    if (stroke && FPDFPageObj_GetStrokeColor(object, &color.red, &color.green, &color.blue, &color.alpha) &&
+        (color.red || color.green || color.blue)) {
+        Bitmap pattern(FPDFPageObj_GetRenderedStrokePattern(doc, object), FPDFBitmap_Destroy);
+        if (!pattern) FPDFPageObj_SetStrokeColor(object, color.red, color.green, color.blue, color.alpha);
+    }
+}
+
+void preserve_page_paint(FPDF_DOCUMENT doc, FPDF_PAGE page) {
+    const auto count = FPDFPage_CountObjects(page);
+    for (int index = 0; index < count; ++index) {
+        const auto object = FPDFPage_GetObject(page, index);
+        switch (FPDFPageObj_GetType(object)) {
+        case FPDF_PAGEOBJ_PATH: {
+            int fill_mode{};
+            FPDF_BOOL stroke{};
+            if (FPDFPath_GetDrawMode(object, &fill_mode, &stroke)) {
+                preserve_solid_paint(doc, object, fill_mode != FPDF_FILLMODE_NONE, stroke != 0);
+            }
+            break;
+        }
+        case FPDF_PAGEOBJ_TEXT: {
+            const auto mode = FPDFTextObj_GetTextRenderMode(object);
+            const bool fill = mode == FPDF_TEXTRENDERMODE_FILL || mode == FPDF_TEXTRENDERMODE_FILL_STROKE ||
+                              mode == FPDF_TEXTRENDERMODE_FILL_CLIP || mode == FPDF_TEXTRENDERMODE_FILL_STROKE_CLIP;
+            const bool stroke = mode == FPDF_TEXTRENDERMODE_STROKE || mode == FPDF_TEXTRENDERMODE_FILL_STROKE ||
+                                mode == FPDF_TEXTRENDERMODE_STROKE_CLIP || mode == FPDF_TEXTRENDERMODE_FILL_STROKE_CLIP;
+            preserve_solid_paint(doc, object, fill, stroke);
+            break;
+        }
+        }
+    }
+}
+}
+
 extern "C" {
 // 1 は成功、0 は変更前の失敗、-1 は変更後の失敗。
 JNIEXPORT jint JNICALL PDF_JNI(writePage)(
@@ -838,6 +880,7 @@ JNIEXPORT jint JNICALL PDF_JNI(writePage)(
         if (!FPDFPage_RemoveObject(on.page.get(), original)) return -1;
         FPDFPageObj_Destroy(original);
     }
+    if (!originals.empty()) preserve_page_paint(doc.pdf.get(), on.page.get());
     for (auto& object : additions) {
         if (!FPDFPage_InsertObject(on.page.get(), object.release())) return -1;
     }
