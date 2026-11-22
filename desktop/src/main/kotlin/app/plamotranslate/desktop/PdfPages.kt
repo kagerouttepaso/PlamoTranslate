@@ -3,6 +3,10 @@ package app.plamotranslate.desktop
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.HorizontalScrollbar
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalScrollbarStyle
+import androidx.compose.foundation.ScrollbarStyle
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -412,9 +416,19 @@ internal fun PdfPages(
                 }
             }
         }
-        VerticalScrollbar(rememberScrollbarAdapter(model.listState), Modifier.align(Alignment.CenterEnd).fillMaxHeight())
-        if (contentWidth > viewWidth + 1) {
-            HorizontalScrollbar(rememberScrollbarAdapter(horizontal), Modifier.align(Alignment.BottomCenter).fillMaxWidth())
+        // 既定のスクロールバーは黒の半透明で、暗い背景では見えないので、画面の文字の色で太めに描く。
+        val onSurface = MaterialTheme.colorScheme.onSurface
+        val scrollbar = remember(onSurface) {
+            ScrollbarStyle(
+                minimalHeight = 32.dp, thickness = 10.dp, shape = RoundedCornerShape(5.dp), hoverDurationMillis = 200,
+                unhoverColor = onSurface.copy(alpha = 0.35f), hoverColor = onSurface.copy(alpha = 0.6f),
+            )
+        }
+        CompositionLocalProvider(LocalScrollbarStyle provides scrollbar) {
+            VerticalScrollbar(rememberScrollbarAdapter(model.listState), Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(2.dp))
+            if (contentWidth > viewWidth + 1) {
+                HorizontalScrollbar(rememberScrollbarAdapter(horizontal), Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(2.dp))
+            }
         }
     }
 }
