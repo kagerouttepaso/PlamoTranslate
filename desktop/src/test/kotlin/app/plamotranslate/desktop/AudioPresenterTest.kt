@@ -26,33 +26,27 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class AudioPresenterTest {
     @Test
-    fun `マイクの発話者を選び直しても前の確定カードは残る`() = runTest {
-        val speech = FakeSpeech()
+    fun `会話中に相手の言語を選び直しても聞き取りを止めずに次の発話へ渡す`() = runTest {
+        val speech = FakeSpeech(detected = "en")
         val engine = FakeTranslationEngine()
         val presenter = AudioPresenter(
             backgroundScope, FakeCapture(), { speech }, engine::open,
-            initialSelection = AudioSelection(partner = Language.EN, partnerSpeaking = false),
             io = StandardTestDispatcher(testScheduler),
         )
         presenter.start()
         runCurrent()
-        assertEquals("ja", speech.languages.specified)
         assertEquals(AudioPhase.LISTENING, presenter.state.value.phase)
-        assertEquals("途中", presenter.state.value.cards.single().status)
+        assertTrue(presenter.state.value.canChooseLanguages)
+        val other = presenter.state.value.partnerOptions.filterNotNull().first { it != Language.EN }
+        presenter.selectPartner(other)
+        runCurrent()
+        assertEquals(AudioPhase.LISTENING, presenter.state.value.phase)
+        assertEquals(other, presenter.state.value.selection.partner)
+        assertEquals(1, presenter.state.value.live.size)
         presenter.stop()
         runCurrent()
         assertEquals(AudioPhase.IDLE, presenter.state.value.phase)
-        assertEquals("確定", presenter.state.value.cards.single().status)
-        assertEquals(Language.JA, presenter.state.value.cards.single().language)
-
-        presenter.selectSpeaker(true)
-        presenter.start()
-        runCurrent()
-        assertEquals("en", speech.languages.specified)
-        presenter.stop()
-        runCurrent()
-        assertEquals(listOf(Language.EN, Language.JA), presenter.state.value.cards.map(AudioCard::language))
-        assertEquals(listOf(Language.JA to Language.EN, Language.EN to Language.JA), engine.directions.distinct())
+        assertEquals(1, presenter.state.value.turns.size)
         presenter.close()
     }
 
@@ -94,7 +88,7 @@ class AudioPresenterTest {
         presenter.stop()
         runCurrent()
         assertEquals(AudioPhase.IDLE, presenter.state.value.phase)
-        assertTrue(presenter.state.value.cards.isEmpty())
+        assertTrue(presenter.state.value.turns.isEmpty() && presenter.state.value.live.isEmpty())
         presenter.start()
         runCurrent()
         assertEquals(AudioPhase.LISTENING, presenter.state.value.phase)
@@ -115,8 +109,9 @@ class AudioPresenterTest {
         presenter.stop()
         runCurrent()
         val state = presenter.state.value
-        assertEquals(Language.EN, state.detectedPartner)
-        assertEquals(false, state.cards.single().mine)
+        assertEquals(Language.EN, state.partner)
+        assertTrue(state.partnerFound)
+        assertEquals(false, state.turns.single().direction.mine)
         assertEquals(listOf(Language.EN to Language.JA), engine.directions.distinct())
         assertTrue(state.canExport)
         presenter.close()

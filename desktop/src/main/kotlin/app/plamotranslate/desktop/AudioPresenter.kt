@@ -5,10 +5,10 @@ import app.plamotranslate.llm.isChinese
 import app.plamotranslate.llm.sameAs
 import app.plamotranslate.log.Logs
 import app.plamotranslate.pipeline.conversation.ConversationSession
+import app.plamotranslate.pipeline.conversation.LiveSpeech
 import app.plamotranslate.pipeline.conversation.ConversationSession.Effect
 import app.plamotranslate.pipeline.conversation.ConversationSession.Event
 import app.plamotranslate.pipeline.conversation.PartnerMode
-import app.plamotranslate.pipeline.conversation.SwapState
 import app.plamotranslate.pipeline.conversation.Turn
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechEvent
@@ -34,6 +34,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.math.log10
 
 internal enum class AudioPhase(val label: String) {
     IDLE("停止中"), STARTING("音声入力を準備中…"), LISTENING("聞き取り中…"), STOPPING("話していた分を確定中…"),
@@ -45,19 +46,17 @@ internal data class AudioSelection(
     val partner: Language? = null,
     val playbackFrom: Language = Language.EN,
     val playbackTo: Language = Language.JA,
-    val partnerSpeaking: Boolean? = null,
-    val faceToFace: Boolean = false,
     val recognition: DesktopRecognitionSettings = DesktopRecognitionSettings(),
 ) {
     val languages get() = recognition.model.languages
 
+    /**
+     * 話す言語が先に決まっているか。マイクは話した言語で話し手を決める（Android 版と同じ）ので決めない。
+     * 再生音は原文の言語を利用者が選ぶ。
+     */
     val spoken: Language?
         get() = when (source) {
-            AudioSource.MICROPHONE -> when (partnerSpeaking) {
-                null -> null
-                true -> partner
-                false -> self
-            }
+            AudioSource.MICROPHONE -> null
             AudioSource.PLAYBACK -> playbackFrom
         }
 
@@ -67,38 +66,42 @@ internal data class AudioSelection(
     }
 }
 
-internal data class AudioCard(
-    val key: String,
-    val language: Language?,
-    val original: String,
-    val translation: String,
-    val status: String,
-    val error: String? = null,
-    val mine: Boolean? = null,
-    val turnId: Long? = null,
-    val swap: SwapState = SwapState.UNAVAILABLE,
-)
-
+/**
+ * 会話翻訳の画面の状態。カードは中核の [ConversationSession] のもの（話し中・書き起こし待ちの [LiveSpeech] と確定した [Turn]）を
+ * そのまま渡し、見せ方は画面が決める（Android 版の `ConversationCards.kt` と同じ分け方）。
+ * [live] と [turns] は古い順。
+ */
 internal data class AudioState(
     val selection: AudioSelection,
     val phase: AudioPhase = AudioPhase.IDLE,
-    val cards: List<AudioCard> = emptyList(),
+    val live: List<LiveSpeech> = emptyList(),
+    val turns: List<Turn> = emptyList(),
     val subtitle: SubtitleLine? = null,
     val subtitleVisible: Boolean = false,
     val canCut: Boolean = false,
     val error: String? = null,
     val notice: String? = null,
-    val detectedPartner: Language? = null,
+    val partner: Language? = null,
+    val partnerFound: Boolean = false,
     val canExport: Boolean = false,
     val automaticAvailable: Boolean = true,
+    /** 音声認識が録音からどれだけ遅れているか（秒）。 */
+    val lagSeconds: Float = 0f,
 ) {
+    /** 音の出どころ・認識の設定・再生音の言語は、止めているときだけ変える（認識器とセッションを作り直す）。 */
     val canConfigure get() = phase == AudioPhase.IDLE
-    val canStop get() = phase == AudioPhase.STARTING || phase == AudioPhase.LISTENING
+
+    /** マイクの自分と相手の言語は、会話中も選び直せる。次の発話から効く（Android 版と同じ）。 */
+    val canChooseLanguages get() = selection.source == AudioSource.MICROPHONE && phase != AudioPhase.STOPPING
+    val listening get() = phase == AudioPhase.STARTING || phase == AudioPhase.LISTENING
+    val canStop get() = listening
     val selfOptions get() = selection.languages
     val partnerOptions get() = listOf(null) + selection.languages.filterNot { it.sameAs(selection.self) }
     val playbackFromOptions get() = selection.languages.filterNot { it.sameAs(selection.playbackTo) }
     val playbackToOptions get() = Language.entries.filterNot { it.sameAs(selection.playbackFrom) }
-    val canStart get() = canConfigure && (selection.source == AudioSource.PLAYBACK || selection.partnerSpeaking != null || automaticAvailable)
+
+    /** マイクは話した言語で話し手を決めるので、言語の識別ができる認識の設定が要る。 */
+    val canStart get() = canConfigure && (selection.source == AudioSource.PLAYBACK || automaticAvailable)
 }
 
 /** UI スレッドでセッションに出来事を渡し、返された処理を接続する。 */
@@ -116,6 +119,13 @@ internal class AudioPresenter(
 ) : AutoCloseable {
     private val mutableState = MutableStateFlow(AudioState(initialSelection, automaticAvailable = supportsAutomatic(initialSelection.recognition.model)))
     val state = mutableState.asStateFlow()
+
+    /**
+     * 入力の音量の目安（0〜1）。区切るボタンの輪と話し中のカードのバーに出す。音声のたびに変わるので、
+     * 画面の状態（[state]）と分けて、音量を描く部品だけが購読する。
+     */
+    private val mutableLevel = MutableStateFlow(0f)
+    val level = mutableLevel.asStateFlow()
     private val selection get() = state.value.selection
     private var session = selection.session()
     private val translations = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
@@ -132,13 +142,13 @@ internal class AudioPresenter(
     fun selectSource(source: AudioSource) = configure(selection.copy(source = source))
 
     fun selectSelf(language: Language) {
-        if (language in selection.languages) configure(selection.copy(self = language,
+        if (language in selection.languages) chooseLanguages(selection.copy(self = language,
             partner = selection.partner?.takeUnless { it.sameAs(language) }))
     }
 
     fun selectPartner(language: Language?) {
         if (language == null || language in selection.languages && !language.sameAs(selection.self)) {
-            configure(selection.copy(partner = language, partnerSpeaking = selection.partnerSpeaking.takeUnless { it == true && language == null }))
+            chooseLanguages(selection.copy(partner = language))
         }
     }
 
@@ -150,18 +160,6 @@ internal class AudioPresenter(
         if (!language.sameAs(selection.playbackFrom)) configure(selection.copy(playbackTo = language))
     }
 
-    fun selectSpeaker(partner: Boolean?) {
-        if (partner == true && selection.partner == null) return
-        if (!state.value.canConfigure) return
-        mutableState.value = state.value.copy(selection = selection.copy(partnerSpeaking = partner))
-        saveSelection(selection)
-    }
-
-    fun setFaceToFace(enabled: Boolean) {
-        mutableState.value = state.value.copy(selection = selection.copy(faceToFace = enabled))
-        saveSelection(selection)
-    }
-
     fun setRecognition(settings: DesktopRecognitionSettings) {
         if (settings != selection.recognition) configure(selection.copy(recognition = settings).validLanguages())
     }
@@ -170,25 +168,33 @@ internal class AudioPresenter(
         if (selection.source == AudioSource.MICROPHONE && engine != null) handle(session, Event.LanguageSwapped(turnId))
     }
 
-    private fun configure(updated: AudioSelection) {
-        if (!state.value.canConfigure || closed) return
+    /**
+     * マイクの自分・相手の言語の選び直し。会話中でも中核に知らせるだけで、認識器もセッションも作り直さない。
+     * 中核が次の発話から新しい言語で振り分け、相手を選び直したときは自分の発話を訳し直す（docs/設計/会話翻訳.md）。
+     * 同じ「自動」を選び直すと、見つけた相手の言語を忘れて探し直す。
+     */
+    private fun chooseLanguages(updated: AudioSelection) {
+        if (!state.value.canChooseLanguages || closed) return
         val previous = selection
         if (updated == previous) {
-            if (updated.source == AudioSource.MICROPHONE && updated.partner == null) handle(session, Event.ModeChanged(PartnerMode.AUTO))
+            if (updated.partner == null) handle(session, Event.ModeChanged(PartnerMode.AUTO))
             return
         }
-        if (updated.recognition != previous.recognition || updated.source != previous.source || updated.source == AudioSource.PLAYBACK) {
-            engine?.close()
-            engine = null
-            session = updated.session()
-            partialJob = null
-            translations.coroutineContext.cancelChildren()
-            mutableState.value = AudioState(updated, automaticAvailable = supportsAutomatic(updated.recognition.model))
-        } else {
-            mutableState.value = state.value.copy(selection = updated)
-            if (updated.self != previous.self) handle(session, Event.SelfChanged(updated.self))
-            if (updated.partner != previous.partner) handle(session, Event.ModeChanged(PartnerMode(updated.partner)))
-        }
+        mutableState.value = state.value.copy(selection = updated)
+        if (updated.self != previous.self) handle(session, Event.SelfChanged(updated.self))
+        if (updated.partner != previous.partner) handle(session, Event.ModeChanged(PartnerMode(updated.partner)))
+        saveSelection(updated)
+    }
+
+    /** 音の出どころ・認識の設定・再生音の言語。止めているときだけ変え、認識器とセッションを作り直す。 */
+    private fun configure(updated: AudioSelection) {
+        if (!state.value.canConfigure || closed || updated == selection) return
+        engine?.close()
+        engine = null
+        session = updated.session()
+        partialJob = null
+        translations.coroutineContext.cancelChildren()
+        mutableState.value = AudioState(updated, automaticAvailable = supportsAutomatic(updated.recognition.model))
         saveSelection(updated)
     }
 
@@ -265,7 +271,12 @@ internal class AudioPresenter(
                     }
                 }
                 asr.loadListener = { load ->
-                    scope.launch { if (active === run) handle(session, Event.RecognitionBusy(load.urgent)) }
+                    scope.launch {
+                        if (active === run) {
+                            if (load.behindSeconds != state.value.lagSeconds) mutableState.value = state.value.copy(lagSeconds = load.behindSeconds)
+                            handle(session, Event.RecognitionBusy(load.urgent))
+                        }
+                    }
                 }
                 asr.reset()
                 capture.capture(run.selection.source, started = {
@@ -274,7 +285,10 @@ internal class AudioPresenter(
                             mutableState.value = state.value.copy(phase = AudioPhase.LISTENING)
                         }
                     }
-                }, asr::accept)
+                }) { samples ->
+                    asr.accept(samples)
+                    mutableLevel.value = level(samples)
+                }
                 if (active === run) stop()
             } catch (error: CancellationException) {
                 throw error
@@ -315,7 +329,8 @@ internal class AudioPresenter(
             Effect.Flush -> flush()
             Effect.Finish -> {
                 active = null
-                mutableState.value = state.value.copy(phase = AudioPhase.IDLE)
+                mutableLevel.value = 0f
+                mutableState.value = state.value.copy(phase = AudioPhase.IDLE, lagSeconds = 0f)
             }
             is Effect.TranslateFinal -> translations.launch { translateFinal(current, effect) }
             is Effect.TranslatePartial -> translatePartial(current, effect)
@@ -331,22 +346,9 @@ internal class AudioPresenter(
     }
 
     private fun publish(current: ConversationSession) {
-        val live = current.listeningCards.map { card ->
-            AudioCard("live-${card.card}", card.direction?.source, card.text, card.translation,
-                if (card.open) "途中" else "書き起こしを確定中", mine = card.direction?.mine)
-        }
-        val final = current.turns.takeLast(100).map { turn ->
-            AudioCard("final-${turn.id}", turn.direction.source, turn.original, turn.translation,
-                when {
-                    turn.swap == SwapState.REWRITING -> "書き起こし直し中"
-                    turn.direction.target == null -> "相手の言語が分かったら訳します"
-                    turn.translated -> "確定"
-                    else -> "翻訳中"
-                }, turn.failure, turn.direction.mine, turn.id, turn.swap)
-        }
         mutableState.value = state.value.copy(
-            cards = live.asReversed() + final.asReversed(), canCut = current.canCut,
-            detectedPartner = current.partner.takeIf { current.partnerFound },
+            live = current.listeningCards, turns = current.turns.takeLast(MAX_SHOWN_TURNS), canCut = current.canCut,
+            partner = current.partner, partnerFound = current.partnerFound,
             canExport = selection.source == AudioSource.MICROPHONE && current.turns.isNotEmpty(),
             subtitle = if (selection.source == AudioSource.PLAYBACK) playbackSubtitle(current) else null,
         )
@@ -420,11 +422,22 @@ internal class AudioPresenter(
     }
 }
 
+/** 画面に出す確定したカードの数。会話の記録（保存・コピー）はセッションの全部を使う。 */
+private const val MAX_SHOWN_TURNS = 200
+
+/** 音量の目安。-55dBFS（静かな部屋）〜-15dBFS（近くで話す）を0〜1に割り当てる（Android 版と同じ）。 */
+internal fun level(samples: FloatArray): Float {
+    if (samples.isEmpty()) return 0f
+    var sum = 0.0
+    for (s in samples) sum += s * s
+    val db = 10 * log10(sum / samples.size + 1e-10)
+    return ((db + 55) / 40).toFloat().coerceIn(0f, 1f)
+}
+
 internal fun AudioSelection.validLanguages(): AudioSelection {
     val mine = self.takeIf { it in languages } ?: Language.JA
     val from = playbackFrom.takeIf { it in languages } ?: Language.EN
     val other = partner?.takeIf { it in languages && !it.sameAs(mine) }
     return copy(self = mine, partner = other, playbackFrom = from,
-        playbackTo = playbackTo.takeUnless { it.sameAs(from) } ?: Language.JA,
-        partnerSpeaking = partnerSpeaking.takeUnless { it == true && other == null })
+        playbackTo = playbackTo.takeUnless { it.sameAs(from) } ?: Language.JA)
 }

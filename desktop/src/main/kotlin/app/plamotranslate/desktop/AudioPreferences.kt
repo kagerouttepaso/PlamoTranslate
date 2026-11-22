@@ -25,8 +25,6 @@ internal class AudioPreferences(directory: Path) {
             partner = properties.language("partner"),
             playbackFrom = properties.language("playbackFrom") ?: defaults.playbackFrom,
             playbackTo = properties.language("playbackTo") ?: defaults.playbackTo,
-            partnerSpeaking = properties.getProperty("partnerSpeaking")?.toBooleanStrictOrNull(),
-            faceToFace = properties.getProperty("faceToFace").toBoolean(),
             recognition = recognition.copy(
                 model = SpeechModel.entries.find { it.name == properties.getProperty("recognitionModel") } ?: recognition.model,
                 transcribeThreads = properties.getProperty("transcribeThreads")?.toIntOrNull()?.takeIf { it in 0..16 } ?: recognition.transcribeThreads,
@@ -45,8 +43,6 @@ internal class AudioPreferences(directory: Path) {
             selection.partner?.let { setProperty("partner", it.code) }
             setProperty("playbackFrom", selection.playbackFrom.code)
             setProperty("playbackTo", selection.playbackTo.code)
-            selection.partnerSpeaking?.let { setProperty("partnerSpeaking", it.toString()) }
-            setProperty("faceToFace", selection.faceToFace.toString())
             setProperty("recognitionModel", selection.recognition.model.name)
             setProperty("transcribeThreads", selection.recognition.transcribeThreads.toString())
             setProperty("identifyThreads", selection.recognition.identifyThreads.toString())

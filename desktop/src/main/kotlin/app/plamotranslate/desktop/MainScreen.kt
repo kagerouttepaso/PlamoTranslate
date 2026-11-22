@@ -73,7 +73,9 @@ internal fun MainScreen(components: DesktopComponents) {
                     Page.AUDIO -> {
                         val audio by components.audio.state.collectAsState()
                         val settings by components.settings.state.collectAsState()
-                        AudioScreen(audio, settings.modelStatus, components.audio) { components.navigation.select(Page.SETTINGS) }
+                        AudioScreen(audio, components.audio.level, settings.modelStatus, components.audio) {
+                            components.navigation.select(Page.SETTINGS)
+                        }
                     }
                     Page.PDF -> {
                         DisposableEffect(components.pdf) {
