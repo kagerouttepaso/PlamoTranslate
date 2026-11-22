@@ -102,7 +102,7 @@ internal fun <T : Language?> LanguageMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        DesktopOutline(onClick = { expanded = true }, enabled = enabled) { Text(label) }
+        DesktopOutline(onClick = { expanded = true }, enabled = enabled) { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = DesktopSize.menuMax)) {
             options.forEach { item ->
                 DropdownMenuItem(text = { Text(optionLabel(item)) }, onClick = {

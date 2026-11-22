@@ -42,7 +42,7 @@ internal fun ApplicationScope.SubtitleWindow(audio: AudioState, preferences: Aud
                 Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
                     contentColor = MaterialTheme.colorScheme.onSurface) {
                     Column(
-                        Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                        Modifier.fillMaxSize().padding(horizontal = DesktopSize.margin),
                         verticalArrangement = Arrangement.spacedBy(DesktopSize.small),
                     ) {
                         WindowDraggableArea(Modifier.fillMaxWidth()) {

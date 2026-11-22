@@ -58,6 +58,7 @@ internal object DesktopSize {
     val paneText = TextStyle(fontSize = 16.sp, lineHeight = 24.sp)
     val cardMain = TextStyle(fontSize = 18.sp, lineHeight = 25.sp, fontWeight = FontWeight.Medium)
     val cardSub = TextStyle(fontSize = 15.sp, lineHeight = 21.sp)
+    val audioActionWidth = 110.dp
     val cutRing = 70.dp
     val cutButton = 58.dp
 }

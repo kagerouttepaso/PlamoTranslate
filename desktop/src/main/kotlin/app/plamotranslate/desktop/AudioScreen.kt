@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -131,7 +132,7 @@ internal fun AudioScreen(
 /** 上の帯：音の出どころの切り替え（左）、会話の記録と翻訳モデル（右）。 */
 @Composable
 private fun TopBar(state: AudioState, model: ModelStatus, presenter: AudioPresenter, openSettings: () -> Unit, clear: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(bottom = DesktopSize.gap), verticalAlignment = Alignment.CenterVertically) {
         Row(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
             AudioSource.entries.forEach { source ->
                 DesktopChoice(
@@ -196,7 +197,7 @@ private fun Cards(state: AudioState, level: StateFlow<Float>, presenter: AudioPr
         modifier,
         state = list,
         reverseLayout = true,
-        verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.Bottom),
+        verticalArrangement = Arrangement.spacedBy(DesktopSize.gap, Alignment.Bottom),
     ) {
         items(state.live.asReversed(), key = { "live-${it.card}" }) { card ->
             if (card.open) {
@@ -255,11 +256,11 @@ private fun TurnCard(turn: Turn, canSwap: Boolean, onSwap: () -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (d.mine) Arrangement.End else Arrangement.Start) {
         Surface(
             modifier = Modifier.fillMaxWidth(0.88f).hoverable(hover),
-            shape = RoundedCornerShape(16.dp),
+            shape = MaterialTheme.shapes.large,
             color = surface,
             contentColor = content,
         ) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.padding(horizontal = DesktopSize.margin, vertical = DesktopSize.gap), verticalArrangement = Arrangement.spacedBy(DesktopSize.small)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         if (rewriting) "${cardLabel(d)}・書き起こし直し中" else cardLabel(d),
@@ -268,13 +269,13 @@ private fun TurnCard(turn: Turn, canSwap: Boolean, onSwap: () -> Unit) {
                         modifier = Modifier.weight(1f),
                     )
                     if (canSwap && turn.swap == SwapState.AVAILABLE && hovered) {
-                        DesktopLink(onClick = onSwap, modifier = Modifier.height(28.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)) {
+                        DesktopLink(onClick = onSwap, contentPadding = DesktopSize.linkPadding) {
                             Text("⇄ 話し手を入れ替える", style = MaterialTheme.typography.labelMedium, color = content)
                         }
                     }
                 }
                 SelectionContainer {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(DesktopSize.small)) {
                         Text(turn.original, style = DesktopSize.cardSub, color = if (rewriting) pending else content.copy(alpha = 0.85f))
                         Text(
                             turn.shownTranslation,
@@ -324,12 +325,12 @@ private fun LiveCard(live: LiveSpeech, level: Float, lagSeconds: Float, waiting:
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (d?.mine != false) Arrangement.End else Arrangement.Start) {
         Surface(
             modifier = Modifier.fillMaxWidth(0.88f),
-            shape = RoundedCornerShape(16.dp),
+            shape = MaterialTheme.shapes.large,
             color = c.surfaceContainerHigh,
             contentColor = c.onSurface,
             border = BorderStroke(if (waiting) 1.dp else 2.dp, if (waiting) accent.copy(alpha = 0.6f) else accent),
         ) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.padding(horizontal = DesktopSize.margin, vertical = DesktopSize.gap), verticalArrangement = Arrangement.spacedBy(DesktopSize.small)) {
                 Text(status, style = MaterialTheme.typography.labelLarge, color = accent)
                 Text(live.text.ifEmpty { "書き起こし中… ${seconds}秒" }, style = DesktopSize.cardSub)
                 Text(live.translation.ifEmpty { "…" }, style = DesktopSize.cardMain, color = c.onSurface.copy(alpha = 0.8f))
@@ -354,19 +355,20 @@ private fun LiveCard(live: LiveSpeech, level: Float, lagSeconds: Float, waiting:
 private fun Controls(state: AudioState, level: StateFlow<Float>, presenter: AudioPresenter) {
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.padding(horizontal = DesktopSize.margin, vertical = DesktopSize.gap), verticalArrangement = Arrangement.spacedBy(DesktopSize.small)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
                     if (state.listening || state.phase == AudioPhase.STOPPING) {
-                        DesktopOutline(onClick = presenter::stop, enabled = state.canStop, modifier = Modifier.widthIn(min = 110.dp)) {
+                        DesktopOutline(onClick = presenter::stop, enabled = state.canStop, modifier = Modifier.widthIn(min = DesktopSize.audioActionWidth)) {
                             Text(if (state.phase == AudioPhase.STOPPING) "確定中…" else "停止")
                         }
                     } else {
-                        DesktopButton(onClick = presenter::start, enabled = state.canStart, modifier = Modifier.widthIn(min = 110.dp)) {
+                        DesktopButton(onClick = presenter::start, enabled = state.canStart, modifier = Modifier.widthIn(min = DesktopSize.audioActionWidth)) {
                             Text("開始")
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap),
+                        verticalArrangement = Arrangement.spacedBy(DesktopSize.small)) {
                         when (state.selection.source) {
                             AudioSource.MICROPHONE -> {
                                 LanguageMenu("自分：${state.selection.self.conversationLabel} ▾", state.selfOptions,
@@ -445,7 +447,7 @@ private fun CutButton(state: AudioState, level: StateFlow<Float>, onCut: () -> U
     val c = MaterialTheme.colorScheme
     val ring = if (state.canCut) c.primary else c.outline
     val track = c.surfaceVariant
-    Box(Modifier.padding(horizontal = 16.dp).size(DesktopSize.cutRing), contentAlignment = Alignment.Center) {
+    Box(Modifier.padding(horizontal = DesktopSize.margin).size(DesktopSize.cutRing), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val stroke = 6.dp.toPx()
             val inset = stroke / 2

@@ -151,7 +151,7 @@ private fun OutputPane(state: TranslationState, presenter: TextPresenter, modifi
                 if (state.translating) "翻訳中…" else state.stats,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 12.dp),
+                modifier = Modifier.padding(start = DesktopSize.margin),
             )
             Spacer(Modifier.weight(1f))
             DesktopLink(onClick = presenter::copyOutput, enabled = state.canCopy) { Text("コピー") }

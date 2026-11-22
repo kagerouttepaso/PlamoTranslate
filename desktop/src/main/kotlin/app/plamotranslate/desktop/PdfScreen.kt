@@ -273,7 +273,7 @@ private fun Viewer(model: PdfViewerModel, state: PdfState, documents: PdfDocumen
     ) {
         if (view.settings.outline && model.outline.isNotEmpty()) {
             OutlinePane(model, state, view.showTranslation, Modifier.width(232.dp).fillMaxHeight())
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(DesktopSize.gap))
         }
         Column(Modifier.weight(1f).fillMaxHeight()) {
             PageBar(model, view, scale, presenter)
@@ -289,13 +289,13 @@ private fun Viewer(model: PdfViewerModel, state: PdfState, documents: PdfDocumen
 @Composable
 private fun PageBar(model: PdfViewerModel, view: PdfViewState, scale: Int, presenter: PdfPresenter) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = DesktopSize.small), verticalAlignment = Alignment.CenterVertically) {
             if (model.outline.isNotEmpty()) {
                 DesktopLink(onClick = presenter::toggleOutline) { Text("見出し") }
             }
             DesktopLink(onClick = model::back, enabled = model.history.canBack) { Text("‹ 戻る", maxLines = 1) }
             DesktopLink(onClick = model::forward, enabled = model.history.canForward) { Text("進む ›", maxLines = 1) }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(DesktopSize.gap))
             PageField(model)
             Spacer(Modifier.weight(1f))
             DesktopLink(onClick = { presenter.setZoom(PdfScale.step(scale, -1)) }) { Text("−") }
@@ -324,7 +324,7 @@ private fun PageField(model: PdfViewerModel) {
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Go),
                 keyboardActions = KeyboardActions(onGo = { text.toIntOrNull()?.let { model.goTo(it - 1) } }),
-                modifier = Modifier.width(48.dp).padding(horizontal = 4.dp, vertical = 6.dp)
+                modifier = Modifier.width(48.dp).padding(DesktopSize.small)
                     .onPreviewKeyEvent { event ->
                         if (event.type == KeyEventType.KeyDown && event.key == Key.Enter) {
                             text.toIntOrNull()?.let { model.goTo(it - 1) }
@@ -346,14 +346,14 @@ private fun SearchBar(model: PdfViewerModel, documents: PdfDocuments, view: PdfV
     // 原文/訳文を切り替えたら、表示している側で探し直す。
     LaunchedEffect(view.showTranslation) { if (model.search.active) run() }
     Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.fillMaxWidth().padding(horizontal = DesktopSize.gap, vertical = DesktopSize.small), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
             Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.small, modifier = Modifier.width(280.dp)) {
                 BasicTextField(
                     value = query, onValueChange = { query = it }, singleLine = true,
                     textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    modifier = Modifier.fillMaxWidth().padding(8.dp).focusRequester(focus).onPreviewKeyEvent { event ->
+                    modifier = Modifier.fillMaxWidth().padding(DesktopSize.gap).focusRequester(focus).onPreviewKeyEvent { event ->
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         when (event.key) {
                             Key.Enter, Key.NumPadEnter -> {
@@ -399,7 +399,7 @@ private fun OutlinePane(model: PdfViewerModel, state: PdfState, showTranslation:
     }
     Surface(modifier, color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.medium) {
         Column {
-            Text("見出し", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(12.dp))
+            Text("見出し", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(DesktopSize.margin))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             LazyColumn(Modifier.fillMaxSize()) {
                 items(rows) { (item, depth) ->
@@ -431,7 +431,7 @@ private fun <T> ChoiceMenu(label: String, options: List<T>, optionLabel: (T) -> 
     var open by remember { mutableStateOf(false) }
     Box {
         DesktopLink(onClick = { open = true }) { Text("$label ▾", maxLines = 1) }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.heightIn(max = 360.dp)) {
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.heightIn(max = DesktopSize.menuMax)) {
             options.forEach { option ->
                 DropdownMenuItem(text = { Text(optionLabel(option)) }, onClick = { open = false; select(option) })
             }
