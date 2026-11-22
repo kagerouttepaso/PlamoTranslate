@@ -31,6 +31,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.nio.file.Files
 import java.nio.file.Path
@@ -132,6 +134,7 @@ internal class AudioPresenter(
     private var session = selection.session()
     private val translations = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
     private var engine: SpeechEngine? = null
+    private val loading = Mutex()
     private var closed = false
     private var active: CaptureRun? = null
     private var partialJob: Pair<Long, Job>? = null
@@ -264,13 +267,44 @@ internal class AudioPresenter(
         if (state.value.canExport) action(session.turns)
     }
 
+    /** Android の会話画面と同じく、画面を開いた時点で準備する。入力開始時も同じ読み込みを待つ。 */
+    suspend fun prepare() {
+        if (!state.value.canStart || closed) return
+        val current = session
+        try {
+            obtainEngine()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (!closed && current === session) mutableState.value = state.value.copy(error = error.message ?: "音声認識を準備できません。")
+        }
+    }
+
+    private suspend fun obtainEngine(): SpeechEngine = loading.withLock {
+        engine?.let { return@withLock it }
+        val current = session
+        val requested = selection
+        var loaded: SpeechEngine? = null
+        try {
+            val asr = withContext(io) { loadEngine(requested).also { loaded = it } }
+            if (closed || current !== session) throw CancellationException("認識の設定が変わりました")
+            engine = asr
+            asr
+        } catch (error: LinkageError) {
+            Logs.w("Windows の音声ライブラリを読み込めませんでした", error)
+            throw IllegalStateException("音声ライブラリを読み込めません。DLL の配置を確認して再起動してください。", error)
+        } finally {
+            // JNI の読み込み中に画面を離れた場合も、作成済みの認識器を解放する。
+            loaded?.takeUnless { it === engine }?.close()
+        }
+    }
+
     private fun begin() {
         val run = CaptureRun(selection)
         active = run
         run.input = scope.launch {
-            var loaded: SpeechEngine? = null
             try {
-                val asr = engine ?: withContext(io) { loadEngine(run.selection).also { loaded = it } }.also { engine = it }
+                val asr = obtainEngine()
                 run.engine = asr
                 val current = session
                 val language = run.selection.spoken
@@ -308,9 +342,6 @@ internal class AudioPresenter(
             } catch (error: LinkageError) {
                 Logs.w("Windows の音声ライブラリを読み込めませんでした", error)
                 failInput(run, "音声ライブラリを読み込めません。DLL の配置を確認して再起動してください。")
-            } finally {
-                // 読み込みの完了と停止が重なったとき、受け取れなかった認識器も閉じる。
-                loaded?.takeUnless { it === engine }?.close()
             }
         }
     }

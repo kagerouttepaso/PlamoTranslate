@@ -94,6 +94,10 @@ internal fun AudioScreen(
     var confirmClear by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
+    LaunchedEffect(state.selection.recognition, state.selection.source, state.selection.playbackFrom,
+        state.selection.playbackTo, state.automaticAvailable) {
+        presenter.prepare()
+    }
     Column(
         Modifier.fillMaxSize()
             .focusRequester(focus)

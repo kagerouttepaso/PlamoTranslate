@@ -7,14 +7,17 @@ import app.plamotranslate.pipeline.speech.RecognitionLoad
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechEvent
 import app.plamotranslate.pipeline.speech.SpeechLanguages
+import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.pipeline.speech.Utterance
 import app.plamotranslate.pipeline.translation.JobEngine
 import app.plamotranslate.pipeline.translation.JobSource
 import app.plamotranslate.pipeline.translation.ModelOrigin
 import app.plamotranslate.pipeline.translation.TranslationStream
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -25,6 +28,36 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AudioPresenterTest {
+    @Test
+    fun `画面の準備と開始が重なっても認識器は一度だけ読み込む`() = runTest {
+        var loads = 0
+        val capture = FakeCapture()
+        val presenter = AudioPresenter(backgroundScope, capture, { loads++; FakeSpeech() }, FakeTranslationEngine()::open,
+            io = StandardTestDispatcher(testScheduler))
+        launch(start = CoroutineStart.UNDISPATCHED) { presenter.prepare() }
+        presenter.start()
+        runCurrent()
+        assertEquals(1, loads)
+        assertEquals(AudioPhase.LISTENING, presenter.state.value.phase)
+        presenter.close()
+    }
+
+    @Test
+    fun `マイクの識別モデルが届いた後にそのモデルで準備する`() = runTest {
+        var available = false
+        var loads = 0
+        val presenter = AudioPresenter(backgroundScope, FakeCapture(), { loads++; FakeSpeech() }, FakeTranslationEngine()::open,
+            initialSelection = AudioSelection(recognition = DesktopRecognitionSettings(model = SpeechModel.QWEN3_ASR)),
+            supportsAutomatic = { available }, io = StandardTestDispatcher(testScheduler))
+        presenter.prepare()
+        assertEquals(0, loads)
+        available = true
+        presenter.usePreparedRecognition(SpeechModel.QWEN3_ASR)
+        presenter.prepare()
+        assertEquals(1, loads)
+        presenter.close()
+    }
+
     @Test
     fun `会話中に相手の言語を選び直しても聞き取りを止めずに次の発話へ渡す`() = runTest {
         val speech = FakeSpeech(detected = "en")
