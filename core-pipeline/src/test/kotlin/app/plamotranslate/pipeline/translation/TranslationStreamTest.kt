@@ -161,6 +161,20 @@ class TranslationStreamTest {
     }
 
     @Test
+    fun 長い段落の先頭のチャンクが終わっても段落の残りの原文を消さない() {
+        val first = "A".repeat(900) + ". "
+        val second = "B".repeat(600) + "."
+        val engine = FakeEngine(2) { if (it.startsWith("A")) "先頭。" else "最後まで続く長い訳文。" }
+        val stream = stream(engine)
+        stream.submitBatch(listOf(Segment(1, first + second)))
+        val updates = stream.collectUntilDone(setOf(1))
+        val partials = updates.filterIsInstance<SegmentUpdate.Partial>()
+        assertTrue(partials.any { it.text == "先頭。" })
+        assertTrue(partials.all { !it.lineComplete && "先頭。".startsWith(it.text) })
+        assertEquals("先頭。 最後まで続く長い訳文。", finals(updates)[1L])
+    }
+
+    @Test
     fun 複数行の文は全部の行を訳し改行を残す() {
         // テキスト翻訳は入力の全体を1つの文として頼む。チャンクは1行に限るので、行ごとに分けてから訳し、元の改行へ戻す
         for (parallel in listOf(1, 4)) {

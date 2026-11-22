@@ -314,7 +314,8 @@ class TranslationStream(
             val seg = segments[id] ?: continue
             if (fromEngine) seg.fromEngine = true
             if (!completeIfDone(id) && (!seg.batched || p == seg.pieces.first())) {
-                emit(SegmentUpdate.Partial(id, joined(seg), lineComplete = seg.batched))
+                // 長い段落の先頭のチャンクが確定しても、段落の残りは生成中。
+                emit(SegmentUpdate.Partial(id, joined(seg)))
             }
         }
     }
