@@ -6,6 +6,7 @@ import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.llm.TranslationRequest
 import app.plamotranslate.log.Logs
 import app.plamotranslate.models.TranslationModel
+import app.plamotranslate.models.file
 import app.plamotranslate.pipeline.translation.EngineLoader
 import app.plamotranslate.pipeline.translation.SingleRequest
 import java.io.File
