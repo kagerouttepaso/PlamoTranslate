@@ -110,6 +110,7 @@ class AudioPresenterTest {
         assertTrue(capture.stopped)
         assertEquals(SubtitleLine("A complete sentence.", "確定訳"), presenter.state.value.subtitle)
         assertEquals(listOf(Language.EN to Language.JA), engine.directions.distinct())
+        assertTrue(presenter.state.value.turns.single().statsText.startsWith("区切りから確定まで1ms未満"))
         presenter.close()
     }
 

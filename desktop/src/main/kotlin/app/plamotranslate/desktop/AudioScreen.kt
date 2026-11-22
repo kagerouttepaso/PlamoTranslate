@@ -233,10 +233,11 @@ private val Turn.shownTranslation: String
     get() = failure?.let { "（翻訳に失敗しました：$it）" }
         ?: if (direction.target == null) "（相手の言語が分かったら訳します）" else translation.ifEmpty { "…" }
 
-/** かかった時間（認識・発話の長さ・翻訳）。 */
-private val Turn.statsText: String
+/** 認識器が区切った後の待ち時間。話している間に終わったジョブの処理時間は含まない。 */
+internal val Turn.statsText: String
     get() = buildString {
-        append("認識${recognizeMs}ms（発話${String.format(Locale.US, "%.1f", durationMs / 1000.0)}秒）")
+        val wait = if (recognizeMs == 0L) "1ms未満" else "${recognizeMs}ms"
+        append("区切りから確定まで${wait}（音声区間${String.format(Locale.US, "%.1f", durationMs / 1000.0)}秒）")
         translateMs?.let { append("・翻訳${it}ms") }
     }
 
