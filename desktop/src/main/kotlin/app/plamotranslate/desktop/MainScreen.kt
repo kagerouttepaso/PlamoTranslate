@@ -3,7 +3,6 @@ package app.plamotranslate.desktop
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,16 +12,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationDrawerItem
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -42,7 +37,7 @@ import app.plamotranslate.pipeline.translation.ModelState
 internal fun MainScreen(components: DesktopComponents) {
     val settings by components.settings.state.collectAsState()
     when (settings.initialSetup) {
-        null -> Surface(Modifier.fillMaxSize()) { Text("設定を読み込み中…", Modifier.padding(24.dp)) }
+        null -> Surface(Modifier.fillMaxSize()) { Text("設定を読み込み中…", Modifier.padding(DesktopSize.margin)) }
         true -> Surface(Modifier.fillMaxSize()) {
             val audio by components.audio.state.collectAsState()
             ModelSetupScreen(settings, components.settings, audio.selection.recognition.model, initial = true)
@@ -56,19 +51,15 @@ private fun DesktopPages(components: DesktopComponents, settings: SettingsState)
     val page by components.navigation.state.collectAsState()
     Surface(modifier = Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxSize()) {
-            Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.width(184.dp).fillMaxHeight()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(PRODUCT_NAME, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 16.dp))
+            Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.width(DesktopSize.navWidth).fillMaxHeight()) {
+                Column(Modifier.padding(DesktopSize.gap), verticalArrangement = Arrangement.spacedBy(DesktopSize.small)) {
                     Page.entries.forEach { item ->
-                        NavigationDrawerItem(
-                            label = { Text(item.label) },
-                            selected = item == page,
-                            onClick = { components.navigation.select(item) },
-                        )
+                        NavigationItem(item.label, item == page) { components.navigation.select(item) }
                     }
                 }
             }
-            Column(Modifier.weight(1f).fillMaxHeight().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Column(Modifier.weight(1f).fillMaxHeight().padding(DesktopSize.margin), verticalArrangement = Arrangement.spacedBy(DesktopSize.margin)) {
                 Text(page.label, style = MaterialTheme.typography.headlineSmall)
                 when (page) {
                     Page.TEXT -> {
@@ -117,8 +108,8 @@ internal fun <T : Language?> LanguageMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        OutlinedButton(onClick = { expanded = true }, enabled = enabled) { Text(label) }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 320.dp)) {
+        DesktopOutline(onClick = { expanded = true }, enabled = enabled) { Text(label) }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = DesktopSize.menuMax)) {
             options.forEach { item ->
                 DropdownMenuItem(text = { Text(optionLabel(item)) }, onClick = {
                     expanded = false
@@ -133,8 +124,8 @@ internal fun <T : Language?> LanguageMenu(
 private fun SettingsScreen(state: SettingsState, presenter: SettingsPresenter, recognition: @Composable () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.medium) {
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(DesktopSize.margin),
+            verticalArrangement = Arrangement.spacedBy(DesktopSize.gap),
         ) {
             Text("翻訳モデル", style = MaterialTheme.typography.titleLarge)
             ModelSummary(state.modelStatus)
@@ -145,7 +136,7 @@ private fun SettingsScreen(state: SettingsState, presenter: SettingsPresenter, r
             val automaticThreads = state.automaticThreads?.let { "自動（$it）" } ?: "自動"
             val threadChoices = (listOf(1, 2, 4, 6, 8) + listOfNotNull(state.automaticThreads, state.threads.takeIf { it > 0 }))
                 .distinct().sorted()
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
                 CountMenu(
                     "スレッド数", state.threads.takeIf { it > 0 }, automaticThreads, threadChoices,
                     !state.busy && state.model !is ModelState.Loading, { presenter.setThreads(it ?: 0) },
@@ -155,14 +146,14 @@ private fun SettingsScreen(state: SettingsState, presenter: SettingsPresenter, r
                     !state.busy && state.model is ModelState.Ready, presenter::setParallel,
                 )
             }
-            OutlinedButton(onClick = presenter::tuneParallel, enabled = !state.busy && state.model is ModelState.Ready) {
+            DesktopOutline(onClick = presenter::tuneParallel, enabled = !state.busy && state.model is ModelState.Ready) {
                 Text("速さを調整")
             }
             state.tuningStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             recognition()
             Text("ログ", style = MaterialTheme.typography.titleLarge)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
                 androidx.compose.material3.Switch(
                     checked = state.detailedLogs, onCheckedChange = presenter::setDetailedLogs, enabled = !state.busy,
                 )
@@ -185,10 +176,10 @@ internal fun CountMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        OutlinedButton(onClick = { expanded = true }, enabled = enabled) {
+        DesktopOutline(onClick = { expanded = true }, enabled = enabled) {
             Text("$label ${selected ?: automatic}")
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 320.dp)) {
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = DesktopSize.menuMax)) {
             DropdownMenuItem(text = { Text(automatic) }, onClick = { expanded = false; select(null) })
             choices.forEach { count ->
                 DropdownMenuItem(text = { Text(count.toString()) }, onClick = { expanded = false; select(count) })

@@ -1,5 +1,7 @@
 package app.plamotranslate.desktop
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.res.painterResource
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -41,20 +43,30 @@ fun main() {
         val owner = remember { java.util.concurrent.atomic.AtomicReference<java.awt.Window>() }
         val components = remember { assemble(scope) { owner.get() } }
         val audio by components.audio.state.collectAsState()
+        val close = {
+            components.audio.close()
+            scope.cancel()
+            exitApplication()
+        }
+        val state = rememberWindowState(width = 1080.dp, height = 700.dp)
         Window(
-            onCloseRequest = {
-                components.audio.close()
-                scope.cancel()
-                exitApplication()
-            },
-            state = rememberWindowState(width = 1080.dp, height = 700.dp),
+            onCloseRequest = close,
+            state = state,
+            undecorated = WindowsFrame.available,
+            icon = painterResource("mockingword.png"),
             title = PRODUCT_NAME,
         ) {
             LaunchedEffect(window) {
+                if (WindowsFrame.available) check(WindowsFrame.install(window.windowHandle, DesktopSize.titleHeight.value.toInt(), DesktopSize.captionWidth.value.toInt()))
                 owner.set(window)
                 window.minimumSize = Dimension(760, 480)
             }
-            DesktopTheme { MainScreen(components) }
+            DesktopTheme {
+                Column {
+                    if (WindowsFrame.available) WindowTitle(state, close)
+                    MainScreen(components)
+                }
+            }
         }
         SubtitleWindow(audio, components.audioPreferences) { components.audio.showSubtitle(false) }
     }

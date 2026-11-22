@@ -61,3 +61,8 @@ add_library(mockingword-pdf SHARED pdfium_jni.cpp)
 target_include_directories(mockingword-pdf PRIVATE ${JNI_INCLUDE_DIRS})
 target_compile_options(mockingword-pdf PRIVATE /utf-8)
 target_link_libraries(mockingword-pdf PRIVATE pdfium harfbuzz-subset)
+
+add_library(mockingword-window SHARED window_frame.cpp)
+target_include_directories(mockingword-window PRIVATE ${JNI_INCLUDE_DIRS})
+target_compile_options(mockingword-window PRIVATE /utf-8)
+target_link_libraries(mockingword-window PRIVATE user32)

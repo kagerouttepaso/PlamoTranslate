@@ -27,18 +27,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -63,10 +59,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import app.plamotranslate.pipeline.conversation.Direction
 import app.plamotranslate.pipeline.conversation.LiveSpeech
 import app.plamotranslate.pipeline.conversation.SwapState
@@ -84,12 +78,6 @@ import java.util.Locale
  * - 区切るボタンは画面で1つだけの強い操作として、操作の帯の中央に大きく置く。スペースキーでも押せる。
  * - 自分・相手の言語は会話中も選び直せる。
  */
-
-/** カードの文字。机から読む距離に合わせ、Android（26sp・20sp）より一段小さくする。原文も話した人が確かめるので小さくしすぎない。 */
-private object CardType {
-    val main = TextStyle(fontSize = 22.sp, lineHeight = 30.sp, fontWeight = FontWeight.Medium)
-    val sub = TextStyle(fontSize = 17.sp, lineHeight = 24.sp)
-}
 
 /** カードの一覧の最大の幅。横に広いウィンドウでも、1行が長くなりすぎて読みにくくならないようにする。 */
 private val CardListMaxWidth = 960.dp
@@ -134,8 +122,8 @@ internal fun AudioScreen(
             onDismissRequest = { confirmClear = false },
             title = { Text("画面の発話を消去しますか？") },
             text = { Text("保存していない会話の記録は残りません。") },
-            confirmButton = { TextButton(onClick = { confirmClear = false; presenter.clear() }) { Text("消去") } },
-            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("取り消し") } },
+            confirmButton = { DesktopLink(onClick = { confirmClear = false; presenter.clear() }) { Text("消去") } },
+            dismissButton = { DesktopLink(onClick = { confirmClear = false }) { Text("取り消し") } },
         )
     }
 }
@@ -144,9 +132,9 @@ internal fun AudioScreen(
 @Composable
 private fun TopBar(state: AudioState, model: ModelStatus, presenter: AudioPresenter, openSettings: () -> Unit, clear: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
             AudioSource.entries.forEach { source ->
-                FilterChip(
+                DesktopChoice(
                     selected = state.selection.source == source,
                     enabled = state.canConfigure,
                     onClick = { presenter.selectSource(source) },
@@ -156,7 +144,7 @@ private fun TopBar(state: AudioState, model: ModelStatus, presenter: AudioPresen
         }
         Spacer(Modifier.weight(1f))
         if (state.selection.source == AudioSource.MICROPHONE) LogMenu(state, presenter, clear)
-        TextButton(onClick = openSettings) {
+        DesktopLink(onClick = openSettings) {
             Text(if (model.isError) model.label else "翻訳モデル：${model.label}", maxLines = 1,
                 color = if (model.isError) MaterialTheme.colorScheme.error else Color.Unspecified)
         }
@@ -167,7 +155,7 @@ private fun TopBar(state: AudioState, model: ModelStatus, presenter: AudioPresen
 private fun LogMenu(state: AudioState, presenter: AudioPresenter, clear: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { open = true }, enabled = state.canExport) { Text("記録 ▾") }
+        DesktopLink(onClick = { open = true }, enabled = state.canExport) { Text("記録 ▾") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(text = { Text("ファイルに保存") }, onClick = { open = false; presenter.exportLog() })
             DropdownMenuItem(text = { Text("コピー") }, onClick = { open = false; presenter.copyLog() })
@@ -280,17 +268,17 @@ private fun TurnCard(turn: Turn, canSwap: Boolean, onSwap: () -> Unit) {
                         modifier = Modifier.weight(1f),
                     )
                     if (canSwap && turn.swap == SwapState.AVAILABLE && hovered) {
-                        TextButton(onClick = onSwap, modifier = Modifier.height(28.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)) {
+                        DesktopLink(onClick = onSwap, modifier = Modifier.height(28.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)) {
                             Text("⇄ 話し手を入れ替える", style = MaterialTheme.typography.labelMedium, color = content)
                         }
                     }
                 }
                 SelectionContainer {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(turn.original, style = CardType.sub, color = if (rewriting) pending else content.copy(alpha = 0.85f))
+                        Text(turn.original, style = DesktopSize.cardSub, color = if (rewriting) pending else content.copy(alpha = 0.85f))
                         Text(
                             turn.shownTranslation,
-                            style = CardType.main,
+                            style = DesktopSize.cardMain,
                             color = if (!turn.translated || turn.direction.target == null) pending else content,
                         )
                     }
@@ -343,8 +331,8 @@ private fun LiveCard(live: LiveSpeech, level: Float, lagSeconds: Float, waiting:
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(status, style = MaterialTheme.typography.labelLarge, color = accent)
-                Text(live.text.ifEmpty { "書き起こし中… ${seconds}秒" }, style = CardType.sub)
-                Text(live.translation.ifEmpty { "…" }, style = CardType.main, color = c.onSurface.copy(alpha = 0.8f))
+                Text(live.text.ifEmpty { "書き起こし中… ${seconds}秒" }, style = DesktopSize.cardSub)
+                Text(live.translation.ifEmpty { "…" }, style = DesktopSize.cardMain, color = c.onSurface.copy(alpha = 0.8f))
                 if (!waiting && lagSeconds >= 1f) {
                     Text("認識が%.0f秒遅れています".format(lagSeconds), style = MaterialTheme.typography.labelSmall, color = c.onSurfaceVariant)
                 }
@@ -368,17 +356,17 @@ private fun Controls(state: AudioState, level: StateFlow<Float>, presenter: Audi
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
                     if (state.listening || state.phase == AudioPhase.STOPPING) {
-                        OutlinedButton(onClick = presenter::stop, enabled = state.canStop, modifier = Modifier.widthIn(min = 160.dp)) {
+                        DesktopOutline(onClick = presenter::stop, enabled = state.canStop, modifier = Modifier.widthIn(min = 110.dp)) {
                             Text(if (state.phase == AudioPhase.STOPPING) "確定中…" else "停止")
                         }
                     } else {
-                        Button(onClick = presenter::start, enabled = state.canStart, modifier = Modifier.widthIn(min = 160.dp)) {
+                        DesktopButton(onClick = presenter::start, enabled = state.canStart, modifier = Modifier.widthIn(min = 110.dp)) {
                             Text("開始")
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
                         when (state.selection.source) {
                             AudioSource.MICROPHONE -> {
                                 LanguageMenu("自分：${state.selection.self.conversationLabel} ▾", state.selfOptions,
@@ -398,7 +386,7 @@ private fun Controls(state: AudioState, level: StateFlow<Float>, presenter: Audi
                 CutButton(state, level, presenter::cut)
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
                     if (state.selection.source == AudioSource.PLAYBACK) {
-                        OutlinedButton(onClick = { presenter.showSubtitle(!state.subtitleVisible) }) {
+                        DesktopOutline(onClick = { presenter.showSubtitle(!state.subtitleVisible) }) {
                             Text(if (state.subtitleVisible) "字幕を隠す" else "字幕を表示")
                         }
                     }
@@ -457,7 +445,7 @@ private fun CutButton(state: AudioState, level: StateFlow<Float>, onCut: () -> U
     val c = MaterialTheme.colorScheme
     val ring = if (state.canCut) c.primary else c.outline
     val track = c.surfaceVariant
-    Box(Modifier.padding(horizontal = 16.dp).size(116.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.padding(horizontal = 16.dp).size(DesktopSize.cutRing), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val stroke = 6.dp.toPx()
             val inset = stroke / 2
@@ -468,12 +456,12 @@ private fun CutButton(state: AudioState, level: StateFlow<Float>, onCut: () -> U
         FilledIconButton(
             onClick = onCut,
             enabled = state.canCut,
-            modifier = Modifier.size(98.dp),
+            modifier = Modifier.size(DesktopSize.cutButton),
             shape = CircleShape,
             colors = IconButtonDefaults.filledIconButtonColors(containerColor = c.primary, contentColor = c.onPrimary),
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(if (state.canCut) "区切る" else "話して", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(if (state.canCut) "区切る" else "話して", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                 if (state.canCut) Text("Space", style = MaterialTheme.typography.labelSmall)
             }
         }

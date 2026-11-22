@@ -20,19 +20,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -109,7 +106,7 @@ internal fun PdfScreen(
     }
     Column(
         Modifier.fillMaxSize().dragAndDropTarget({ it.dragData() is DragData.FilesList }, dropTarget),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(DesktopSize.gap),
     ) {
         TranslationBar(state, documents, view, presenter, selectTarget)
         StatusLine(state, documents, view, presenter)
@@ -135,8 +132,8 @@ private fun TranslationBar(
     selectTarget: (Language) -> Unit,
 ) {
     val opened = state.name != null && state.pageCount > 0
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = presenter::choose) { Text("PDF を開く") }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
+        DesktopOutline(onClick = presenter::choose) { Text("PDF を開く") }
         Text(
             state.name ?: "", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = true),
@@ -158,14 +155,14 @@ private fun TranslationBar(
             val canSave = state.writtenPages.isNotEmpty() && !view.saving
             val saveLabel = if (view.saving) "保存中…" else "訳した PDF を保存"
             if (finished) {
-                Button(onClick = presenter::save, enabled = canSave) { Text(saveLabel) }
+                DesktopButton(onClick = presenter::save, enabled = canSave) { Text(saveLabel) }
             } else {
-                OutlinedButton(onClick = presenter::save, enabled = canSave) { Text(saveLabel) }
+                DesktopOutline(onClick = presenter::save, enabled = canSave) { Text(saveLabel) }
                 when {
-                    state.phase == PdfPhase.Translating -> OutlinedButton(onClick = presenter::stop) { Text("翻訳を中止") }
-                    state.untranslated.isNotEmpty() -> Button(onClick = presenter::retry) { Text("やり直す") }
-                    state.phase == PdfPhase.Paused -> Button(onClick = presenter::start) { Text("翻訳を再開") }
-                    else -> Button(onClick = presenter::start, enabled = !state.opening) { Text("翻訳を開始") }
+                    state.phase == PdfPhase.Translating -> DesktopOutline(onClick = presenter::stop) { Text("翻訳を中止") }
+                    state.untranslated.isNotEmpty() -> DesktopButton(onClick = presenter::retry) { Text("やり直す") }
+                    state.phase == PdfPhase.Paused -> DesktopButton(onClick = presenter::start) { Text("翻訳を再開") }
+                    else -> DesktopButton(onClick = presenter::start, enabled = !state.opening) { Text("翻訳を開始") }
                 }
             }
         }
@@ -198,7 +195,7 @@ private fun StatusLine(state: PdfState, documents: PdfDocuments, view: PdfViewSt
         total > 0 -> "$total ページ。「翻訳を開始」で、今見ているページから訳します" to false
         else -> null to false
     }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(DesktopSize.small)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 message.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = if (isError) error else muted,
@@ -207,7 +204,7 @@ private fun StatusLine(state: PdfState, documents: PdfDocuments, view: PdfViewSt
             if (state.unreadable.isNotEmpty()) {
                 Text("文字を読み取れないページ ${state.unreadable.size}", style = MaterialTheme.typography.labelMedium, color = muted)
             }
-            if (view.notice != null) TextButton(onClick = presenter::dismissNotice) { Text("閉じる") }
+            if (view.notice != null) DesktopLink(onClick = presenter::dismissNotice) { Text("閉じる") }
         }
         if (state.phase == PdfPhase.Translating && total > 0) {
             LinearProgressIndicator(progress = { written.toFloat() / total }, modifier = Modifier.fillMaxWidth())
@@ -220,7 +217,7 @@ private fun EmptyState(state: PdfState, presenter: PdfPresenter) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxSize()) {
         Column(
             Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+            verticalArrangement = Arrangement.spacedBy(DesktopSize.margin, Alignment.CenterVertically),
         ) {
             Text(if (state.opening) "開いています…" else "PDF をここにドロップ", style = MaterialTheme.typography.headlineSmall)
             Text(
@@ -228,7 +225,7 @@ private fun EmptyState(state: PdfState, presenter: PdfPresenter) {
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
-            Button(onClick = presenter::choose) { Text("PDF を開く") }
+            DesktopButton(onClick = presenter::choose) { Text("PDF を開く") }
         }
     }
 }
@@ -294,22 +291,22 @@ private fun PageBar(model: PdfViewerModel, view: PdfViewState, scale: Int, prese
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             if (model.outline.isNotEmpty()) {
-                TextButton(onClick = presenter::toggleOutline) { Text("見出し") }
+                DesktopLink(onClick = presenter::toggleOutline) { Text("見出し") }
             }
-            TextButton(onClick = model::back, enabled = model.history.canBack) { Text("‹ 戻る", maxLines = 1) }
-            TextButton(onClick = model::forward, enabled = model.history.canForward) { Text("進む ›", maxLines = 1) }
+            DesktopLink(onClick = model::back, enabled = model.history.canBack) { Text("‹ 戻る", maxLines = 1) }
+            DesktopLink(onClick = model::forward, enabled = model.history.canForward) { Text("進む ›", maxLines = 1) }
             Spacer(Modifier.width(8.dp))
             PageField(model)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { presenter.setZoom(PdfScale.step(scale, -1)) }) { Text("−") }
+            DesktopLink(onClick = { presenter.setZoom(PdfScale.step(scale, -1)) }) { Text("−") }
             ChoiceMenu(
                 "$scale%",
                 listOf(PdfZoom.FitWidth, PdfZoom.FitPage) + listOf(50, 75, 100, 125, 150, 200, 300).map(PdfZoom::Scale),
                 { it.label }, presenter::setZoom,
             )
-            TextButton(onClick = { presenter.setZoom(PdfScale.step(scale, 1)) }) { Text("+") }
+            DesktopLink(onClick = { presenter.setZoom(PdfScale.step(scale, 1)) }) { Text("+") }
             ChoiceMenu(view.settings.spread.short, PdfSpread.entries, { it.label }, presenter::setSpread)
-            TextButton(onClick = { model.searchOpen = !model.searchOpen }) { Text("検索", maxLines = 1) }
+            DesktopLink(onClick = { model.searchOpen = !model.searchOpen }) { Text("検索", maxLines = 1) }
         }
     }
 }
@@ -350,7 +347,7 @@ private fun SearchBar(model: PdfViewerModel, documents: PdfDocuments, view: PdfV
     LaunchedEffect(view.showTranslation) { if (model.search.active) run() }
     Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
             Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.small, modifier = Modifier.width(280.dp)) {
                 BasicTextField(
                     value = query, onValueChange = { query = it }, singleLine = true,
@@ -379,10 +376,10 @@ private fun SearchBar(model: PdfViewerModel, documents: PdfDocuments, view: PdfV
                 },
                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            TextButton(onClick = { model.moveSearch(-1) }, enabled = search.hits.isNotEmpty()) { Text("前へ") }
-            TextButton(onClick = { model.moveSearch(1) }, enabled = search.hits.isNotEmpty()) { Text("次へ") }
+            DesktopLink(onClick = { model.moveSearch(-1) }, enabled = search.hits.isNotEmpty()) { Text("前へ") }
+            DesktopLink(onClick = { model.moveSearch(1) }, enabled = search.hits.isNotEmpty()) { Text("次へ") }
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = close) { Text("閉じる") }
+            DesktopLink(onClick = close) { Text("閉じる") }
         }
     }
 }
@@ -433,7 +430,7 @@ private fun OutlinePane(model: PdfViewerModel, state: PdfState, showTranslation:
 private fun <T> ChoiceMenu(label: String, options: List<T>, optionLabel: (T) -> String, select: (T) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { open = true }) { Text("$label ▾", maxLines = 1) }
+        DesktopLink(onClick = { open = true }) { Text("$label ▾", maxLines = 1) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.heightIn(max = 360.dp)) {
             options.forEach { option ->
                 DropdownMenuItem(text = { Text(optionLabel(option)) }, onClick = { open = false; select(option) })

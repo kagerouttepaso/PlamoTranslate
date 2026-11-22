@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.window.WindowDraggableArea
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
@@ -42,12 +41,12 @@ internal fun ApplicationScope.SubtitleWindow(audio: AudioState, preferences: Aud
             DesktopTheme {
                 Column(
                     Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.90f)).padding(horizontal = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(DesktopSize.small),
                 ) {
                     WindowDraggableArea(Modifier.fillMaxWidth()) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text("字幕", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
-                            TextButton(onClick = hide) { Text("閉じる") }
+                            DesktopLink(onClick = hide) { Text("閉じる") }
                         }
                     }
                     val subtitle = audio.subtitle

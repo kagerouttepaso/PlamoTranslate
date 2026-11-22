@@ -1,9 +1,14 @@
 package app.plamotranslate.desktop
 
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
@@ -37,7 +42,40 @@ private val PaperChirp = lightColorScheme(
     surfaceContainerHighest = Color(0xFFE8DDCB), outline = Color(0xFF9C9083), outlineVariant = Color(0xFFE5DCCB),
 )
 
+internal object DesktopSize {
+    val small = 4.dp
+    val gap = 8.dp
+    val margin = 12.dp
+    val control = 32.dp
+    val titleHeight = 36.dp
+    val captionWidth = 46.dp
+    val logo = 22.dp
+    val navWidth = 132.dp
+    val settingsWidth = 148.dp
+    val menuMax = 320.dp
+    val buttonPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+    val linkPadding = PaddingValues(horizontal = 7.dp, vertical = 2.dp)
+    val paneText = TextStyle(fontSize = 16.sp, lineHeight = 24.sp)
+    val cardMain = TextStyle(fontSize = 18.sp, lineHeight = 25.sp, fontWeight = FontWeight.Medium)
+    val cardSub = TextStyle(fontSize = 15.sp, lineHeight = 21.sp)
+    val cutRing = 70.dp
+    val cutButton = 58.dp
+}
+
+private val desktopType = Typography(
+    headlineSmall = TextStyle(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold),
+    titleLarge = TextStyle(fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.SemiBold),
+    titleMedium = TextStyle(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold),
+    bodyLarge = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
+    bodyMedium = TextStyle(fontSize = 13.sp, lineHeight = 19.sp),
+    labelLarge = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
+)
+
 @Composable
 internal fun DesktopTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) NightBird else PaperChirp, content = content)
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides DesktopSize.control) {
+        MaterialTheme(colorScheme = if (isSystemInDarkTheme()) NightBird else PaperChirp,
+            typography = desktopType, shapes = Shapes(small = RoundedCornerShape(6.dp), large = RoundedCornerShape(8.dp)),
+            content = content)
+    }
 }

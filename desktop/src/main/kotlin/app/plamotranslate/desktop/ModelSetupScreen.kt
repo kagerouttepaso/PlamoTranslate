@@ -7,11 +7,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,8 +35,8 @@ internal fun ModelSetupScreen(
     val files = listOfNotNull(translation.file.takeIf { initial }) + DesktopSpeechModels.downloadFiles(recognition)
 
     Column(
-        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(if (initial) 24.dp else 0.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(if (initial) DesktopSize.margin else 0.dp),
+        verticalArrangement = Arrangement.spacedBy(DesktopSize.gap),
     ) {
         Text("モデルの準備", style = MaterialTheme.typography.headlineSmall)
         if (!initial) Text("音声翻訳を使うには、音声認識モデルを準備してください。")
@@ -57,12 +54,12 @@ internal fun ModelSetupScreen(
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         val download = state.download
         if (download == null) {
-            Button(
+            DesktopButton(
                 onClick = { presenter.prepareModels(translation.takeIf { initial }, recognition) },
                 enabled = !state.busy,
             ) { Text(modelDownloadLabel(files, state)) }
             if (initial) {
-                TextButton(onClick = presenter::choose, enabled = !state.busy) { Text("GGUF ファイルを選ぶ") }
+                DesktopLink(onClick = presenter::choose, enabled = !state.busy) { Text("GGUF ファイルを選ぶ") }
                 TranslationModelLicense()
             }
         } else {
@@ -79,7 +76,7 @@ private fun TranslationModelLicense() {
             "18歳未満の方は、保護者の同意を得てから使ってください。個人の利用と非商用の利用は無料です。",
         style = MaterialTheme.typography.bodySmall,
     )
-    TextButton(onClick = { links.openUri("https://plamo.preferredai.jp/info/plamo-community-license-ja") }) {
+    DesktopLink(onClick = { links.openUri("https://plamo.preferredai.jp/info/plamo-community-license-ja") }) {
         Text("ライセンスを読む")
     }
     Text("Built with PLaMo", style = MaterialTheme.typography.bodySmall)
@@ -95,9 +92,9 @@ private fun <T> ModelChoice(
     label: (T) -> String,
 ) {
     Text(title, style = MaterialTheme.typography.titleMedium)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
         options.forEach { option ->
-            FilterChip(
+            DesktopChoice(
                 selected = option == selected, enabled = enabled,
                 onClick = { onSelect(option) }, label = { Text(label(option)) },
             )

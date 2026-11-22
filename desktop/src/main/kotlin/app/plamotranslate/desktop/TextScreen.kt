@@ -1,6 +1,8 @@
 package app.plamotranslate.desktop
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,13 +14,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -31,9 +30,7 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import app.plamotranslate.llm.Language
 
 /*
@@ -43,8 +40,6 @@ import app.plamotranslate.llm.Language
  * 翻訳は Ctrl+Enter でも始められる（文を打ってからマウスに持ち替えなくてよい）。
  */
 
-/** 原文・訳文の文字。読み比べるので同じ大きさにする。 */
-private val PaneText = TextStyle(fontSize = 18.sp, lineHeight = 27.sp)
 
 @Composable
 internal fun TextScreen(
@@ -63,31 +58,31 @@ internal fun TextScreen(
                 false
             }
         },
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(DesktopSize.gap),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
             LanguageMenu("${state.source?.label ?: "自動判定"} ▾", listOf(null) + Language.entries, presenter::selectSource, canEdit) {
                 it?.label ?: "自動判定"
             }
-            TextButton(onClick = presenter::swap, enabled = state.canSwap) { Text("⇄", style = MaterialTheme.typography.titleLarge) }
+            DesktopLink(onClick = presenter::swap, enabled = state.canSwap) { Text("⇄", style = MaterialTheme.typography.titleLarge) }
             LanguageMenu("${state.target.label} ▾", Language.entries, selectTarget, canEdit)
             Spacer(Modifier.weight(1f))
             val model = state.modelStatus
-            TextButton(onClick = openSettings) {
+            DesktopLink(onClick = openSettings) {
                 Text(if (model.isError) model.label else "翻訳モデル：${model.label}", maxLines = 1,
                     color = if (model.isError) MaterialTheme.colorScheme.error else Color.Unspecified)
             }
         }
-        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DesktopSize.margin)) {
             SourcePane(state, presenter, canEdit, Modifier.weight(1f).fillMaxHeight())
             OutputPane(state, presenter, Modifier.weight(1f).fillMaxHeight())
         }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
             if (state.translating) {
-                OutlinedButton(onClick = presenter::cancel) { Text("翻訳を取り消す") }
+                DesktopOutline(onClick = presenter::cancel) { Text("翻訳を取り消す") }
             } else {
-                Button(onClick = presenter::translate, enabled = state.canTranslate) {
+                DesktopButton(onClick = presenter::translate, enabled = state.canTranslate) {
                     Text(if (state.output.isNotBlank()) "訳し直す" else "翻訳")
                 }
             }
@@ -99,24 +94,24 @@ internal fun TextScreen(
 /** 原文の欄。下の帯に入力の操作を置く。 */
 @Composable
 private fun SourcePane(state: TranslationState, presenter: TextPresenter, canEdit: Boolean, modifier: Modifier) {
-    Pane(modifier, container = MaterialTheme.colorScheme.surfaceContainerLow) {
+    Pane(modifier, "原文", MaterialTheme.colorScheme.primary) {
         TextField(
             value = state.input,
             onValueChange = presenter::edit,
             readOnly = !canEdit,
-            textStyle = PaneText,
-            placeholder = { Text("訳したい文を入力・貼り付け", style = PaneText) },
+            textStyle = DesktopSize.paneText,
+            placeholder = { Text("訳したい文を入力・貼り付け", style = DesktopSize.paneText) },
             colors = TextFieldDefaults.colors(
                 focusedContainerColor = Color.Transparent,
                 unfocusedContainerColor = Color.Transparent,
                 disabledContainerColor = Color.Transparent,
-                focusedIndicatorColor = Color.Transparent,
+                focusedIndicatorColor = MaterialTheme.colorScheme.primary,
                 unfocusedIndicatorColor = Color.Transparent,
             ),
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
         PaneBar {
-            TextButton(
+            DesktopLink(
                 onClick = if (state.voice == TextVoicePhase.LISTENING) presenter::stopVoice else presenter::startVoice,
                 enabled = canEdit && !state.translating || state.voice == TextVoicePhase.LISTENING,
             ) {
@@ -127,13 +122,13 @@ private fun SourcePane(state: TranslationState, presenter: TextPresenter, canEdi
                     TextVoicePhase.FINISHING -> "書き起こし中…"
                 })
             }
-            TextButton(onClick = presenter::pasteAndTranslate, enabled = canEdit) { Text("貼り付けて翻訳") }
+            DesktopLink(onClick = presenter::pasteAndTranslate, enabled = canEdit) { Text("貼り付けて翻訳") }
             Spacer(Modifier.weight(1f))
             if (state.input.isNotEmpty()) {
                 Text("${state.input.length}文字", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            TextButton(onClick = presenter::copyInput, enabled = state.input.isNotBlank() && canEdit) { Text("コピー") }
-            TextButton(onClick = presenter::clear, enabled = canEdit && state.input.isNotEmpty()) { Text("消去") }
+            DesktopLink(onClick = presenter::copyInput, enabled = state.input.isNotBlank() && canEdit) { Text("コピー") }
+            DesktopLink(onClick = presenter::clear, enabled = canEdit && state.input.isNotEmpty()) { Text("消去") }
         }
     }
 }
@@ -141,12 +136,12 @@ private fun SourcePane(state: TranslationState, presenter: TextPresenter, canEdi
 /** 訳文の欄。訳している途中の訳を流し、下の帯にかかった時間とコピーを置く。 */
 @Composable
 private fun OutputPane(state: TranslationState, presenter: TextPresenter, modifier: Modifier) {
-    Pane(modifier, container = MaterialTheme.colorScheme.surfaceContainer) {
-        Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
+    Pane(modifier, "訳文", MaterialTheme.colorScheme.secondary) {
+        Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(DesktopSize.margin)) {
             SelectionContainer {
                 Text(
                     state.output.ifEmpty { if (state.translating) "…" else "" },
-                    style = PaneText,
+                    style = DesktopSize.paneText,
                     color = if (state.translating) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f) else MaterialTheme.colorScheme.onSurface,
                 )
             }
@@ -159,24 +154,29 @@ private fun OutputPane(state: TranslationState, presenter: TextPresenter, modifi
                 modifier = Modifier.padding(start = 12.dp),
             )
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = presenter::copyOutput, enabled = state.canCopy) { Text("コピー") }
+            DesktopLink(onClick = presenter::copyOutput, enabled = state.canCopy) { Text("コピー") }
         }
     }
 }
 
 @Composable
-private fun Pane(modifier: Modifier, container: Color, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
-    Surface(modifier, color = container, shape = MaterialTheme.shapes.large) {
-        Column(Modifier.fillMaxSize(), content = content)
+private fun Pane(modifier: Modifier, title: String, accent: Color, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Surface(modifier, color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large) {
+        Column(Modifier.fillMaxSize()) {
+            Spacer(Modifier.fillMaxWidth().height(DesktopSize.small).background(accent))
+            Text(title, Modifier.padding(start = DesktopSize.margin, top = DesktopSize.gap),
+                style = MaterialTheme.typography.labelLarge, color = accent)
+            content()
+        }
     }
 }
 
 @Composable
-private fun PaneBar(content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+private fun PaneBar(content: @Composable androidx.compose.foundation.layout.FlowRowScope.() -> Unit) {
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    androidx.compose.foundation.layout.FlowRow(
+        Modifier.fillMaxWidth().padding(horizontal = DesktopSize.small),
+        itemVerticalAlignment = Alignment.CenterVertically,
         content = content,
     )
 }

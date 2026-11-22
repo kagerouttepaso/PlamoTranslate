@@ -2,11 +2,8 @@ package app.plamotranslate.desktop
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,9 +24,9 @@ internal fun RecognitionSettings(
     val enabled = state.canConfigure && models.download == null
     var expanded by remember { mutableStateOf(false) }
     Text("音声認識", style = MaterialTheme.typography.titleLarge)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
         SpeechModel.entries.forEach { model ->
-            FilterChip(selected = model == settings.model, enabled = enabled,
+            DesktopChoice(selected = model == settings.model, enabled = enabled,
                 onClick = { change(settings.copy(model = model)) }, label = { Text(model.label) })
         }
     }
@@ -37,17 +34,17 @@ internal fun RecognitionSettings(
         style = MaterialTheme.typography.bodySmall)
     val files = DesktopSpeechModels.downloadFiles(settings.model)
     if (files.any { models.availableBytes(it) < it.size }) {
-        OutlinedButton(
+        DesktopOutline(
             onClick = { modelPresenter.prepareModels(recognition = settings.model) },
             enabled = enabled && !models.busy,
         ) { Text(modelDownloadLabel(files, models)) }
     }
     if (!state.canConfigure) Text("音声入力を停止すると設定を変更できます。")
     if (state.canExport) Text("認識設定を変える前に、必要な会話の記録を保存してください。")
-    TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "音声認識の詳細を閉じる" else "音声認識の詳細") }
+    DesktopLink(onClick = { expanded = !expanded }) { Text(if (expanded) "音声認識の詳細を閉じる" else "音声認識の詳細") }
     if (expanded) {
         val defaults = DesktopRecognitionSettings()
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
             CountMenu("書き起こしのスレッド数", settings.transcribeThreads.takeIf { it > 0 }, "自動", 1..16, enabled) {
                 change(settings.copy(transcribeThreads = it ?: defaults.transcribeThreads))
             }
@@ -68,6 +65,6 @@ internal fun RecognitionSettings(
                 change(settings.copy(vadMinSpeechSeconds = it?.div(1000f) ?: defaults.vadMinSpeechSeconds))
             }
         }
-        TextButton(onClick = { change(defaults.copy(model = settings.model)) }, enabled = enabled) { Text("調整を既定に戻す") }
+        DesktopLink(onClick = { change(defaults.copy(model = settings.model)) }, enabled = enabled) { Text("調整を既定に戻す") }
     }
 }
