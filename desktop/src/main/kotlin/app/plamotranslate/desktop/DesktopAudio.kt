@@ -4,6 +4,7 @@ import app.plamotranslate.asr.Qwen3Recognizer
 import app.plamotranslate.asr.JvmSenseVoice
 import app.plamotranslate.asr.JvmWhisperIdentifier
 import app.plamotranslate.asr.SileroVoiceActivity
+import app.plamotranslate.pipeline.models.SharedModelCatalog
 import app.plamotranslate.pipeline.speech.IdentifiedRecognizer
 import app.plamotranslate.pipeline.speech.SegmentationProfile
 import app.plamotranslate.pipeline.speech.SpeechEngine
@@ -15,6 +16,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.nio.file.Path
 
 internal enum class AudioSource(val label: String) {
     MICROPHONE("マイク"),
@@ -26,7 +28,7 @@ internal fun interface AudioCapture {
 }
 
 internal data class DesktopRecognitionSettings(
-    val model: SpeechModel = SpeechModel.QWEN3_ASR,
+    val model: SpeechModel = SpeechModel.DEFAULT,
     val transcribeThreads: Int = 0,
     val identifyThreads: Int = 2,
     val cardLanguageSeconds: Float = SegmentationProfile.CONVERSATION.cardLanguageSeconds,
@@ -66,7 +68,8 @@ internal object WindowsAudio : AudioCapture {
     private external fun close(handle: Long)
 }
 
-internal class DesktopAsr(private val directory: File) {
+internal class DesktopAsr(private val models: Path) {
+    private val directory = models.resolve("asr").toFile()
     private val runtime by lazy {
         val sherpa = checkNotNull(System.getProperty("mockingword.sherpa.dir")) { "sherpa-onnx の DLL の場所を指定してください。" }
         // 名前だけで依存 DLL を解決すると、PATH より先に System32 の旧版が選ばれる。
@@ -74,20 +77,18 @@ internal class DesktopAsr(private val directory: File) {
     }
 
     fun supportsAutomatic(model: SpeechModel): Boolean = model.identifiesLanguage ||
-        JvmWhisperIdentifier.files.all { File(directory, it).isFile && File(directory, it).canRead() }
+        SharedModelCatalog.whisperTiny.all { DesktopSpeechModels.isInstalled(models, it) }
+
+    fun hasRequiredFiles(model: SpeechModel): Boolean =
+        DesktopSpeechModels.requiredFiles(model).all { DesktopSpeechModels.isInstalled(models, it) }
 
     fun load(settings: DesktopRecognitionSettings): SpeechEngine {
         val qwen = File(directory, Qwen3Recognizer.DIR)
-        val vad = File(directory, "silero_vad.onnx")
+        val vad = models.resolve(SharedModelCatalog.sileroVad.path).toFile()
         val identify = supportsAutomatic(settings.model)
-        val qwenFiles = Qwen3Recognizer.FILES + listOf("tokenizer/merges.txt", "tokenizer/tokenizer_config.json")
-        val files = when (settings.model) {
-            SpeechModel.QWEN3_ASR -> qwenFiles.map { File(qwen, it) } +
-                if (identify) JvmWhisperIdentifier.files.map { File(directory, it) } else emptyList()
-            SpeechModel.SENSE_VOICE -> JvmSenseVoice.files.map { File(directory, it) }
-        }
-        val missing = (listOf(vad) + files).firstOrNull { !it.isFile || !it.canRead() }
-        require(missing == null) { "音声認識モデルがありません。設定の音声認識とモデルの配置を確認してください。\n${missing?.path}" }
+        val missing = DesktopSpeechModels.requiredFiles(settings.model)
+            .firstOrNull { !DesktopSpeechModels.isInstalled(models, it) }
+        require(missing == null) { "音声認識モデルがありません。設定の「音声認識」からダウンロードしてください。\n${missing?.path}" }
 
         runtime
         val profile = SegmentationProfile.CONVERSATION.copy(cardLanguageSeconds = settings.cardLanguageSeconds)

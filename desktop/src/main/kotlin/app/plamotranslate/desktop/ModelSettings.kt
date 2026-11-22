@@ -23,7 +23,7 @@ import app.plamotranslate.pipeline.translation.ModelState
 internal fun ModelSettings(state: SettingsState, presenter: SettingsPresenter) {
     val enabled = !state.busy && state.model !is ModelState.Loading
     DesktopModelCatalog.entries.forEach { model ->
-        val bytes = state.catalogStatus[model] ?: 0L
+        val bytes = state.availableBytes(model.file)
         val selected = state.selectedPath == model.path(state.defaultPath.parent)
         val action = when {
             bytes == model.size -> "使う"
@@ -37,15 +37,8 @@ internal fun ModelSettings(state: SettingsState, presenter: SettingsPresenter) {
                 Text(if (bytes in 1 until model.size) "${bytes / 1_000_000} / $size" else size,
                     style = MaterialTheme.typography.bodySmall)
             }
-            OutlinedButton(onClick = { presenter.selectModel(model) }, enabled = enabled) { Text(action) }
+            OutlinedButton(onClick = { presenter.prepareModels(translation = model) }, enabled = enabled) { Text(action) }
         }
-    }
-    state.download?.let { progress ->
-        val fraction = (progress.bytes.toDouble() / progress.model.size).toFloat().coerceIn(0f, 1f)
-        val label = if (progress.verifying) "SHA-256 を照合中" else "ダウンロード中 ${(fraction * 100).toInt()}%"
-        Text("${progress.model.title}：$label")
-        LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
-        OutlinedButton(onClick = presenter::cancelDownload) { Text("取り消す") }
     }
     var details by remember { mutableStateOf(false) }
     TextButton(onClick = { details = !details }) { Text(if (details) "詳細を閉じる" else "モデルの詳細") }
@@ -56,6 +49,21 @@ internal fun ModelSettings(state: SettingsState, presenter: SettingsPresenter) {
             OutlinedButton(onClick = presenter::reload, enabled = enabled) { Text("読み込み直す") }
         }
     }
+}
+
+@Composable
+internal fun ModelDownloadControls(progress: ModelPreparationProgress, cancel: () -> Unit) {
+    val file = progress.file
+    if (file == null) {
+        Text("モデルを確認中…")
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    } else {
+        val fraction = (progress.bytes.toDouble() / progress.total).toFloat().coerceIn(0f, 1f)
+        val label = if (progress.verifying) "SHA-256 を照合中" else "ダウンロード中 ${(fraction * 100).toInt()}%"
+        Text("${file.label}：$label")
+        LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+    }
+    OutlinedButton(onClick = cancel) { Text("取り消す") }
 }
 
 @Composable

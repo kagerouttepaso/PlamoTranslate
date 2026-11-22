@@ -436,7 +436,7 @@ private fun statusText(state: AudioState): String {
     }
     return when {
         !playback && !state.automaticAvailable ->
-            "話した言語で話し手を決めるには、言語を識別できる音声認識が要ります。設定の「音声認識」で選んでください"
+            "Qwen3-ASR でマイクを使うには Whisper tiny が必要です。設定の「音声認識」からダウンロードしてください。"
         state.phase == AudioPhase.STARTING -> "音声入力を準備中…"
         state.phase == AudioPhase.STOPPING -> "話していた分を確定中…"
         state.canCut -> "聞き取り中…（話し終わると訳が確定します。スペースキーで区切れます）"

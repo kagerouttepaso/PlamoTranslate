@@ -1,5 +1,6 @@
 package app.plamotranslate.desktop
 
+import app.plamotranslate.pipeline.models.ModelFile
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import java.io.IOException
@@ -12,26 +13,27 @@ import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import java.util.HexFormat
 
-internal data class ModelDownloadProgress(val model: DesktopModelCatalog, val bytes: Long, val verifying: Boolean = false)
+internal data class ModelDownloadProgress(val bytes: Long, val verifying: Boolean = false)
 
 internal class DesktopModelDownloads(private val directory: Path) {
-    fun status(): Map<DesktopModelCatalog, Long> = DesktopModelCatalog.entries.associateWith { model ->
-        if (sizeOf(model.path(directory)) == model.size) model.size else sizeOf(partial(model)).coerceIn(0L, model.size - 1)
+    fun bytesAvailable(model: ModelFile): Long {
+        val target = directory.resolve(model.path)
+        return if (sizeOf(target) == model.size) model.size else sizeOf(partial(target)).coerceIn(0L, model.size - 1)
     }
 
-    suspend fun prepare(model: DesktopModelCatalog, publish: (ModelDownloadProgress) -> Unit) {
-        val target = model.path(directory)
+    suspend fun prepare(model: ModelFile, publish: (ModelDownloadProgress) -> Unit) {
+        val target = directory.resolve(model.path)
         if (sizeOf(target) == model.size) {
-            publish(ModelDownloadProgress(model, model.size, verifying = true))
+            publish(ModelDownloadProgress(model.size, verifying = true))
             if (verify(target, model)) return
         }
 
-        Files.createDirectories(directory)
-        val partial = partial(model)
+        Files.createDirectories(target.parent)
+        val partial = partial(target)
         val offset = sizeOf(partial).takeIf { it in 1..model.size } ?: 0L
         if (offset < model.size) transfer(model, partial, offset, publish)
 
-        publish(ModelDownloadProgress(model, model.size, verifying = true))
+        publish(ModelDownloadProgress(model.size, verifying = true))
         if (!verify(partial, model)) {
             Files.deleteIfExists(partial)
             throw IOException("モデルの SHA-256 が一致しません。もう一度ダウンロードしてください。")
@@ -40,10 +42,10 @@ internal class DesktopModelDownloads(private val directory: Path) {
         Files.move(partial, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
     }
 
-    private fun partial(model: DesktopModelCatalog): Path = directory.resolve("${model.filename}.part")
+    private fun partial(target: Path): Path = target.resolveSibling("${target.fileName}.part")
 
     private suspend fun transfer(
-        model: DesktopModelCatalog,
+        model: ModelFile,
         partial: Path,
         offset: Long,
         publish: (ModelDownloadProgress) -> Unit,
@@ -79,7 +81,7 @@ internal class DesktopModelDownloads(private val directory: Path) {
                 Files.newOutputStream(partial, StandardOpenOption.CREATE, StandardOpenOption.WRITE, mode).use { output ->
                     val buffer = ByteArray(128 * 1024)
                     var nextProgress = bytes
-                    publish(ModelDownloadProgress(model, bytes))
+                    publish(ModelDownloadProgress(bytes))
                     while (bytes < model.size) {
                         context.ensureActive()
                         val count = input.read(buffer, 0, minOf(buffer.size.toLong(), model.size - bytes).toInt())
@@ -87,7 +89,7 @@ internal class DesktopModelDownloads(private val directory: Path) {
                         output.write(buffer, 0, count)
                         bytes += count
                         if (bytes >= nextProgress) {
-                            publish(ModelDownloadProgress(model, bytes))
+                            publish(ModelDownloadProgress(bytes))
                             nextProgress = bytes + 1_048_576
                         }
                     }
@@ -101,7 +103,7 @@ internal class DesktopModelDownloads(private val directory: Path) {
     companion object {
         private fun sizeOf(path: Path): Long = if (Files.isRegularFile(path)) Files.size(path) else 0L
 
-        suspend fun verify(path: Path, model: DesktopModelCatalog): Boolean {
+        suspend fun verify(path: Path, model: ModelFile): Boolean {
             if (sizeOf(path) != model.size) return false
             val context = currentCoroutineContext()
             val digest = MessageDigest.getInstance("SHA-256")

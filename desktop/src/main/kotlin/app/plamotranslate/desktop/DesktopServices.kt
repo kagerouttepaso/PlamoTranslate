@@ -152,7 +152,7 @@ internal class DesktopEngineLoader(
 
     override suspend fun load(model: Path, parallel: Int): TranslationEngine = withContext(Dispatchers.IO) {
         DesktopModelCatalog.entries.firstOrNull { it.path(settings.modelDirectory) == model }?.let { entry ->
-            check(DesktopModelDownloads.verify(model, entry)) { "モデルを照合できません。設定からモデルを選び直してください。" }
+            check(DesktopModelDownloads.verify(model, entry.file)) { "モデルを照合できません。設定からモデルを選び直してください。" }
         }
         val gpu = preferGpu && !settings.cpuOnly && settings.beginGpuLoad()
         try {

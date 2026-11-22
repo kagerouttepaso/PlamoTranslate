@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -15,10 +16,15 @@ import androidx.compose.ui.unit.dp
 import app.plamotranslate.pipeline.speech.SpeechModel
 
 @Composable
-internal fun RecognitionSettings(state: AudioState, presenter: AudioPresenter) {
+internal fun RecognitionSettings(
+    state: AudioState,
+    presenter: AudioPresenter,
+    models: SettingsState,
+    modelPresenter: SettingsPresenter,
+) {
     val settings = state.selection.recognition
     val change = presenter::setRecognition
-    val enabled = state.canConfigure
+    val enabled = state.canConfigure && models.download == null
     var expanded by remember { mutableStateOf(false) }
     Text("音声認識", style = MaterialTheme.typography.titleLarge)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -27,9 +33,16 @@ internal fun RecognitionSettings(state: AudioState, presenter: AudioPresenter) {
                 onClick = { change(settings.copy(model = model)) }, label = { Text(model.label) })
         }
     }
-    Text("Qwen3-ASR の話者自動判定には Whisper tiny が必要です。モデルは開発環境の手順に沿って配置してください。",
+    Text("Qwen3-ASR の話者自動判定には Whisper tiny が必要です。",
         style = MaterialTheme.typography.bodySmall)
-    if (!enabled) Text("音声入力を停止すると設定を変更できます。")
+    val files = DesktopSpeechModels.downloadFiles(settings.model)
+    if (files.any { models.availableBytes(it) < it.size }) {
+        OutlinedButton(
+            onClick = { modelPresenter.prepareModels(recognition = settings.model) },
+            enabled = enabled && !models.busy,
+        ) { Text(modelDownloadLabel(files, models)) }
+    }
+    if (!state.canConfigure) Text("音声入力を停止すると設定を変更できます。")
     if (state.canExport) Text("認識設定を変える前に、必要な会話の記録を保存してください。")
     TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "音声認識の詳細を閉じる" else "音声認識の詳細") }
     if (expanded) {

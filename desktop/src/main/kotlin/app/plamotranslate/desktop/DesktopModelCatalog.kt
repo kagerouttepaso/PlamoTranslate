@@ -9,10 +9,9 @@ internal enum class DesktopModelCatalog(private val model: TranslationModel) {
     ;
 
     val title get() = "PLaMo 3 Translate ${model.label}"
-    val filename get() = model.file.path.substringAfterLast('/')
-    val url get() = model.file.url
-    val size get() = model.file.size
-    val sha256 get() = model.file.sha256
+    val file = model.file.copy(path = model.file.path.substringAfterLast('/'))
+    val filename get() = file.path
+    val size get() = file.size
     val origin get() = model.origin
 
     fun path(directory: Path): Path = directory.resolve(filename)

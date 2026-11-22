@@ -164,6 +164,15 @@ internal class AudioPresenter(
         if (settings != selection.recognition) configure(selection.copy(recognition = settings).validLanguages())
     }
 
+    fun usePreparedRecognition(model: SpeechModel) {
+        if (model == selection.recognition.model) {
+            mutableState.value = state.value.copy(automaticAvailable = supportsAutomatic(model))
+            saveSelection(selection)
+        } else {
+            setRecognition(selection.recognition.copy(model = model))
+        }
+    }
+
     fun swapLanguage(turnId: Long) {
         if (selection.source == AudioSource.MICROPHONE && engine != null) handle(session, Event.LanguageSwapped(turnId))
     }

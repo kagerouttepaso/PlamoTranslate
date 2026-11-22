@@ -2,19 +2,25 @@ package app.plamotranslate.desktop
 
 import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.log.Logs
+import app.plamotranslate.pipeline.models.ModelFile
+import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.pipeline.translation.ModelHost
 import app.plamotranslate.pipeline.translation.ModelState
 import app.plamotranslate.pipeline.translation.ParallelTuner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.nio.file.Files
 import java.nio.file.Path
 
 internal data class SettingsState(
@@ -28,14 +34,25 @@ internal data class SettingsState(
     val manualParallel: Int? = null,
     val automaticParallel: Int = TranslationEngine.DEFAULT_PARALLEL,
     val tuningStatus: String? = null,
-    val catalogStatus: Map<DesktopModelCatalog, Long> = emptyMap(),
-    val download: ModelDownloadProgress? = null,
+    val catalogStatus: Map<ModelFile, Long> = emptyMap(),
+    val download: ModelPreparationProgress? = null,
+    val initialSetup: Boolean? = null,
     val cpuOnly: Boolean = false,
     val gpuFallback: String? = null,
     val detailedLogs: Boolean = false,
 ) {
     val modelStatus get() = model.toStatus()
+    fun availableBytes(file: ModelFile): Long = catalogStatus[file] ?: 0L
+
+    fun hasRecognition(model: SpeechModel): Boolean = DesktopSpeechModels.requiredFiles(model).all { availableBytes(it) == it.size }
 }
+
+internal data class ModelPreparationProgress(
+    val file: ModelFile? = null,
+    val bytes: Long = 0L,
+    val total: Long = 0L,
+    val verifying: Boolean = false,
+)
 
 internal data class ModelStatus(val label: String, val detail: String? = null, val isError: Boolean = false)
 
@@ -50,6 +67,7 @@ internal class SettingsPresenter(
     private val scope: CoroutineScope,
     private val settings: DesktopSettings,
     private val models: ModelHost<Path, TranslationEngine>,
+    private val audio: AudioPresenter,
     private val chooseModel: (Path) -> Path?,
 ) {
     private val benchmark = DesktopTranslationBenchmark(models)
@@ -65,6 +83,8 @@ internal class SettingsPresenter(
                 settings.read()
                 Logs.allowUserText(settings.detailedLogs)
             }
+            val needsSetup = withContext(Dispatchers.IO) { !Files.isRegularFile(settings.model) }
+            mutableState.update { it.copy(initialSetup = needsSetup) }
             models.ensureLoaded()
         }
     }
@@ -75,7 +95,10 @@ internal class SettingsPresenter(
         mutableState.update { it.copy(busy = true, error = null, tuningStatus = null) }
         scope.launch {
             val saved = updateSettings("モデルの場所を保存できませんでした。") { settings.save(path) }
-            if (saved) models.select()
+            if (saved) {
+                models.select()
+                mutableState.update { it.copy(initialSetup = false) }
+            }
         }
     }
 
@@ -83,29 +106,57 @@ internal class SettingsPresenter(
         if (!state.value.busy) models.reload()
     }
 
-    fun selectModel(model: DesktopModelCatalog) {
-        if (state.value.busy || state.value.model is ModelState.Loading) return
-        val path = model.path(settings.modelDirectory)
-        mutableState.update {
-            it.copy(busy = true, error = null, download = ModelDownloadProgress(model, it.catalogStatus[model] ?: 0))
-        }
-        downloadJob = scope.launch {
+    fun prepareModels(translation: DesktopModelCatalog? = null, recognition: SpeechModel? = null) {
+        if (state.value.busy || recognition != null && !audio.state.value.canConfigure) return
+        mutableState.update { it.copy(busy = true, error = null, download = ModelPreparationProgress()) }
+        downloadJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
-                withContext(Dispatchers.IO) { downloads.prepare(model) { progress -> mutableState.update { it.copy(download = progress) } } }
-                if (updateSettings("モデルの選択を保存できませんでした。") { settings.save(path) }) {
+                withContext(Dispatchers.IO) {
+                    // 初回は音声認識から準備し、途中でアプリを閉じても次回の起動で続きから取る。
+                    val speech = recognition?.let(DesktopSpeechModels::downloadFiles).orEmpty().filterNot(::hasSpeechFile)
+                    downloadFiles(speech + listOfNotNull(translation?.file))
+                }
+                if (translation != null) {
+                    if (!updateSettings("モデルの選択を保存できませんでした。") { settings.save(translation.path(settings.modelDirectory)) }) {
+                        return@launch
+                    }
                     models.select()
                 }
+                recognition?.let(audio::usePreparedRecognition)
+                if (translation != null) mutableState.update { it.copy(initialSetup = false) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
                 Logs.w("モデルを準備できませんでした。", error)
                 mutableState.update { it.copy(error = error.message ?: "モデルを準備できませんでした。") }
             } finally {
-                val status = withContext(NonCancellable + Dispatchers.IO) { runCatching { downloads.status() }.getOrDefault(emptyMap()) }
+                val status = withContext(NonCancellable + Dispatchers.IO) { catalogStatus() }
                 mutableState.update { it.copy(download = null, busy = false, catalogStatus = status) }
             }
         }
     }
+
+    private suspend fun downloadFiles(files: List<ModelFile>) {
+        val total = files.sumOf { it.size }
+        var completed = 0L
+        for (file in files) {
+            downloads.prepare(file) { progress ->
+                val current = ModelPreparationProgress(file, completed + progress.bytes, total, progress.verifying)
+                mutableState.update { it.copy(download = current) }
+            }
+            completed += file.size
+        }
+    }
+
+    private fun hasSpeechFile(file: ModelFile) = DesktopSpeechModels.isInstalled(settings.modelDirectory, file)
+
+    private fun catalogStatus(): Map<ModelFile, Long> = runCatching {
+        val translationFiles = DesktopModelCatalog.entries.map { it.file }
+        translationFiles.associateWith(downloads::bytesAvailable) + DesktopSpeechModels.files.associateWith { file ->
+            if (hasSpeechFile(file)) file.size else downloads.bytesAvailable(file).coerceAtMost(file.size - 1)
+        }
+    }.getOrDefault(emptyMap())
 
     fun cancelDownload() {
         downloadJob?.cancel()
@@ -219,7 +270,7 @@ internal class SettingsPresenter(
     private suspend fun updateSettings(message: String, operation: () -> Unit): Boolean = try {
         val catalogStatus = withContext(Dispatchers.IO) {
             operation()
-            runCatching { downloads.status() }.getOrDefault(emptyMap())
+            catalogStatus()
         }
         mutableState.update {
             withModel(it, models.state.value).copy(selectedPath = settings.model, threads = settings.threads,

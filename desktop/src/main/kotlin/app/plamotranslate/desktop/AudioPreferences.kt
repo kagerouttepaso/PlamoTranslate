@@ -11,7 +11,10 @@ import java.util.Properties
 
 internal data class SubtitleBounds(val x: Float, val y: Float, val width: Float, val height: Float)
 
-internal class AudioPreferences(directory: Path) {
+internal class AudioPreferences(
+    directory: Path,
+    private val defaultRecognition: () -> SpeechModel = { SpeechModel.DEFAULT },
+) {
     private val selectionFile = directory.resolve("audio.properties")
     private val subtitleFile = directory.resolve("subtitles.properties")
 
@@ -26,7 +29,7 @@ internal class AudioPreferences(directory: Path) {
             playbackFrom = properties.language("playbackFrom") ?: defaults.playbackFrom,
             playbackTo = properties.language("playbackTo") ?: defaults.playbackTo,
             recognition = recognition.copy(
-                model = SpeechModel.entries.find { it.name == properties.getProperty("recognitionModel") } ?: recognition.model,
+                model = SpeechModel.entries.find { it.name == properties.getProperty("recognitionModel") } ?: defaultRecognition(),
                 transcribeThreads = properties.getProperty("transcribeThreads")?.toIntOrNull()?.takeIf { it in 0..16 } ?: recognition.transcribeThreads,
                 identifyThreads = properties.getProperty("identifyThreads")?.toIntOrNull()?.takeIf { it in 1..8 } ?: recognition.identifyThreads,
                 cardLanguageSeconds = properties.number("cardLanguageSeconds")?.takeIf { it in 0.3f..3f } ?: recognition.cardLanguageSeconds,

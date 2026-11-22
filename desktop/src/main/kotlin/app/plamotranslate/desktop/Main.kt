@@ -12,6 +12,7 @@ import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.llm.Language
 import app.plamotranslate.log.LogSink
 import app.plamotranslate.log.Logs
+import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.pipeline.translation.ModelHost
 import app.plamotranslate.pipeline.translation.ModelState
 import kotlinx.coroutines.CoroutineScope
@@ -85,8 +86,10 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
     )
     val translations = DesktopTranslations(models)
     val pdfCache = DesktopPdfCache(directory.resolve("cache/pdf-translations/v1"))
-    val audioPreferences = AudioPreferences(directory)
-    val asr = DesktopAsr(directory.resolve("models/asr").toFile())
+    val asr = DesktopAsr(settings.modelDirectory)
+    val audioPreferences = AudioPreferences(directory) {
+        SpeechModel.entries.firstOrNull(asr::hasRequiredFiles) ?: SpeechModel.DEFAULT
+    }
     val copy: (String) -> Unit = { value ->
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(value), null)
     }
@@ -118,10 +121,17 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
             pdf.selectTarget(target)
         }
     }
+    val audio = AudioPresenter(
+        scope, WindowsAudio, asr::load, translations::open,
+        initialSelection = audioPreferences.loadSelection(), saveSelection = audioPreferences::saveSelection,
+        supportsAutomatic = asr::supportsAutomatic,
+        chooseLog = { filename -> chooseConversationLog(filename, owner()) },
+        copyText = copy,
+    )
     return DesktopComponents(
         NavigationPresenter(),
         text,
-        SettingsPresenter(scope, settings, models) { current ->
+        SettingsPresenter(scope, settings, models, audio) { current ->
             val chooser = JFileChooser(current.parent.toFile()).apply {
                 dialogTitle = "翻訳モデルを選ぶ"
                 isAcceptAllFileFilterUsed = false
@@ -131,13 +141,7 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
                 chooser.selectedFile.toPath().toAbsolutePath().normalize()
             } else null
         },
-        AudioPresenter(
-            scope, WindowsAudio, asr::load, translations::open,
-            initialSelection = audioPreferences.loadSelection(), saveSelection = audioPreferences::saveSelection,
-            supportsAutomatic = asr::supportsAutomatic,
-            chooseLog = { filename -> chooseConversationLog(filename, owner()) },
-            copyText = copy,
-        ),
+        audio,
         pdf,
         audioPreferences,
         settings::selectTranslationTarget,

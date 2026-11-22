@@ -40,6 +40,19 @@ import app.plamotranslate.pipeline.translation.ModelState
 
 @Composable
 internal fun MainScreen(components: DesktopComponents) {
+    val settings by components.settings.state.collectAsState()
+    when (settings.initialSetup) {
+        null -> Surface(Modifier.fillMaxSize()) { Text("設定を読み込み中…", Modifier.padding(24.dp)) }
+        true -> Surface(Modifier.fillMaxSize()) {
+            val audio by components.audio.state.collectAsState()
+            ModelSetupScreen(settings, components.settings, audio.selection.recognition.model, initial = true)
+        }
+        false -> DesktopPages(components, settings)
+    }
+}
+
+@Composable
+private fun DesktopPages(components: DesktopComponents, settings: SettingsState) {
     val page by components.navigation.state.collectAsState()
     Surface(modifier = Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxSize()) {
@@ -66,15 +79,20 @@ internal fun MainScreen(components: DesktopComponents) {
                         }
                     }
                     Page.SETTINGS -> {
-                        val settings by components.settings.state.collectAsState()
                         val audio by components.audio.state.collectAsState()
-                        SettingsScreen(settings, components.settings) { RecognitionSettings(audio, components.audio) }
+                        SettingsScreen(settings, components.settings) {
+                            RecognitionSettings(audio, components.audio, settings, components.settings)
+                        }
                     }
                     Page.AUDIO -> {
                         val audio by components.audio.state.collectAsState()
-                        val settings by components.settings.state.collectAsState()
-                        AudioScreen(audio, components.audio.level, settings.modelStatus, components.audio) {
-                            components.navigation.select(Page.SETTINGS)
+                        val recognition = audio.selection.recognition.model
+                        if (settings.hasRecognition(recognition)) {
+                            AudioScreen(audio, components.audio.level, settings.modelStatus, components.audio) {
+                                components.navigation.select(Page.SETTINGS)
+                            }
+                        } else {
+                            ModelSetupScreen(settings, components.settings, recognition, initial = false)
                         }
                     }
                     Page.PDF -> {
@@ -121,6 +139,7 @@ private fun SettingsScreen(state: SettingsState, presenter: SettingsPresenter, r
             Text("翻訳モデル", style = MaterialTheme.typography.titleLarge)
             ModelSummary(state.modelStatus)
             ModelSettings(state, presenter)
+            state.download?.let { ModelDownloadControls(it, presenter::cancelDownload) }
             Text("性能", style = MaterialTheme.typography.titleLarge)
             BackendSettings(state, presenter)
             val automaticThreads = state.automaticThreads?.let { "自動（$it）" } ?: "自動"
