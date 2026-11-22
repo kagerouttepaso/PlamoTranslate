@@ -58,6 +58,17 @@ fun main() {
     exitProcess(0)
 }
 
+/**
+ * JNI の DLL が依存する DLL を、先に完全なパスで読み込む。Windows は依存先を java.library.path から探さないので、
+ * 配布物（DLL を PATH に足さずに起動する）では、これをしないと読み込みに失敗する。
+ */
+private fun preloadDependencies(nativeDir: String) {
+    listOf("ggml-base.dll", "ggml.dll", "llama.dll", "pdfium.dll").forEach { name ->
+        val file = java.io.File(nativeDir, name)
+        if (file.isFile) System.load(file.absolutePath)
+    }
+}
+
 private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): DesktopComponents {
     val directory = Path.of(checkNotNull(System.getenv("LOCALAPPDATA")), "Mockingword")
     Logs.install(listOf(LogSink { level, tag, message, error ->
@@ -65,6 +76,7 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
         error?.printStackTrace(System.err)
     }, DesktopLogFile(directory.resolve("logs"))), userText = false)
     val nativeDir = checkNotNull(System.getProperty("mockingword.native.dir"))
+    preloadDependencies(nativeDir)
     val settings = DesktopSettings(directory)
     val loader = DesktopEngineLoader(nativeDir, !java.lang.Boolean.getBoolean("mockingword.cpuOnly"), settings)
     val models = ModelHost(
