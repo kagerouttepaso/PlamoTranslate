@@ -456,7 +456,9 @@ private fun PdfPage(
     val selection = model.selection?.takeIf { it.page == page && it.version == version.number }
     val hits = model.search.hits.filter { it.page == page }
     val selectedHit = model.search.selected?.takeIf { it.page == page }
-    val working = if (showTranslation) state.layouts[page].orEmpty().filter { it.text in state.working } else emptyList()
+    val working = if (showTranslation) state.layouts[page].orEmpty().filter { paragraph ->
+        paragraph.text in state.working && paragraph.elements.none { it.original != null }
+    } else emptyList()
     val highlight = MaterialTheme.colorScheme.primary
 
     Box(

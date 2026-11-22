@@ -17,23 +17,26 @@ private val mono = Regex("mono|courier|typewriter|cmtt|consol", RegexOption.IGNO
 private val leadingInMarker = Regex("<(a[0-9]+)> ")
 private val trailingInMarker = Regex(" </(a[0-9]+)>")
 
-private data class Style(val kind: PdfElementKind, val link: Int?, val bold: Boolean)
+private data class Style(val kind: PdfElementKind, val link: Int?, val bold: Boolean, val unmapped: Boolean = false)
 
 internal fun encodePdfMarkup(glyphs: List<PdfGlyph?>, baseBold: Boolean): PdfMarkup {
     val text = StringBuilder()
     val plain = StringBuilder()
     val code = StringBuilder()
+    val unmapped = mutableListOf<PdfGlyph>()
     val elements = mutableListOf<PdfElement>()
     var style: Style? = null
     fun close() {
         val active = style ?: return
         val element = elements.last()
         if (active.kind == PdfElementKind.Code) {
-            val source = code.toString().replace(edgeSpaces, "")
-            elements[elements.lastIndex] = element.copy(code = source)
+            val original = if (active.unmapped) PdfOriginalText(unmapped.toList()) else null
+            val source = if (original == null) code.toString().replace(edgeSpaces, "") else "…"
+            elements[elements.lastIndex] = element.copy(code = source, original = original)
             text.append("<c").append(element.id).append('>').append(normalizePdfText(source))
                 .append("</c").append(element.id).append('>')
             code.clear()
+            unmapped.clear()
         } else {
             text.append("</a").append(element.id).append('>')
         }
@@ -41,7 +44,8 @@ internal fun encodePdfMarkup(glyphs: List<PdfGlyph?>, baseBold: Boolean): PdfMar
     for (glyph in glyphs) {
         val ch = glyph?.text ?: " "
         val next = when {
-            glyph == null || glyph.generated || ch == " " -> style
+            glyph == null || glyph.generated || ch == " " -> style?.takeUnless { it.unmapped }
+            glyph.unmappedAdvance != null -> Style(PdfElementKind.Code, glyph.link, false, unmapped = true)
             mono.containsMatchIn(glyph.font) -> Style(PdfElementKind.Code, glyph.link, false)
             else -> with(PdfParagraphs) {
                 val bold = glyph.isBold() != baseBold
@@ -57,10 +61,13 @@ internal fun encodePdfMarkup(glyphs: List<PdfGlyph?>, baseBold: Boolean): PdfMar
                 if (next.kind == PdfElementKind.Decoration) text.append("<a").append(id).append('>')
             }
         }
-        if (style?.kind == PdfElementKind.Code) code.append(ch)
-        else {
-            text.append(ch)
-            plain.append(ch)
+        when {
+            style?.unmapped == true -> unmapped += checkNotNull(glyph)
+            style?.kind == PdfElementKind.Code -> code.append(ch)
+            else -> {
+                text.append(ch)
+                plain.append(ch)
+            }
         }
     }
     close()
@@ -88,7 +95,11 @@ object PdfMarkupTranslation {
 
     fun prepare(paragraph: PdfParagraph, translation: String): List<PdfPiece>? {
         if (!shouldReplace(paragraph, translation)) return null
-        return pieces(paragraph, translation)
+        val pieces = pieces(paragraph, translation)
+        if (paragraph.elements.mapNotNull { it.original }.any { original ->
+                pieces.count { it.original == original } != 1
+            }) return null
+        return pieces
     }
 
     fun pieces(paragraph: PdfParagraph, text: String, source: Boolean = false): List<PdfPiece> =
@@ -166,7 +177,9 @@ object PdfMarkupTranslation {
             fun addNodes(nodes: List<Node>, bold: Boolean, link: Int?) {
                 for (node in nodes) when (node) {
                     is Node.Text -> add(StyledPiece(PdfPiece(node.text, bold, link, source)))
-                    is Node.Code -> add(StyledPiece(PdfPiece(node.element.code, bold, link, source), "\uFFFC"))
+                    is Node.Code -> add(StyledPiece(
+                        PdfPiece(node.element.code, bold, node.element.link ?: link, source, node.element.original), "\uFFFC",
+                    ))
                     is Node.Wrap -> addNodes(node.children, bold xor node.element.bold, node.element.link ?: link)
                 }
             }

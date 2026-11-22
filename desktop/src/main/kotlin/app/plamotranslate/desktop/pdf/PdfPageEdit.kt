@@ -15,6 +15,7 @@ internal sealed interface PdfContent {
     data class Mask(val box: PdfBounds, val color: PdfColor) : PdfContent
     data class Text(val text: String, val x: Double, val baseline: Double, val size: Double, val bold: Boolean,
                     val color: PdfColor) : PdfContent
+    data class OriginalGlyph(val index: Int, val x: Double, val baseline: Double, val scale: Double) : PdfContent
 }
 
 internal data class PageEdit(
@@ -27,10 +28,15 @@ internal data class PageEdit(
 ) {
     fun apply(document: Long, page: Int): Int {
         val strings = arrayOfNulls<String>(content.size)
+        val sourceChars = IntArray(content.size) { -1 }
         val coordinates = DoubleArray(content.size * 5)
         for ((index, item) in content.withIndex()) {
             val fields = when (item) {
                 is PdfContent.Mask -> item.box.fields() + item.color.argb()
+                is PdfContent.OriginalGlyph -> {
+                    sourceChars[index] = item.index
+                    doubleArrayOf(item.x, item.baseline, item.scale, 0.0, 0.0)
+                }
                 is PdfContent.Text -> {
                     require(item.text.isNotEmpty() && '\u0000' !in item.text)
                     strings[index] = item.text
@@ -41,7 +47,7 @@ internal data class PageEdit(
             fields.copyInto(coordinates, index * 5)
         }
         return PdfEditingNative.writePage(
-            document, page, remove.toIntArray(), retain.sorted().toIntArray(), strings, coordinates,
+            document, page, remove.toIntArray(), retain.sorted().toIntArray(), strings, sourceChars, coordinates,
             moves.flatMap { (index, boxes) -> listOf(index, boxes.size) }.toIntArray(),
             moves.values.flatten().flatMap { it.fields().asIterable() }.toDoubleArray(),
             duplicateLinks.sortedDescending().toIntArray(),
@@ -92,7 +98,16 @@ internal fun pageEdit(
             }
             for (line in layout.lines) {
                 for (run in line.runs) {
-                    add(PdfContent.Text(run.text, run.x, line.baseline, layout.size, run.bold, paragraph.color))
+                    val original = run.original
+                    if (original == null) {
+                        add(PdfContent.Text(run.text, run.x, line.baseline, layout.size, run.bold, paragraph.color))
+                    } else {
+                        val scale = layout.size / original.first.size
+                        for (glyph in original.glyphs) {
+                            add(PdfContent.OriginalGlyph(glyph.index, run.x + (glyph.originX - original.first.originX) * scale,
+                                line.baseline + (glyph.originY - original.first.originY) * scale, scale))
+                        }
+                    }
                     run.link?.let { index ->
                         runsByLink.getOrPut(index, ::mutableListOf).add(PdfBounds(
                             run.x, line.baseline - 0.25 * layout.size,

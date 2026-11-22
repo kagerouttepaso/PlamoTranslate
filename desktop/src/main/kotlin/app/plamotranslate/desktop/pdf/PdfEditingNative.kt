@@ -24,7 +24,7 @@ internal object PdfEditingNative {
     external fun embedFonts(handle: Long, regular: ByteArray, bold: ByteArray): Boolean
     external fun writePage(
         handle: Long, page: Int, removeObjects: IntArray, retainChars: IntArray,
-        contents: Array<String?>, coordinates: DoubleArray, moveIndices: IntArray,
+        contents: Array<String?>, sourceChars: IntArray, coordinates: DoubleArray, moveIndices: IntArray,
         moveBoxes: DoubleArray, removeLinks: IntArray,
     ): Int
     external fun save(handle: Long): ByteArray?
@@ -59,6 +59,7 @@ internal class PdfPacket(bytes: ByteArray) {
             val y = number()
             val bounds = box()
             val size = number()
+            val unmappedAdvance = number().takeIf { it >= 0 }
             val generated = flags and 1 != 0
             val text = if (Character.isValidCodePoint(code) && code !in 0xD800..0xDFFF) {
                 String(Character.toChars(code))
@@ -66,7 +67,7 @@ internal class PdfPacket(bytes: ByteArray) {
             PdfGlyph(
                 index, text, x, y, bounds, if (generated) "" else style?.name.orEmpty(),
                 if (generated) 0 else style?.weight ?: 0, style?.color ?: PdfColor.Black,
-                if (generated) null else style?.path, size, generated, flags and 2 != 0, link,
+                if (generated) null else style?.path, size, generated, flags and 2 != 0, link, unmappedAdvance,
             )
         }
     }

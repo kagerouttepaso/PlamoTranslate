@@ -393,8 +393,10 @@ JNIEXPORT jbyteArray JNICALL PDF_JNI(characters)(JNIEnv* env, jobject, jlong han
     for (int i = 0; i < count; ++i) {
         const bool generated = FPDFText_IsGenerated(text, i) == 1;
         auto code = FPDFText_GetUnicode(text, i);
-        if (!code || FPDFText_HasUnicodeMapError(text, i) == 1) code = 0xFFFD;
         const auto object = generated ? nullptr : FPDFText_GetTextObject(text, i);
+        const bool unmapped = FPDFText_HasUnicodeMapError(text, i) == 1;
+        const bool has_original = unmapped && object;
+        if (!code || unmapped) code = 0xFFFD;
         CharacterStyle style = generated ? prior : CharacterStyle{-1, 0, {}};
         if (object) {
             auto cached = styles.find(object);
@@ -435,6 +437,9 @@ JNIEXPORT jbyteArray JNICALL PDF_JNI(characters)(JNIEnv* env, jobject, jlong han
         chars.number(y);
         box.pack(chars);
         chars.number(style.size);
+        FS_RECTF loose{};
+        chars.number(!has_original ? -1 : FPDFText_GetLooseCharBox(text, i, &loose) ?
+            std::max(0.0, static_cast<double>(loose.right) - x) : std::max(0.0, box.right - x));
     }
     Packet out;
     out.integer(static_cast<jint>(styles.size()));
@@ -583,24 +588,37 @@ PageObject text_object(FPDF_DOCUMENT doc, FPDF_FONT font, float size, const FPDF
     return object;
 }
 
-PageObject retained_character(FPDF_DOCUMENT doc, FPDF_TEXTPAGE text, int index, FPDF_PAGEOBJECT original) {
+PageObject original_character(FPDF_DOCUMENT doc, FPDF_TEXTPAGE text, int index, FPDF_PAGEOBJECT original,
+                              float scale, float x, float y) {
     float size{};
     FS_MATRIX matrix{};
-    double x{}, y{};
     Color fill;
-    if (!FPDFTextObj_GetFontSize(original, &size) || !FPDFPageObj_GetMatrix(original, &matrix) ||
-        !FPDFText_GetCharOrigin(text, index, &x, &y)) return {nullptr, FPDFPageObj_Destroy};
-    matrix.e = static_cast<float>(x);
-    matrix.f = static_cast<float>(y);
-    FPDFPageObj_GetFillColor(original, &fill.red, &fill.green, &fill.blue, &fill.alpha);
-    const auto code = FPDFText_GetUnicode(text, index);
-    FPDF_WCHAR value[3]{static_cast<FPDF_WCHAR>(code), 0, 0};
-    if (code > 0xFFFF && code <= 0x10FFFF) {
-        const auto offset = code - 0x10000;
-        value[0] = static_cast<FPDF_WCHAR>(0xD800 + (offset >> 10));
-        value[1] = static_cast<FPDF_WCHAR>(0xDC00 + (offset & 0x3FF));
+    if (!FPDFTextObj_GetFontSize(original, &size) || !FPDFText_GetMatrix(text, index, &matrix)) {
+        return {nullptr, FPDFPageObj_Destroy};
     }
-    auto object = text_object(doc, FPDFTextObj_GetFont(original), size, value, matrix, fill);
+    matrix.a *= scale;
+    matrix.b *= scale;
+    matrix.c *= scale;
+    matrix.d *= scale;
+    matrix.e = x;
+    matrix.f = y;
+    FPDFPageObj_GetFillColor(original, &fill.red, &fill.green, &fill.blue, &fill.alpha);
+    const uint32_t code = FPDFText_GetUnicode(text, index);
+    PageObject object(nullptr, FPDFPageObj_Destroy);
+    const auto font = FPDFTextObj_GetFont(original);
+    if (FPDFText_HasUnicodeMapError(text, index) == 1) {
+        object.reset(font ? FPDFPageObj_CreateTextObj(doc, font, size) : nullptr);
+        if (object && (!FPDFText_SetCharcodes(object.get(), &code, 1) ||
+            !FPDFPageObj_SetMatrix(object.get(), &matrix) || !fill.apply(object.get()))) object.reset();
+    } else {
+        FPDF_WCHAR value[3]{static_cast<FPDF_WCHAR>(code), 0, 0};
+        if (code > 0xFFFF && code <= 0x10FFFF) {
+            const auto offset = code - 0x10000;
+            value[0] = static_cast<FPDF_WCHAR>(0xD800 + (offset >> 10));
+            value[1] = static_cast<FPDF_WCHAR>(0xDC00 + (offset & 0x3FF));
+        }
+        object = text_object(doc, font, size, value, matrix, fill);
+    }
     if (object) {
         FPDFTextObj_SetTextRenderMode(object.get(), FPDFTextObj_GetTextRenderMode(original));
         Color stroke;
@@ -610,6 +628,52 @@ PageObject retained_character(FPDF_DOCUMENT doc, FPDF_TEXTPAGE text, int index, 
     }
     return object;
 }
+
+class OriginalGlyphRenderer {
+public:
+    PageObject render(FPDF_DOCUMENT target, FPDF_TEXTPAGE text, int index, FPDF_PAGEOBJECT original,
+                      float scale, float x, float y) {
+        PageObject image(nullptr, FPDFPageObj_Destroy);
+        if (!page_) {
+            document_.reset(FPDF_CreateNewDocument());
+            if (!document_) return image;
+            page_.reset(FPDFPage_New(document_.get(), 0, 1, 1));
+            if (!page_) return image;
+        }
+        auto glyph = original_character(document_.get(), text, index, original, scale, 0, 0);
+        float left{}, bottom{}, right{}, top{};
+        if (!glyph || !FPDFPageObj_GetBounds(glyph.get(), &left, &bottom, &right, &top) ||
+            !std::isfinite(left) || !std::isfinite(bottom) || !std::isfinite(right) || !std::isfinite(top) ||
+            right < left || top < bottom) return image;
+        left -= 1;
+        bottom -= 1;
+        right += 1;
+        top += 1;
+        const float extent = std::max(right - left, top - bottom);
+        if (!std::isfinite(extent) || extent <= 0) return image;
+        const float resolution = std::min(6.0f, 2048.0f / extent);
+        const int width = static_cast<int>(std::ceil((right - left) * resolution));
+        const int height = static_cast<int>(std::ceil((top - bottom) * resolution));
+        Bitmap bitmap(FPDFBitmap_CreateEx(width, height, FPDFBitmap_BGRA, nullptr, 0), FPDFBitmap_Destroy);
+        if (!bitmap || !FPDFBitmap_FillRect(bitmap.get(), 0, 0, width, height, 0)) return image;
+        if (!FPDFPage_InsertObject(page_.get(), glyph.get())) return image;
+        const auto inserted = glyph.release();
+        const FS_MATRIX matrix{resolution, 0, 0, resolution, -left * resolution, (top - 1) * resolution};
+        const FS_RECTF clip{0, 0, static_cast<float>(width), static_cast<float>(height)};
+        FPDF_RenderPageBitmapWithMatrix(bitmap.get(), page_.get(), &matrix, &clip, 0);
+        if (!FPDFPage_RemoveObject(page_.get(), inserted)) return image;
+        glyph.reset(inserted);
+        image.reset(FPDFPageObj_NewImageObj(target));
+        const FS_MATRIX placement{width / resolution, 0, 0, height / resolution, x + left, y + top - height / resolution};
+        if (image && (!FPDFImageObj_SetBitmap(nullptr, 0, image.get(), bitmap.get()) ||
+            !FPDFPageObj_SetMatrix(image.get(), &placement))) image.reset();
+        return image;
+    }
+
+private:
+    std::unique_ptr<fpdf_document_t__, decltype(&FPDF_CloseDocument)> document_{nullptr, FPDF_CloseDocument};
+    Page page_{nullptr, FPDF_ClosePage};
+};
 
 FS_QUADPOINTSF attachment(const Box& box) {
     const auto rect = box.pdf_rect();
@@ -682,7 +746,7 @@ extern "C" {
 // 1 は成功、0 は変更前の失敗、-1 は変更後の失敗。
 JNIEXPORT jint JNICALL PDF_JNI(writePage)(
     JNIEnv* env, jobject, jlong handle, jint page, jintArray remove_objects, jintArray retain_chars,
-    jobjectArray contents, jdoubleArray coordinates, jintArray move_indices, jdoubleArray move_boxes,
+    jobjectArray contents, jintArray source_chars, jdoubleArray coordinates, jintArray move_indices, jdoubleArray move_boxes,
     jintArray remove_links) {
     std::lock_guard guard(pdfium_mutex);
     const auto& doc = *reinterpret_cast<Document*>(handle);
@@ -690,12 +754,13 @@ JNIEXPORT jint JNICALL PDF_JNI(writePage)(
     if (!on.text) return 0;
     const auto removed = read_ints(env, remove_objects);
     const auto retained = read_ints(env, retain_chars);
+    const auto sources = read_ints(env, source_chars);
     const auto fields = read_doubles(env, coordinates);
     const auto moves = read_ints(env, move_indices);
     const auto boxes = read_doubles(env, move_boxes);
     const auto duplicates = read_ints(env, remove_links);
     const int num_ops = env->GetArrayLength(contents);
-    if (env->ExceptionCheck() || fields.size() != static_cast<size_t>(num_ops) * 5 ||
+    if (env->ExceptionCheck() || fields.size() != static_cast<size_t>(num_ops) * 5 || sources.size() != num_ops ||
         moves.size() % 2 || boxes.size() % 4) return 0;
 
     std::unordered_set<FPDF_PAGEOBJECT> originals;
@@ -705,18 +770,34 @@ JNIEXPORT jint JNICALL PDF_JNI(writePage)(
         originals.insert(original);
     }
     std::vector<PageObject> additions;
+    OriginalGlyphRenderer original_glyphs;
     for (int index : retained) {
         const auto associated = FPDFText_GetTextObject(on.text.get(), index);
         if (!originals.count(associated)) return 0;
-        auto object = retained_character(doc.pdf.get(), on.text.get(), index, associated);
+        double x{}, y{};
+        if (!FPDFText_GetCharOrigin(on.text.get(), index, &x, &y)) return 0;
+        const auto left = static_cast<float>(x);
+        const auto baseline = static_cast<float>(y);
+        auto object = FPDFText_HasUnicodeMapError(on.text.get(), index) == 1 ?
+            original_glyphs.render(doc.pdf.get(), on.text.get(), index, associated, 1, left, baseline) :
+            original_character(doc.pdf.get(), on.text.get(), index, associated, 1, left, baseline);
         if (!object) return 0;
         additions.push_back(std::move(object));
     }
     for (int i = 0; i < num_ops; ++i) {
         const auto* values = fields.data() + static_cast<size_t>(i) * 5;
+        PageObject object(nullptr, FPDFPageObj_Destroy);
+        if (sources[i] >= 0) {
+            const auto associated = FPDFText_GetTextObject(on.text.get(), sources[i]);
+            if (!associated || FPDFText_HasUnicodeMapError(on.text.get(), sources[i]) != 1) return 0;
+            object = original_glyphs.render(doc.pdf.get(), on.text.get(), sources[i], associated,
+                static_cast<float>(values[2]), static_cast<float>(values[0]), static_cast<float>(values[1]));
+            if (!object) return 0;
+            additions.push_back(std::move(object));
+            continue;
+        }
         const auto color = unpack_color(values[4]);
         auto text = static_cast<jstring>(env->GetObjectArrayElement(contents, i));
-        PageObject object(nullptr, FPDFPageObj_Destroy);
         if (text) {
             const auto chars = wide_string(env, text);
             env->DeleteLocalRef(text);

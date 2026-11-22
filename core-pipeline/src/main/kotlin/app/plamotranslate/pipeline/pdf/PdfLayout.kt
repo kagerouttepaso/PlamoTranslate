@@ -1,8 +1,14 @@
 package app.plamotranslate.pipeline.pdf
 
-data class PdfPiece(val text: String, val bold: Boolean = false, val link: Int? = null, val source: Boolean = false)
+data class PdfPiece(
+    val text: String, val bold: Boolean = false, val link: Int? = null, val source: Boolean = false,
+    val original: PdfOriginalText? = null,
+)
 
-data class PdfRun(val text: String, val width: Double, val x: Double, val bold: Boolean, val link: Int?, val source: Boolean)
+data class PdfRun(
+    val text: String, val width: Double, val x: Double, val bold: Boolean, val link: Int?, val source: Boolean,
+    val original: PdfOriginalText? = null,
+)
 
 data class PdfPlacedLine(val baseline: Double, val runs: List<PdfRun>)
 
@@ -68,10 +74,11 @@ object PdfLayout {
                 val (bold, link, source) = a.piece.let { Triple(it.bold, it.link, it.source) }
                 if (source && (baseline < geometry.floor || x + a.width > geometry.x + geometry.width)) break
                 val last = runs.lastOrNull()
-                if (last != null && last.bold == bold && last.link == link && last.source == source) {
+                if (last != null && last.original == null && a.piece.original == null &&
+                    last.bold == bold && last.link == link && last.source == source) {
                     runs[runs.lastIndex] = last.copy(text = last.text + a.text, width = last.width + a.width)
                 } else {
-                    runs += PdfRun(a.text, a.width, x, bold, link, source)
+                    runs += PdfRun(a.text, a.width, x, bold, link, source, a.piece.original)
                 }
                 x += a.width
             }
@@ -81,7 +88,9 @@ object PdfLayout {
 
     private fun wrap(pieces: List<PdfPiece>, width: Double, size: Double, measure: PdfMeasure): List<List<Atom>> {
         val atoms = pieces.asSequence().flatMap { piece ->
-            atom.findAll(piece.text).map {
+            val original = piece.original
+            if (original != null) sequenceOf(Atom(piece.text, original.width * size / original.first.size, piece))
+            else atom.findAll(piece.text).map {
                 val text = if (whitespace.matches(it.value)) " " else it.value
                 Atom(text, measure(text, piece.bold, size), piece)
             }

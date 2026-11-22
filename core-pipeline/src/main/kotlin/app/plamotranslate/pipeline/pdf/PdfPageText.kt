@@ -43,6 +43,7 @@ data class PdfGlyph(
     val generated: Boolean = false,
     val hyphen: Boolean = false,
     val link: Int? = null,
+    val unmappedAdvance: Double? = null,
 )
 
 /** [glyphs] は PDFium テキストページの文字番号順。 */
@@ -63,8 +64,16 @@ enum class PdfSkip { Repeat, NoWords, Japanese }
 
 enum class PdfElementKind { Decoration, Code }
 
+data class PdfOriginalText(val glyphs: List<PdfGlyph>) {
+    val first get() = glyphs.first()
+    val width = glyphs.maxOf { it.originX + checkNotNull(it.unmappedAdvance) } - first.originX
+}
+
 /** [bold] は段落の太字を反転する指定。コードの文字列は原文を置き直すために保持する。 */
-data class PdfElement(val id: Int, val kind: PdfElementKind, val link: Int?, val bold: Boolean, val code: String = "")
+data class PdfElement(
+    val id: Int, val kind: PdfElementKind, val link: Int?, val bold: Boolean, val code: String = "",
+    val original: PdfOriginalText? = null,
+)
 
 data class PdfParagraphGlyph(val glyph: PdfGlyph, val translated: Boolean)
 

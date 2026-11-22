@@ -5,7 +5,9 @@ import app.plamotranslate.pipeline.pdf.PdfColor
 import app.plamotranslate.pipeline.pdf.PdfParagraphs
 import kotlinx.coroutines.runBlocking
 import org.apache.pdfbox.Loader
+import org.apache.pdfbox.cos.COSArray
 import org.apache.pdfbox.cos.COSDictionary
+import org.apache.pdfbox.cos.COSInteger
 import org.apache.pdfbox.cos.COSName
 import org.apache.pdfbox.cos.COSStream
 import org.apache.pdfbox.pdmodel.PDDocument
@@ -14,9 +16,11 @@ import org.apache.pdfbox.pdmodel.PDPage
 import org.apache.pdfbox.pdmodel.PDPageContentStream
 import org.apache.pdfbox.pdmodel.PDResources
 import org.apache.pdfbox.pdmodel.common.PDRectangle
+import org.apache.pdfbox.pdmodel.common.PDStream
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import org.apache.pdfbox.pdmodel.font.PDType1Font
+import org.apache.pdfbox.pdmodel.font.PDType3Font
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts
 import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject
 import org.apache.pdfbox.pdmodel.interactive.action.PDActionURI
@@ -42,6 +46,43 @@ class PdfDocumentTest {
 
     @Before fun windows() {
         assumeTrue(System.getProperty("os.name").startsWith("Windows") && System.getProperty("os.arch") == "amd64")
+    }
+
+    @Test fun `Unicode に対応しない字形は原文のフォントで訳文内へ移す`() = runBlocking {
+        val source = unmappedFontFixture()
+        val fonts = PdfFonts.load()
+        val magenta = Color.MAGENTA.rgb
+        withPdf(source) { pdf ->
+            val page = pdf.pageText(0)
+            val original = page.glyphs.filter { it.unmappedAdvance != null }
+            assertEquals(2, original.size)
+            val oldPixel = pdf.render(0, 300, 300).indexOf(magenta)
+            assertTrue(oldPixel >= 0)
+            val paragraphs = PdfParagraphs.page(page)
+            val paragraph = paragraphs.single()
+            assertTrue(paragraph.text.contains("<c1>…</c1>"))
+            assertFalse(paragraph.text.contains('\uFFFD'))
+            val missing = pdf.writePage(0, paragraphs, mapOf(paragraph.text to "設定を確認します。"), fonts)
+            assertEquals(0, missing.translated)
+            val duplicate = pdf.writePage(0, paragraphs, mapOf(paragraph.text to "設定 <c1>x</c1><c1>y</c1>"), fonts)
+            assertEquals(0, duplicate.translated)
+            val write = pdf.writePage(0, paragraphs, mapOf(paragraph.text to "設定 <c1>無視</c1> を確認します。"), fonts)
+            assertEquals(1, write.translated)
+            val snapshot = pdf.snapshot()
+            withPdf(snapshot.bytes) { live ->
+                withPdf(snapshot.finish().bytes) { saved ->
+                    val image = saved.render(0, 300, 300)
+                    assertArrayEquals(live.render(0, 300, 300), image)
+                    val newPixel = image.indexOf(magenta)
+                    assertTrue("元の字形が訳文の位置に描かれる: $oldPixel → $newPixel", newPixel >= 0 && newPixel != oldPixel)
+                    val japanese = saved.search(0, "設定").single()
+                    assertTrue(newPixel % 300 > japanese.boxes.maxOf { it.right })
+                    assertTrue(saved.search(0, "無視").isEmpty())
+                    val glyphColumns = image.indices.filter { image[it] == magenta }.map { it % 300 }.toSortedSet()
+                    assertEquals(2, glyphColumns.zipWithNext().count { (left, right) -> right > left + 1 } + 1)
+                }
+            }
+        }
     }
 
     @Test fun `文字の座標と書式から検索および選択ができる`() = runBlocking {
@@ -197,6 +238,41 @@ class PdfDocumentTest {
             val stream = descriptor?.getDictionaryObject(COSName.FONT_FILE2) as? COSStream
             stream?.getInt(COSName.LENGTH1)
         }.sorted()
+    }
+
+    private fun unmappedFontFixture(): ByteArray = PDDocument().use { pdf ->
+        fun stream(text: String) = PDStream(pdf).also { data ->
+            data.createOutputStream().use { it.write(text.toByteArray(Charsets.US_ASCII)) }
+        }
+        val names = listOf(COSName.getPDFName("unknownOne"), COSName.getPDFName("unknownTwo"))
+        val differences = COSArray().apply {
+            add(COSInteger.get(65))
+            names.forEach { add(it) }
+        }
+        val font = PDType3Font(COSDictionary().apply {
+            setItem(COSName.TYPE, COSName.FONT)
+            setItem(COSName.SUBTYPE, COSName.TYPE3)
+            setItem(COSName.FONT_BBOX, PDRectangle(600f, 800f).cosArray)
+            setItem(COSName.FONT_MATRIX, COSArray().apply { setFloatArray(floatArrayOf(0.001f, 0f, 0f, 0.001f, 0f, 0f)) })
+            setInt(COSName.FIRST_CHAR, 65)
+            setInt(COSName.LAST_CHAR, 66)
+            setItem(COSName.WIDTHS, COSArray().apply { setFloatArray(floatArrayOf(600f, 600f)) })
+            setItem(COSName.ENCODING, COSDictionary().apply { setItem(COSName.DIFFERENCES, differences) })
+            setItem(COSName.CHAR_PROCS, COSDictionary().apply {
+                setItem(names[0], stream("600 0 0 0 600 800 d1 0 0 200 800 re f"))
+                setItem(names[1], stream("600 0 0 0 600 800 d1 0 0 500 350 re f"))
+            })
+        })
+        val page = PDPage(PDRectangle(300f, 300f)).also(pdf::addPage)
+        page.resources = PDResources()
+        val regular = page.resources.add(PDType1Font(Standard14Fonts.FontName.HELVETICA)).name
+        val opaque = page.resources.add(font).name
+        page.setContents(stream(
+            "BT /$regular 12 Tf 30 240 Td (Please select ) Tj ET\n" +
+                "BT /$opaque 12 Tf 105 240 Td 1 0 1 rg <4142> Tj ET\n" +
+                "BT /$regular 12 Tf 124 240 Td 0 g (to continue.) Tj ET\n",
+        ))
+        ByteArrayOutputStream().also(pdf::save).toByteArray()
     }
 
     private fun fixture(encrypted: Boolean = false, withForm: Boolean = false): ByteArray = PDDocument().use { pdf ->
