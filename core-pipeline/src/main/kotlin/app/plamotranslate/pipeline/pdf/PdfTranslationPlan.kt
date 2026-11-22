@@ -19,6 +19,10 @@ class PdfTranslationPlan(pages: Map<Int, List<PdfParagraph>>) {
 
     fun pagesFor(text: String): List<Int> = pagesOf[text].orEmpty()
 
+    /** 並列に訳している全段落から、依頼順と同じ距離で表示位置に最も近いページを選ぶ。 */
+    fun translationPage(focus: Int, working: Set<String>): Int? =
+        working.asSequence().flatMap { pagesFor(it) }.minByOrNull { distance(it, focus) }
+
     /** [unavailable] は確定済みと送信済みの原文。表示を移動しても進行中の依頼は維持する。 */
     fun batches(focus: Int, slots: Int, unavailable: Set<String> = emptySet()): List<List<String>> {
         if (slots <= 0) return emptyList()

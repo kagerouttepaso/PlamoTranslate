@@ -10,6 +10,17 @@ import org.junit.Test
 
 class PdfViewTest {
     @Test
+    fun `画面の番号は1から始まり入力すると同じページに戻る`() {
+        assertEquals(1, PdfPageNumber.fromIndex(0))
+        assertEquals(4, PdfPageNumber.fromIndex(3))
+        for (index in 0 until 6) {
+            assertEquals(index, PdfPageNumber.parseIndex(PdfPageNumber.fromIndex(index).toString(), 6))
+        }
+        for (text in listOf("", "0", "-1", "7", "abc")) assertNull(PdfPageNumber.parseIndex(text, 6))
+        assertNull(PdfPageNumber.parseIndex("1", 0))
+    }
+
+    @Test
     fun `見開きは奇数始まりと表紙を単独にする並べ方を選べる`() {
         assertEquals(listOf(listOf(0), listOf(1), listOf(2)), PdfSpread.SINGLE.rows(3))
         assertEquals(listOf(listOf(0, 1), listOf(2, 3), listOf(4)), PdfSpread.ODD.rows(5))

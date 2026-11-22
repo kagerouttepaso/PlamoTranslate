@@ -173,9 +173,7 @@ class PdfSession {
             working.addAll(part)
             effects += PdfEffect.Translate(batch, state.target, segments)
         }
-        state = state.copy(working = working, translationPage = working.firstOrNull()?.let { text ->
-            queue.pagesFor(text).let { if (state.page in it) state.page else it.firstOrNull() }
-        })
+        state = state.copy(working = working, translationPage = queue.translationPage(state.page, working))
         if (confirmed.size == queue.sources.size && writing.isEmpty()) {
             cancel(effects)
             state = state.copy(phase = PdfPhase.Finished)

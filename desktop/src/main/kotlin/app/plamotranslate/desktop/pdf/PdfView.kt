@@ -7,6 +7,14 @@ import app.plamotranslate.pipeline.pdf.PdfPageSize
  * 画面（Compose）に依存しない計算だけをここに置き、画面は結果を描くだけにする。
  */
 
+/** PDFium の添字と、画面に表示・入力するページ番号の対応。 */
+internal object PdfPageNumber {
+    fun fromIndex(index: Int): Int = index + 1
+
+    fun parseIndex(text: String, count: Int): Int? =
+        text.toIntOrNull()?.takeIf { it in 1..count }?.minus(1)
+}
+
 /** ページの並べ方。ブラウザー版（pdf.js）の「1ページずつ・見開き・見開き（表紙を単独）」と同じ。 */
 internal enum class PdfSpread(val label: String, val short: String) {
     SINGLE("1ページずつ", "1ページ"),

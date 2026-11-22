@@ -9,6 +9,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PdfSessionTest {
+    @Test fun `並列翻訳中は表示位置に最も近い処理中のページを状態に出す`() {
+        val session = PdfSession()
+        val pages = listOf("First.", "Second.", "Third.", "Fourth.").map { testPage(TestLine(it)) }
+        val batches = session.start(2, *pages.toTypedArray())
+        assertEquals(2, batches.size)
+        session.reduce(PdfEvent.Page(1))
+        assertEquals(1, session.state.translationPage)
+        session.reduce(PdfEvent.Page(3))
+        assertEquals(1, session.state.translationPage)
+        session.finish(batches.first(), "最初。")
+        assertEquals(3, session.state.translationPage)
+        session.reduce(PdfEvent.Stop)
+        assertNull(session.state.translationPage)
+    }
+
     @Test fun `開いただけでは訳さずビューアの状態に関係なく開始後に全ページを読む`() {
         val session = PdfSession()
         val opened = session.reduce(PdfEvent.Open("manual.pdf", "manual.pdf")).read<PdfRead.Open>()

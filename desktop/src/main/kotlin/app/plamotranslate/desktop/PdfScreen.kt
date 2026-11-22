@@ -66,6 +66,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.plamotranslate.desktop.pdf.PdfBookmark
+import app.plamotranslate.desktop.pdf.PdfPageNumber
 import app.plamotranslate.desktop.pdf.PdfScale
 import app.plamotranslate.desktop.pdf.PdfSpread
 import app.plamotranslate.desktop.pdf.PdfZoom
@@ -188,7 +189,7 @@ private fun StatusLine(state: PdfState, documents: PdfDocuments, view: PdfViewSt
             "訳を書き込むフォントを取得しています… ${megabytes(fonts.done)} / ${megabytes(fonts.total)} MB" to false
         state.phase == PdfPhase.Translating -> buildString {
             append("翻訳中：訳したページ $written / $total")
-            state.translationPage?.let { append("（${it + 1}ページ目を訳しています）") }
+            state.translationPage?.let { append("（${PdfPageNumber.fromIndex(it)}ページ目を訳しています）") }
         } to false
         state.phase == PdfPhase.Paused -> "中止しました。訳したページ $written / $total。「翻訳を再開」で続きから訳します" to false
         state.phase == PdfPhase.Finished -> "すべてのページを訳しました（$total ページ）" to false
@@ -314,7 +315,8 @@ private fun PageBar(model: PdfViewerModel, view: PdfViewState, page: Int, scale:
 /** 今のページの番号。番号を打って Enter でそのページへ移る。 */
 @Composable
 private fun PageField(model: PdfViewerModel, page: Int, count: Int) {
-    var text by remember(page) { mutableStateOf((page + 1).toString()) }
+    var text by remember(page) { mutableStateOf(PdfPageNumber.fromIndex(page).toString()) }
+    val go = { PdfPageNumber.parseIndex(text, count)?.let { model.goTo(it) } }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.small) {
             BasicTextField(
@@ -323,11 +325,11 @@ private fun PageField(model: PdfViewerModel, page: Int, count: Int) {
                 textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Center),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Go),
-                keyboardActions = KeyboardActions(onGo = { text.toIntOrNull()?.let { model.goTo(it - 1) } }),
+                keyboardActions = KeyboardActions(onGo = { go() }),
                 modifier = Modifier.width(48.dp).padding(DesktopSize.small)
                     .onPreviewKeyEvent { event ->
                         if (event.type == KeyEventType.KeyDown && event.key == Key.Enter) {
-                            text.toIntOrNull()?.let { model.goTo(it - 1) }
+                            go()
                             true
                         } else false
                     },
