@@ -26,6 +26,8 @@ internal data class TranslationState(
     val translating: Boolean = false,
     val voice: TextVoicePhase = TextVoicePhase.IDLE,
     val error: String? = null,
+    /** 訳の下に小さく出す、生成したトークン数とかかった時間（Android 版のテキスト翻訳と同じ）。 */
+    val stats: String = "",
 ) {
     val canTranslate get() = model is ModelState.Ready && input.isNotBlank() && !translating && voice == TextVoicePhase.IDLE
     val canCopy get() = output.isNotBlank() && !translating
@@ -98,7 +100,7 @@ internal class TextPresenter(
     fun translate() {
         val request = state.value
         if (!request.canTranslate) return
-        mutableState.update { it.copy(translating = true, output = "", error = null) }
+        mutableState.update { it.copy(translating = true, output = "", error = null, stats = "") }
         translation = scope.launch {
             val stream = openTranslation(this, TranslationStream.Options(request.source, request.target))
             try {
@@ -106,7 +108,8 @@ internal class TextPresenter(
                     mutableState.update { it.copy(output = partial) }
                 }) {
                     is SegmentUpdate.Final -> {
-                        mutableState.update { it.copy(output = result.text, translating = false) }
+                        val stats = if (result.cached) "保存した訳" else "${result.tokens}トークン・${"%.2f".format(result.millis / 1000.0)}秒"
+                        mutableState.update { it.copy(output = result.text, translating = false, stats = stats) }
                         Logs.i("翻訳完了: ${result.millis} ms（キャッシュ=${result.cached}）")
                         Logs.text { "テキスト翻訳: ${request.input.take(4000)} → ${result.text.take(4000)}" }
                     }
@@ -213,6 +216,6 @@ internal class TextPresenter(
         translation?.cancel()
         translation = null
         cancelVoice()
-        mutableState.update { change(it).copy(output = "", translating = false, voice = TextVoicePhase.IDLE, error = null) }
+        mutableState.update { change(it).copy(output = "", translating = false, voice = TextVoicePhase.IDLE, error = null, stats = "") }
     }
 }

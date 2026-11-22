@@ -92,67 +92,6 @@ internal fun MainScreen(components: DesktopComponents) {
 }
 
 @Composable
-private fun TextScreen(
-    state: TranslationState, presenter: TextPresenter, selectTarget: (Language) -> Unit, openSettings: () -> Unit,
-) {
-    val canEdit = state.voice == TextVoicePhase.IDLE
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            ModelSummary(state.modelStatus, Modifier.weight(1f), compact = true)
-            TextButton(onClick = openSettings) { Text("モデルの設定") }
-        }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            LanguageMenu("原文: ${state.sourceLabel}", listOf(null) + Language.entries, presenter::selectSource, canEdit)
-            OutlinedButton(onClick = presenter::swap, enabled = state.canSwap) { Text("入れ替え") }
-            LanguageMenu("訳す先: ${state.target.label}", Language.entries, selectTarget, canEdit)
-        }
-        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            OutlinedTextField(
-                value = state.input,
-                onValueChange = presenter::edit,
-                readOnly = !canEdit,
-                label = { Text("原文") },
-                placeholder = { Text("訳したい文を入力") },
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
-            OutlinedTextField(
-                value = state.output,
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("訳文") },
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
-        }
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = presenter::pasteAndTranslate, enabled = canEdit) { Text("貼り付けて翻訳") }
-            OutlinedButton(onClick = presenter::clear, enabled = canEdit && state.input.isNotEmpty()) { Text("消去") }
-            OutlinedButton(onClick = if (canEdit) presenter::startVoice else presenter::stopVoice,
-                enabled = canEdit && !state.translating || state.voice == TextVoicePhase.LISTENING) {
-                Text(when (state.voice) {
-                    TextVoicePhase.IDLE -> "マイク入力"
-                    TextVoicePhase.LOADING -> "マイクを準備中…"
-                    TextVoicePhase.LISTENING -> "聞き取りを停止"
-                    TextVoicePhase.FINISHING -> "書き起こしを確定中…"
-                })
-            }
-        }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = presenter::translate, enabled = state.canTranslate) {
-                Text(if (state.canCopy) "翻訳し直す" else "翻訳する")
-            }
-            if (state.translating) OutlinedButton(onClick = presenter::cancel) { Text("翻訳を取り消す") }
-            TextButton(onClick = presenter::copyInput, enabled = state.input.isNotBlank() && canEdit) { Text("原文をコピー") }
-            TextButton(onClick = presenter::copyOutput, enabled = state.canCopy) { Text("訳文をコピー") }
-        }
-    }
-}
-
-@Composable
 internal fun <T : Language?> LanguageMenu(
     label: String,
     options: List<T>,
