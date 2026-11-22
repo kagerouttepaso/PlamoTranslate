@@ -33,6 +33,8 @@ import javax.swing.JOptionPane
 import javax.swing.filechooser.FileNameExtensionFilter
 import kotlin.system.exitProcess
 
+internal const val PRODUCT_NAME = "Mockingword"
+
 fun main() {
     application {
         val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
@@ -46,7 +48,7 @@ fun main() {
                 exitApplication()
             },
             state = rememberWindowState(width = 1080.dp, height = 700.dp),
-            title = "Mockingword",
+            title = PRODUCT_NAME,
         ) {
             LaunchedEffect(window) {
                 owner.set(window)
@@ -76,7 +78,7 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
         System.err.println("$tag $level: $message")
         error?.printStackTrace(System.err)
     }, DesktopLogFile(directory.resolve("logs"))), userText = false)
-    val nativeDir = checkNotNull(System.getProperty("mockingword.native.dir"))
+    val nativeDir = checkNotNull(System.getProperty("compose.application.resources.dir"))
     preloadDependencies(nativeDir)
     val settings = DesktopSettings(directory)
     val loader = DesktopEngineLoader(nativeDir, !java.lang.Boolean.getBoolean("mockingword.cpuOnly"), settings)

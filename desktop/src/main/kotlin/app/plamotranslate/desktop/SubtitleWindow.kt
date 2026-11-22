@@ -32,7 +32,7 @@ internal fun ApplicationScope.SubtitleWindow(audio: AudioState, preferences: Aud
     val state = rememberWindowState(position = position, width = (bounds?.width ?: 720f).dp, height = (bounds?.height ?: 180f).dp)
     if (audio.subtitleVisible) {
         Window(
-            onCloseRequest = hide, title = "Mockingword 字幕", state = state,
+            onCloseRequest = hide, title = "$PRODUCT_NAME 字幕", state = state,
             alwaysOnTop = true, undecorated = true, transparent = true,
         ) {
             DisposableEffect(window) {

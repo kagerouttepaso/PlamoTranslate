@@ -58,7 +58,7 @@ private fun DesktopPages(components: DesktopComponents, settings: SettingsState)
         Row(Modifier.fillMaxSize()) {
             Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.width(184.dp).fillMaxHeight()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Mockingword", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 16.dp))
+                    Text(PRODUCT_NAME, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 16.dp))
                     Page.entries.forEach { item ->
                         NavigationDrawerItem(
                             label = { Text(item.label) },

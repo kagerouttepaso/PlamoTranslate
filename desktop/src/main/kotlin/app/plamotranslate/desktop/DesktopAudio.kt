@@ -71,7 +71,7 @@ internal object WindowsAudio : AudioCapture {
 internal class DesktopAsr(private val models: Path) {
     private val directory = models.resolve("asr").toFile()
     private val runtime by lazy {
-        val sherpa = checkNotNull(System.getProperty("mockingword.sherpa.dir")) { "sherpa-onnx の DLL の場所を指定してください。" }
+        val sherpa = checkNotNull(System.getProperty("compose.application.resources.dir")) { "sherpa-onnx の DLL の場所を指定してください。" }
         // 名前だけで依存 DLL を解決すると、PATH より先に System32 の旧版が選ばれる。
         System.load(File(sherpa, "onnxruntime.dll").absolutePath)
     }
