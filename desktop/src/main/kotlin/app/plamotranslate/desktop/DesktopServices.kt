@@ -41,6 +41,11 @@ internal class DesktopSettings(private val directory: Path) {
     @Volatile private var properties = Properties()
     val model: Path get() = properties.getProperty("model")?.let { Path.of(it) } ?: defaultModel
     val threads: Int get() = properties.getProperty("threads")?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+    val appearance: ThemeMode get() = ThemeMode.entries.firstOrNull { it.name == properties.getProperty("theme") } ?: ThemeMode.SYSTEM
+    val cpuOptions: CpuOptions get() = CpuOptions(threads = threads,
+        spinWait = properties.getProperty("spinWait")?.toBooleanStrictOrNull() ?: true,
+        threadPool = properties.getProperty("threadPool")?.toBooleanStrictOrNull() ?: true,
+        mmap = properties.getProperty("mmap")?.toBooleanStrictOrNull() ?: true)
     val cpuOnly: Boolean get() = properties.getProperty("cpuOnly").toBoolean()
     val gpuFallback: String? get() = properties.getProperty("gpuFallback")
     val detailedLogs: Boolean get() = properties.getProperty("detailedLogs").toBoolean()
@@ -56,6 +61,20 @@ internal class DesktopSettings(private val directory: Path) {
     }
 
     fun save(path: Path) = update { setProperty("model", path.toString()) }
+
+    fun saveTheme(mode: ThemeMode) = update { setProperty("theme", mode.name) }
+
+    fun saveCpuOptions(options: CpuOptions) = update {
+        setProperty("spinWait", options.spinWait.toString())
+        setProperty("threadPool", options.threadPool.toString())
+        setProperty("mmap", options.mmap.toString())
+    }
+
+    fun resetPerformance() = update {
+        listOf("threads", "spinWait", "threadPool", "mmap", "cpuOnly",
+            parallelKey("manual", model, false), parallelKey("tuned", model, false),
+            parallelKey("manual", model, true), parallelKey("tuned", model, true)).forEach(::remove)
+    }
 
     fun saveThreads(count: Int) = update { setProperty("threads", count.toString()) }
 
@@ -181,7 +200,7 @@ internal class DesktopEngineLoader(
     }
 
     private suspend fun loadEngine(model: Path, gpu: Boolean, parallel: Int): TranslationEngine =
-        TranslationEngine.load(model.toFile(), nativeDir, gpu, cpu = CpuOptions(threads = settings.threads)).also {
+        TranslationEngine.load(model.toFile(), nativeDir, gpu, cpu = settings.cpuOptions).also {
             it.parallel = parallel
         }
 

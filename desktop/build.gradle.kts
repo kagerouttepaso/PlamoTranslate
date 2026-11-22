@@ -1,4 +1,5 @@
 import java.io.File
+import java.util.zip.ZipFile
 import org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask
 
 plugins {
@@ -34,10 +35,49 @@ tasks.withType<Test>().configureEach {
 val desktopSherpaDir = rootProject.file(providers.gradleProperty("desktopSherpaDir")
     .getOrElse("third_party/sherpa-onnx/sherpa-onnx-v${libs.versions.sherpa.onnx.get()}-win-x64-jni/lib"))
 
+val desktopVersion = "0.1.0"
+val libraryNotices = layout.buildDirectory.file("licenses/JVM.txt")
+val collectLibraryNotices by tasks.registering {
+    val jars = configurations.runtimeClasspath
+    inputs.files(jars)
+    outputs.file(libraryNotices)
+    doLast {
+        val output = libraryNotices.get().asFile
+        output.parentFile.mkdirs()
+        output.bufferedWriter().use { writer ->
+            jars.get().files.filter { it.extension == "jar" }.sortedBy { it.name }.forEach { jar ->
+                ZipFile(jar).use { zip ->
+                    val notices = zip.entries().asSequence().filter { entry ->
+                        !entry.isDirectory && entry.name.substringAfterLast('/').matches(
+                            Regex("(license|notice|copying)([-.].*)?", RegexOption.IGNORE_CASE))
+                    }
+                    for (entry in notices) {
+                        writer.appendLine("${jar.name} — ${entry.name}")
+                        zip.getInputStream(entry).bufferedReader().use { it.copyTo(writer) }
+                        writer.appendLine().appendLine()
+                    }
+                }
+            }
+        }
+    }
+}
+
 // 配布物に入れる DLL（翻訳・PDF・音声のネイティブと sherpa-onnx）を、Compose の appResources の windows/ にまとめる。
 val stageNativeResources by tasks.registering(Sync::class) {
     from(desktopNativeDir) { include("*.dll") }
     from(desktopSherpaDir) { include("*.dll") }
+    into("licenses") {
+        from(rootProject.file("third_party/llama.cpp/LICENSE")) { rename { "llama.cpp.txt" } }
+        from(rootProject.file("third_party/llama.cpp/licenses")) { into("llama.cpp") }
+        from("licenses")
+        from(rootProject.file("LICENSE")) { rename { "Mockingword.txt" } }
+        from(rootProject.file("app/src/main/assets/licenses")) {
+            include("apache-2.0.txt", "funasr-model-license.txt", "onnxruntime-third-party-notices.txt")
+        }
+        from(rootProject.file("third_party/pdfium/chromium-8165-win-x64")) { include("LICENSE", "licenses/**"); into("PDFium") }
+        from(rootProject.file("third_party/harfbuzz/harfbuzz-12.3.2/COPYING")) { rename { "HarfBuzz.txt" } }
+        from(collectLibraryNotices)
+    }
     into(layout.buildDirectory.dir("distribution-resources/windows"))
 }
 
@@ -47,10 +87,10 @@ compose.desktop {
         javaHome = desktopJava.get().metadata.installationPath.asFile.absolutePath
         // JNI・PDFBox・sherpa-onnx はリフレクションと JNI から呼ばれるので、縮小（ProGuard）はかけない。
         buildTypes.release.proguard { isEnabled.set(false) }
-        jvmArgs += listOf("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+        jvmArgs += listOf("-Dmockingword.version=$desktopVersion", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
         nativeDistributions {
             packageName = "Mockingword"
-            packageVersion = "0.1.0"
+            packageVersion = desktopVersion
             appResourcesRootDir.set(layout.buildDirectory.dir("distribution-resources"))
             includeAllModules = true
         }

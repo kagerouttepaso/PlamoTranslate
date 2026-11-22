@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -25,13 +23,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import app.plamotranslate.llm.Language
-import app.plamotranslate.llm.TranslationEngine
-import app.plamotranslate.pipeline.translation.ModelState
 
 @Composable
 internal fun MainScreen(components: DesktopComponents) {
@@ -116,51 +110,6 @@ internal fun <T : Language?> LanguageMenu(
                     select(item)
                 })
             }
-        }
-    }
-}
-
-@Composable
-private fun SettingsScreen(state: SettingsState, presenter: SettingsPresenter, recognition: @Composable () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.medium) {
-        Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(DesktopSize.margin),
-            verticalArrangement = Arrangement.spacedBy(DesktopSize.gap),
-        ) {
-            Text("翻訳モデル", style = MaterialTheme.typography.titleLarge)
-            ModelSummary(state.modelStatus)
-            ModelSettings(state, presenter)
-            state.download?.let { ModelDownloadControls(it, presenter::cancelDownload) }
-            Text("性能", style = MaterialTheme.typography.titleLarge)
-            BackendSettings(state, presenter)
-            val automaticThreads = state.automaticThreads?.let { "自動（$it）" } ?: "自動"
-            val threadChoices = (listOf(1, 2, 4, 6, 8) + listOfNotNull(state.automaticThreads, state.threads.takeIf { it > 0 }))
-                .distinct().sorted()
-            Row(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
-                CountMenu(
-                    "スレッド数", state.threads.takeIf { it > 0 }, automaticThreads, threadChoices,
-                    !state.busy && state.model !is ModelState.Loading, { presenter.setThreads(it ?: 0) },
-                )
-                CountMenu(
-                    "同時に訳す数", state.manualParallel, "自動（${state.automaticParallel}）", 1..TranslationEngine.MAX_PARALLEL,
-                    !state.busy && state.model is ModelState.Ready, presenter::setParallel,
-                )
-            }
-            DesktopOutline(onClick = presenter::tuneParallel, enabled = !state.busy && state.model is ModelState.Ready) {
-                Text("速さを調整")
-            }
-            state.tuningStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            recognition()
-            Text("ログ", style = MaterialTheme.typography.titleLarge)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
-                androidx.compose.material3.Switch(
-                    checked = state.detailedLogs, onCheckedChange = presenter::setDetailedLogs, enabled = !state.busy,
-                )
-                Text("詳しい記録を残す")
-            }
-            Text("オンにすると、テキスト・音声翻訳の原文と訳文をこの PC に記録します。オフにしても以前の記録は消えません。")
-            Text("保存先: %LOCALAPPDATA%\\Mockingword\\logs", style = MaterialTheme.typography.bodySmall)
         }
     }
 }

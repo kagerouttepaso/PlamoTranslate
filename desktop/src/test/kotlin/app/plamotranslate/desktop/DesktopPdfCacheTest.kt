@@ -28,4 +28,21 @@ class DesktopPdfCacheTest {
         first.store(scope, ModelOrigin("small", 1), first.generation, mapOf(source to "こんにちは"))
         assertEquals("ごきげんよう", first.lookup(scope, 2, listOf(source)).getValue(source).translation)
     }
+
+    @Test fun `消去前に始まった翻訳はキャッシュに戻らない`() = runBlocking {
+        val directory = folder.newFolder().toPath()
+        val cache = DesktopPdfCache(directory)
+        val scope = TranslationStream.Options(source = null, target = Language.JA).cacheScope
+        val origin = ModelOrigin("small", 1)
+        val old = cache.generation
+        val pair = mapOf("Hello!" to "こんにちは")
+        cache.store(scope, origin, old, pair)
+        assertEquals(1L, cache.count())
+        DesktopPdfCache(directory).clear()
+        assertEquals(0L, cache.count())
+        cache.store(scope, origin, old, pair)
+        assertTrue(DesktopPdfCache(directory).lookup(scope, 1, pair.keys).isEmpty())
+        cache.store(scope, origin, cache.generation, pair)
+        assertEquals("こんにちは", cache.lookup(scope, 1, pair.keys).getValue("Hello!").translation)
+    }
 }

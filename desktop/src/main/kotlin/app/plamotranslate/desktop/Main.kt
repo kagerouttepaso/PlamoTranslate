@@ -43,6 +43,7 @@ fun main() {
         val owner = remember { java.util.concurrent.atomic.AtomicReference<java.awt.Window>() }
         val components = remember { assemble(scope) { owner.get() } }
         val audio by components.audio.state.collectAsState()
+        val settings by components.settings.state.collectAsState()
         val close = {
             components.audio.close()
             scope.cancel()
@@ -61,14 +62,14 @@ fun main() {
                 owner.set(window)
                 window.minimumSize = Dimension(760, 480)
             }
-            DesktopTheme {
+            DesktopTheme(settings.theme) {
                 Column {
                     if (WindowsFrame.available) WindowTitle(state, close)
                     MainScreen(components)
                 }
             }
         }
-        SubtitleWindow(audio, components.audioPreferences) { components.audio.showSubtitle(false) }
+        SubtitleWindow(audio, components.audioPreferences, settings.theme) { components.audio.showSubtitle(false) }
     }
     exitProcess(0)
 }
@@ -145,7 +146,7 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
     return DesktopComponents(
         NavigationPresenter(),
         text,
-        SettingsPresenter(scope, settings, models, audio) { current ->
+        SettingsPresenter(scope, settings, models, audio, listOf(pdfCache), directory.resolve("logs")) { current ->
             val chooser = JFileChooser(current.parent.toFile()).apply {
                 dialogTitle = "翻訳モデルを選ぶ"
                 isAcceptAllFileFilterUsed = false

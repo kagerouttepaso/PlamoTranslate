@@ -23,7 +23,6 @@ internal fun RecognitionSettings(
     val change = presenter::setRecognition
     val enabled = state.canConfigure && models.download == null
     var expanded by remember { mutableStateOf(false) }
-    Text("音声認識", style = MaterialTheme.typography.titleLarge)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
         SpeechModel.entries.forEach { model ->
             DesktopChoice(selected = model == settings.model, enabled = enabled,

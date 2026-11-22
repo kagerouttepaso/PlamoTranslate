@@ -1,5 +1,6 @@
 package app.plamotranslate.desktop
 
+import app.plamotranslate.llm.CpuOptions
 import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.log.Logs
 import app.plamotranslate.pipeline.models.ModelFile
@@ -37,6 +38,10 @@ internal data class SettingsState(
     val catalogStatus: Map<ModelFile, Long> = emptyMap(),
     val download: ModelPreparationProgress? = null,
     val initialSetup: Boolean? = null,
+    val theme: ThemeMode = ThemeMode.SYSTEM,
+    val cpuOptions: CpuOptions = CpuOptions(),
+    val cacheCount: Long? = null,
+    val cacheNotice: String? = null,
     val cpuOnly: Boolean = false,
     val gpuFallback: String? = null,
     val detailedLogs: Boolean = false,
@@ -68,6 +73,8 @@ internal class SettingsPresenter(
     private val settings: DesktopSettings,
     private val models: ModelHost<Path, TranslationEngine>,
     private val audio: AudioPresenter,
+    private val caches: List<ClearableTranslationCache>,
+    private val logsDirectory: Path,
     private val chooseModel: (Path) -> Path?,
 ) {
     private val benchmark = DesktopTranslationBenchmark(models)
@@ -167,6 +174,77 @@ internal class SettingsPresenter(
         changeBackend { settings.saveCpuOnly(enabled) }
     }
 
+    fun selectTheme(mode: ThemeMode) {
+        if (state.value.busy || mode == state.value.theme) return
+        mutableState.update { it.copy(busy = true) }
+        scope.launch { updateSettings("画面の色を保存できませんでした。") { settings.saveTheme(mode) } }
+    }
+
+    fun setCpuOptions(options: CpuOptions) = changeBackend { settings.saveCpuOptions(options) }
+
+    fun resetPerformance() = changeBackend(settings::resetPerformance)
+
+    fun measureSpeed() {
+        val current = state.value
+        val ready = current.model as? ModelState.Ready ?: return
+        if (current.busy) return
+        mutableState.update { it.copy(busy = true, tuningStatus = "計測中…", error = null) }
+        scope.launch {
+            try {
+                val result = listOf(1, ready.parallel).distinct().map { count ->
+                    val rate = measure(ready.generation, count)
+                    if (rate > 0.0) "同時 ${count} 件：%.1f トークン/秒".format(rate) else "同時 ${count} 件：計測できませんでした"
+                }
+                mutableState.update { it.copy(tuningStatus = result.joinToString(" ／ ")) }
+            } finally {
+                mutableState.update { it.copy(busy = false) }
+            }
+        }
+    }
+
+    private var countJob: Job? = null
+
+    fun refreshCacheCount() {
+        countJob?.cancel()
+        countJob = scope.launch {
+            try {
+                val count = caches.sumOf { it.count() }
+                mutableState.update { it.copy(cacheCount = count) }
+            } catch (error: java.io.IOException) {
+                mutableState.update { it.copy(error = "キャッシュ件数を取得できませんでした：${error.localizedMessage}") }
+            }
+        }
+    }
+
+    fun clearCaches() {
+        if (state.value.busy) return
+        countJob?.cancel()
+        mutableState.update { it.copy(busy = true, cacheNotice = null, error = null) }
+        scope.launch {
+            try {
+                caches.forEach { it.clear() }
+                mutableState.update { it.copy(cacheCount = 0L, cacheNotice = "翻訳キャッシュを消去しました。") }
+            } catch (error: java.io.IOException) {
+                mutableState.update { it.copy(error = "キャッシュを消去できませんでした：${error.localizedMessage}") }
+            } finally {
+                mutableState.update { it.copy(busy = false) }
+            }
+        }
+    }
+
+    fun openLogs() {
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    Files.createDirectories(logsDirectory)
+                    java.awt.Desktop.getDesktop().open(logsDirectory.toFile())
+                }
+            } catch (error: java.io.IOException) {
+                mutableState.update { it.copy(error = "ログフォルダーを開けませんでした：${error.localizedMessage}") }
+            }
+        }
+    }
+
     fun retryGpu() = changeBackend(settings::retryGpu)
 
     fun setDetailedLogs(enabled: Boolean) {
@@ -262,6 +340,8 @@ internal class SettingsPresenter(
             manualParallel = ready?.let { settings.manualParallel(it.model, it.gpu) },
             automaticParallel = ready?.let { settings.automaticParallel(it.model, it.gpu) } ?: TranslationEngine.DEFAULT_PARALLEL,
             cpuOnly = settings.cpuOnly,
+            theme = settings.appearance,
+            cpuOptions = settings.cpuOptions,
             gpuFallback = settings.gpuFallback,
             detailedLogs = settings.detailedLogs,
         )

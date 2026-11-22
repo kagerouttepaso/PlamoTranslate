@@ -144,11 +144,11 @@ private fun TranslationBar(
                 val canCompare = documents.writtenPages.isNotEmpty()
                 SegmentedButton(
                     selected = !view.showTranslation || !canCompare, onClick = { presenter.showTranslation(false) },
-                    shape = SegmentedButtonDefaults.itemShape(0, 2), enabled = canCompare,
+                    colors = desktopSegmentColors(), shape = SegmentedButtonDefaults.itemShape(0, 2), enabled = canCompare,
                 ) { Text("原文") }
                 SegmentedButton(
                     selected = view.showTranslation && canCompare, onClick = { presenter.showTranslation(true) },
-                    shape = SegmentedButtonDefaults.itemShape(1, 2), enabled = canCompare,
+                    colors = desktopSegmentColors(), shape = SegmentedButtonDefaults.itemShape(1, 2), enabled = canCompare,
                 ) { Text("訳文") }
             }
             val finished = state.phase == PdfPhase.Finished

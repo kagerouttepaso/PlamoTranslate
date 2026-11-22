@@ -1,6 +1,5 @@
 package app.plamotranslate.desktop
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.window.WindowDraggableArea
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
@@ -25,7 +25,7 @@ import androidx.compose.ui.window.rememberWindowState
 import java.awt.Dimension
 
 @Composable
-internal fun ApplicationScope.SubtitleWindow(audio: AudioState, preferences: AudioPreferences, hide: () -> Unit) {
+internal fun ApplicationScope.SubtitleWindow(audio: AudioState, preferences: AudioPreferences, theme: ThemeMode, hide: () -> Unit) {
     val bounds = remember(preferences) { preferences.loadBounds() }
     val position = bounds?.let { WindowPosition(it.x.dp, it.y.dp) } ?: WindowPosition.Aligned(Alignment.BottomCenter)
     val state = rememberWindowState(position = position, width = (bounds?.width ?: 720f).dp, height = (bounds?.height ?: 180f).dp)
@@ -38,23 +38,26 @@ internal fun ApplicationScope.SubtitleWindow(audio: AudioState, preferences: Aud
                 window.minimumSize = Dimension(280, 110)
                 onDispose { state.bounds()?.let(preferences::saveBounds) }
             }
-            DesktopTheme {
-                Column(
-                    Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.90f)).padding(horizontal = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(DesktopSize.small),
-                ) {
-                    WindowDraggableArea(Modifier.fillMaxWidth()) {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text("字幕", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
-                            DesktopLink(onClick = hide) { Text("閉じる") }
+            DesktopTheme(theme) {
+                Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
+                    contentColor = MaterialTheme.colorScheme.onSurface) {
+                    Column(
+                        Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(DesktopSize.small),
+                    ) {
+                        WindowDraggableArea(Modifier.fillMaxWidth()) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text("字幕", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+                                DesktopLink(onClick = hide) { Text("閉じる") }
+                            }
                         }
-                    }
-                    val subtitle = audio.subtitle
-                    if (subtitle == null) {
-                        Text(audio.error ?: audio.phase.label, style = MaterialTheme.typography.bodyMedium)
-                    } else {
-                        Text(subtitle.original, maxLines = 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
-                        Text(subtitle.translation, maxLines = 4, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
+                        val subtitle = audio.subtitle
+                        if (subtitle == null) {
+                            Text(audio.error ?: audio.phase.label, style = MaterialTheme.typography.bodyMedium)
+                        } else {
+                            Text(subtitle.original, maxLines = 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                            Text(subtitle.translation, maxLines = 4, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
+                        }
                     }
                 }
             }

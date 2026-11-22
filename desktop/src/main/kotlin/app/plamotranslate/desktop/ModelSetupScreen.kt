@@ -76,7 +76,7 @@ private fun TranslationModelLicense() {
             "18歳未満の方は、保護者の同意を得てから使ってください。個人の利用と非商用の利用は無料です。",
         style = MaterialTheme.typography.bodySmall,
     )
-    DesktopLink(onClick = { links.openUri("https://plamo.preferredai.jp/info/plamo-community-license-ja") }) {
+    DesktopLink(onClick = { links.openUri(PLAMO_LICENSE) }) {
         Text("ライセンスを読む")
     }
     Text("Built with PLaMo", style = MaterialTheme.typography.bodySmall)

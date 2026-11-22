@@ -54,7 +54,7 @@ Unicode が分かる等幅の文字は、マーカー内の訳を使わず、原
 
 ## 永続キャッシュ
 
-`DesktopPdfCache` は `PersistentCache` の Windows 実装で、`%LOCALAPPDATA%\Mockingword\cache\pdf-translations\v1` に保存する。翻訳の範囲とチャンクの原文をハッシュにし、ファイルの中身には訳とモデルの品質を残す。同じ条件と品質なら、アプリを閉じても保存済みの訳を使う。空訳と原文の写しはファイルに保存しない。
+`DesktopPdfCache` は `PersistentCache` の Windows 実装で、`%LOCALAPPDATA%\Mockingword\cache\pdf-translations\v1` に保存する。翻訳の範囲とチャンクの原文をハッシュにし、ファイルの中身には訳とモデルの品質を残す。同じ条件と品質なら、アプリを閉じても保存済みの訳を使う。空訳と原文の写しはファイルに保存しない。設定でキャッシュを消去すると、保存済みの訳を消して世代を進め、消去前に開始した翻訳の書き戻しを除外する。
 
 ## 読み取りの限界
 

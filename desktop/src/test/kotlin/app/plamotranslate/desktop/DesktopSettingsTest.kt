@@ -81,4 +81,22 @@ class DesktopSettingsTest {
         assertNull(reloaded.manualParallel(first, gpu = true))
         assertEquals(8, reloaded.automaticParallel(first, gpu = true))
     }
+
+    @Test fun `性能を戻しても外観とGPUの退避理由を保つ`() {
+        val directory = folder.root.toPath()
+        Files.writeString(directory.resolve("settings.properties"), "theme=old-value\n")
+        val settings = DesktopSettings(directory).apply { read() }
+        assertEquals(ThemeMode.SYSTEM, settings.appearance)
+        settings.saveTheme(ThemeMode.LIGHT)
+        settings.saveCpuOptions(settings.cpuOptions.copy(spinWait = false, threadPool = false, mmap = false))
+        settings.endGpuLoad("GPU 準備失敗")
+        val reopened = DesktopSettings(directory).apply { read() }
+        assertFalse(reopened.cpuOptions.mmap)
+        assertFalse(reopened.cpuOptions.threadPool)
+        assertFalse(reopened.cpuOptions.spinWait)
+        reopened.resetPerformance()
+        assertEquals(app.plamotranslate.llm.CpuOptions(), reopened.cpuOptions)
+        assertEquals(ThemeMode.LIGHT, reopened.appearance)
+        assertEquals("GPU 準備失敗", reopened.gpuFallback)
+    }
 }

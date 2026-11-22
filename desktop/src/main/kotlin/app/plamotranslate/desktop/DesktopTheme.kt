@@ -71,10 +71,19 @@ private val desktopType = Typography(
     labelLarge = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
 )
 
+internal enum class ThemeMode(val label: String) {
+    SYSTEM("Windows に合わせる"), LIGHT("ライト（さえずりの紙）"), DARK("ダーク（夜の鳥）"),
+}
+
 @Composable
-internal fun DesktopTheme(content: @Composable () -> Unit) {
+internal fun DesktopTheme(mode: ThemeMode, content: @Composable () -> Unit) {
+    val dark = when (mode) {
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    }
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides DesktopSize.control) {
-        MaterialTheme(colorScheme = if (isSystemInDarkTheme()) NightBird else PaperChirp,
+        MaterialTheme(colorScheme = if (dark) NightBird else PaperChirp,
             typography = desktopType, shapes = Shapes(small = RoundedCornerShape(6.dp), large = RoundedCornerShape(8.dp)),
             content = content)
     }
