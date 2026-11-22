@@ -86,14 +86,17 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
         recognition = { audioPreferences.loadSelection().recognition }, saveTarget = settings::selectTranslationTarget)
     val pdf = PdfPresenter(
         scope, DesktopPdfReader(scope), { childScope, options -> translations.open(childScope, options, pdfCache) },
-    ) {
-        val chooser = JFileChooser().apply {
-            dialogTitle = "PDF を開く"
-            isAcceptAllFileFilterUsed = false
-            fileFilter = FileNameExtensionFilter("PDF (*.pdf)", "pdf")
-        }
-        if (chooser.showOpenDialog(owner()) == JFileChooser.APPROVE_OPTION) chooser.selectedFile.toPath() else null
-    }
+        chooseFile = {
+            val chooser = JFileChooser().apply {
+                dialogTitle = "PDF を開く"
+                isAcceptAllFileFilterUsed = false
+                fileFilter = FileNameExtensionFilter("PDF (*.pdf)", "pdf")
+            }
+            if (chooser.showOpenDialog(owner()) == JFileChooser.APPROVE_OPTION) chooser.selectedFile.toPath() else null
+        },
+        chooseSave = { filename -> chooseSavePath("訳した PDF を保存", filename, "PDF (*.pdf)", "pdf", owner()) },
+        preferences = PdfViewPreferences(directory),
+    )
     scope.launch {
         models.state.collect { state -> if (state is ModelState.Ready) pdf.setParallel(state.parallel) }
     }
@@ -129,16 +132,20 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
     )
 }
 
-private fun chooseConversationLog(filename: String, owner: java.awt.Window?): Path? {
+private fun chooseConversationLog(filename: String, owner: java.awt.Window?): Path? =
+    chooseSavePath("会話の記録を保存", filename, "Markdown (*.md)", "md", owner)
+
+/** 保存先を選ばせる。拡張子が無ければ足し、既にあるファイルは上書きしてよいかを確かめる。 */
+private fun chooseSavePath(title: String, filename: String, description: String, extension: String, owner: java.awt.Window?): Path? {
     val chooser = JFileChooser().apply {
-        dialogTitle = "会話の記録を保存"
-        fileFilter = FileNameExtensionFilter("Markdown (*.md)", "md")
+        dialogTitle = title
+        fileFilter = FileNameExtensionFilter(description, extension)
         selectedFile = java.io.File(currentDirectory, filename)
     }
     if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION) return null
     val selected = chooser.selectedFile
-    val path = if (selected.name.endsWith(".md", ignoreCase = true)) selected.toPath()
-        else selected.toPath().resolveSibling("${selected.name}.md")
+    val path = if (selected.name.endsWith(".$extension", ignoreCase = true)) selected.toPath()
+        else selected.toPath().resolveSibling("${selected.name}.$extension")
     return path.takeIf {
         !Files.exists(it) || JOptionPane.showConfirmDialog(owner, "${it.fileName} を上書きしますか？",
             "上書きの確認", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION

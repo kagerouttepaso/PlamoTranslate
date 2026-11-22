@@ -78,12 +78,10 @@ internal fun MainScreen(components: DesktopComponents) {
                         }
                     }
                     Page.PDF -> {
-                        DisposableEffect(components.pdf) {
-                            components.pdf.setVisible(true)
-                            onDispose { components.pdf.setVisible(false) }
-                        }
                         val pdf by components.pdf.state.collectAsState()
-                        PdfScreen(pdf, components.pdf, components.selectTranslationTarget)
+                        val documents by components.pdf.documents.collectAsState()
+                        val view by components.pdf.view.collectAsState()
+                        PdfScreen(pdf, documents, view, components.pdf, components.selectTranslationTarget)
                     }
                 }
             }
