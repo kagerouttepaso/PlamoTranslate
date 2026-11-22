@@ -4,22 +4,19 @@ import app.plamotranslate.llm.Language
 import app.plamotranslate.pipeline.translation.Segment
 import app.plamotranslate.pipeline.translation.SegmentUpdate
 
-data class PdfImage<Image>(val zoom: Int, val content: Image)
-
 enum class PdfPhase { Idle, Translating, Paused, Finished }
 
-data class PdfState<Image>(
+data class PdfState(
     val target: Language = Language.JA,
     val name: String? = null,
     val page: Int = 0,
     val pageCount: Int = 0,
-    val zoom: Int = 100,
-    val sideBySide: Boolean = false,
     val opening: Boolean = false,
     val phase: PdfPhase = PdfPhase.Idle,
-    val images: Map<Int, PdfImage<Image>> = emptyMap(),
     val layouts: Map<Int, List<PdfParagraph>> = emptyMap(),
     val translations: Map<Int, Map<Int, String>> = emptyMap(),
+    /** キーは [PdfTitles.titleKey] で正規化した原文の見出し。 */
+    val titleTranslations: Map<String, String> = emptyMap(),
     val working: Set<String> = emptySet(),
     val previews: Map<String, PdfPreviewLine> = emptyMap(),
     val writtenPages: Set<Int> = emptySet(),
@@ -27,33 +24,30 @@ data class PdfState<Image>(
     val translationPage: Int? = null,
     val openFailed: Boolean = false,
     val unreadable: Set<Int> = emptySet(),
-    val undrawable: Set<Int> = emptySet(),
     val untranslated: Map<Int, Set<Int>> = emptyMap(),
-)
+) {
+    fun titleTranslation(title: String): String? = titleTranslations[PdfTitles.titleKey(title)]
+}
 
 sealed interface PdfRead {
     val document: Long
     data class Open(override val document: Long, val path: String) : PdfRead
-    data class Render(override val document: Long, val page: Int, val zoom: Int) : PdfRead
     data class Extract(override val document: Long, val page: Int) : PdfRead
 }
 
-sealed interface PdfEvent<out Image> {
-    data class Visible(val visible: Boolean) : PdfEvent<Nothing>
-    data class Open(val path: String, val name: String) : PdfEvent<Nothing>
-    data class Page(val index: Int) : PdfEvent<Nothing>
-    data class Zoom(val direction: Int) : PdfEvent<Nothing>
-    data class Target(val language: Language) : PdfEvent<Nothing>
-    data class Parallel(val slots: Int) : PdfEvent<Nothing>
-    data object Start : PdfEvent<Nothing>
-    data object Stop : PdfEvent<Nothing>
-    data object SwitchView : PdfEvent<Nothing>
-    data object Retry : PdfEvent<Nothing>
-    data class Opened(val request: PdfRead.Open, val count: Int) : PdfEvent<Nothing>
-    data class Rendered<Image>(val request: PdfRead.Render, val image: Image?) : PdfEvent<Image>
-    data class Extracted(val request: PdfRead.Extract, val pageText: PdfPageText?) : PdfEvent<Nothing>
-    data class Translated(val batch: Long, val update: SegmentUpdate) : PdfEvent<Nothing>
-    data class Written(val document: Long, val page: Int, val success: Boolean) : PdfEvent<Nothing>
+sealed interface PdfEvent {
+    data class Open(val path: String, val name: String) : PdfEvent
+    /** 表示の中心にあるページ。0 始まり。 */
+    data class Page(val index: Int) : PdfEvent
+    data class Target(val language: Language) : PdfEvent
+    data class Parallel(val slots: Int) : PdfEvent
+    data object Start : PdfEvent
+    data object Stop : PdfEvent
+    data object Retry : PdfEvent
+    data class Opened(val request: PdfRead.Open, val count: Int) : PdfEvent
+    data class Extracted(val request: PdfRead.Extract, val pageText: PdfPageText?) : PdfEvent
+    data class Translated(val batch: Long, val update: SegmentUpdate) : PdfEvent
+    data class Written(val document: Long, val page: Int, val success: Boolean) : PdfEvent
 }
 
 sealed interface PdfEffect {
@@ -69,11 +63,10 @@ sealed interface PdfEffect {
 }
 
 /** 読み取り・翻訳・ページの書き込みを発行し、古い文書や中止した依頼からの応答を捨てる。 */
-class PdfSession<Image> {
-    var state: PdfState<Image> = PdfState()
+class PdfSession {
+    var state = PdfState()
         private set
 
-    private var visible = false
     private var path: String? = null
     private var document = 0L
     private var parallel = 1
@@ -85,17 +78,11 @@ class PdfSession<Image> {
     private val inflight = linkedMapOf<Long, MutableMap<Long, String>>()
     private val writing = mutableSetOf<Int>()
 
-    fun reduce(event: PdfEvent<Image>): List<PdfEffect> = buildList {
+    fun reduce(event: PdfEvent): List<PdfEffect> = buildList {
         when (event) {
-            is PdfEvent.Visible -> visible = event.visible
             is PdfEvent.Open -> open(event.path, event.name, 0, state.target, PdfPhase.Idle, this)
             is PdfEvent.Page -> if (event.index in 0 until state.pageCount) {
-                state = state.copy(page = event.index, images = state.images.filterKeys { it in retainedImages(event.index) })
-            }
-            is PdfEvent.Zoom -> {
-                val index = ZoomLevels.indexOf(state.zoom) + event.direction.compareTo(0)
-                val zoom = ZoomLevels[index.coerceIn(ZoomLevels.indices)]
-                if (zoom != state.zoom) state = state.copy(zoom = zoom, undrawable = emptySet())
+                state = state.copy(page = event.index)
             }
             is PdfEvent.Target -> if (state.target != event.language) {
                 val current = path
@@ -107,7 +94,6 @@ class PdfSession<Image> {
                 }
             }
             is PdfEvent.Parallel -> parallel = event.slots.coerceAtLeast(1)
-            PdfEvent.SwitchView -> state = state.copy(sideBySide = !state.sideBySide)
             PdfEvent.Start, PdfEvent.Retry -> if (state.pageCount > 0 && state.phase in startable) {
                 state = state.copy(phase = PdfPhase.Translating, untranslated = emptyMap())
             }
@@ -120,7 +106,6 @@ class PdfSession<Image> {
                     page = state.page.coerceAtMost((event.count - 1).coerceAtLeast(0)), openFailed = event.count <= 0,
                     phase = if (event.count > 0) state.phase else PdfPhase.Idle)
             }
-            is PdfEvent.Rendered -> if (accept(event.request)) renderResult(event)
             is PdfEvent.Extracted -> if (accept(event.request)) {
                 state = if (event.pageText == null) state.copy(unreadable = state.unreadable + event.request.page) else
                     state.copy(layouts = state.layouts + (event.request.page to PdfParagraphs.page(event.pageText)))
@@ -131,13 +116,13 @@ class PdfSession<Image> {
                     state.copy(writeFailed = state.writeFailed + event.page)
             }
         }
-        if (visible || state.phase == PdfPhase.Translating) {
-            planRead()?.let {
+        if (state.phase == PdfPhase.Translating) {
+            planExtraction()?.let {
                 reading = it
                 add(PdfEffect.Read(it))
             }
+            planTranslation(this)
         }
-        if (state.phase == PdfPhase.Translating) planTranslation(this)
     }
 
     private fun open(path: String, name: String, page: Int, target: Language, phase: PdfPhase, effects: MutableList<PdfEffect>) {
@@ -146,8 +131,7 @@ class PdfSession<Image> {
         plan = null
         confirmed.clear()
         writing.clear()
-        state = PdfState(target = target, name = name, page = page, zoom = state.zoom,
-            opening = true, sideBySide = state.sideBySide, phase = phase)
+        state = PdfState(target = target, name = name, page = page, opening = true, phase = phase)
         val request = PdfRead.Open(++document, path)
         reading = request
         effects += PdfEffect.Read(request)
@@ -159,25 +143,10 @@ class PdfSession<Image> {
         return true
     }
 
-    private fun renderResult(event: PdfEvent.Rendered<Image>) {
-        val (page, zoom) = event.request.let { it.page to it.zoom }
-        if (page !in retainedImages(state.page) || zoom != state.zoom) return
-        val image = event.image
-        state = if (image == null) state.copy(undrawable = state.undrawable + page) else
-            state.copy(images = state.images + (page to PdfImage(zoom, image)))
-    }
-
-    private fun planRead(): PdfRead? {
-        if (reading != null || state.pageCount == 0) return null
-        fun render(page: Int) = PdfRead.Render(document, page, state.zoom).takeIf {
-            visible && state.images[page]?.zoom != state.zoom && page !in state.undrawable
-        }
-        render(state.page)?.let { return it }
-        if (state.phase == PdfPhase.Translating && plan == null) {
-            val page = (0 until state.pageCount).firstOrNull { it !in state.layouts && it !in state.unreadable }
-            if (page != null) return PdfRead.Extract(document, page)
-        }
-        return retainedImages(state.page).filter { it != state.page }.firstNotNullOfOrNull(::render)
+    private fun planExtraction(): PdfRead.Extract? {
+        if (reading != null || plan != null) return null
+        val page = (0 until state.pageCount).firstOrNull { it !in state.layouts && it !in state.unreadable } ?: return null
+        return PdfRead.Extract(document, page)
     }
 
     private fun planTranslation(effects: MutableList<PdfEffect>) {
@@ -224,16 +193,21 @@ class PdfSession<Image> {
         if (active.isEmpty()) inflight.remove(event.batch)
         confirmed[text] = update.text
         val byPage = state.translations.toMutableMap()
+        val replaced = mutableListOf<PdfParagraph>()
         for (page in queue.pagesFor(text)) {
             val updates = buildMap {
                 state.layouts.getValue(page).forEachIndexed { index, paragraph ->
-                    if (paragraph.text == text && update.text.isNotBlank() &&
-                        PdfMarkupTranslation.shouldReplace(paragraph, update.text)) put(index, update.text)
+                    if (paragraph.text == text && PdfMarkupTranslation.shouldReplace(paragraph, update.text)) {
+                        put(index, update.text)
+                        replaced += paragraph
+                    }
                 }
             }
             if (updates.isNotEmpty()) byPage[page] = byPage[page].orEmpty() + updates
         }
-        state = state.copy(translations = byPage, working = state.working - text, previews = state.previews - text)
+        val titles = PdfTitles.titleTranslations(replaced, mapOf(text to update.text))
+        state = state.copy(translations = byPage, titleTranslations = state.titleTranslations + titles,
+            working = state.working - text, previews = state.previews - text)
         val ready = queue.completedPages(listOf(text), confirmed.keys)
         for (page in ready) {
             if (!writing.add(page)) continue
@@ -249,11 +223,7 @@ class PdfSession<Image> {
         state = state.copy(working = emptySet(), previews = emptyMap(), translationPage = null)
     }
 
-    private fun retainedImages(page: Int) = (page - 1).coerceAtLeast(0)..(page + ImageLookahead).coerceAtMost(state.pageCount - 1)
-
-    companion object {
-        private const val ImageLookahead = 2
+    private companion object {
         private val startable = setOf(PdfPhase.Idle, PdfPhase.Paused)
-        val ZoomLevels = listOf(50, 75, 100, 125, 150, 200, 250)
     }
 }

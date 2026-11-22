@@ -4,22 +4,18 @@ import app.plamotranslate.llm.Language
 import app.plamotranslate.pipeline.translation.SegmentUpdate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PdfSessionTest {
-    @Test fun `開いただけでは描画し開始後に全ページを読み取って訳す`() {
-        val session = PdfSession<String>()
-        session.reduce(PdfEvent.Visible(true))
+    @Test fun `開いただけでは訳さずビューアの状態に関係なく開始後に全ページを読む`() {
+        val session = PdfSession()
         val opened = session.reduce(PdfEvent.Open("manual.pdf", "manual.pdf")).read<PdfRead.Open>()
-        val first = session.reduce(PdfEvent.Opened(opened, 2)).read<PdfRead.Render>()
-        assertEquals(0, first.page)
-        val shown = session.reduce(PdfEvent.Rendered(first, "first"))
-        assertEquals(1, shown.read<PdfRead.Render>().page)
+        assertTrue(session.reduce(PdfEvent.Opened(opened, 2)).isEmpty())
         assertEquals(PdfPhase.Idle, session.state.phase)
-        assertEquals("first", session.state.images[0]?.content)
-        assertTrue(session.reduce(PdfEvent.Start).isEmpty())
-        val extracted = session.reduce(PdfEvent.Rendered(shown.read(), "second")).read<PdfRead.Extract>()
+        val extracted = session.reduce(PdfEvent.Start).read<PdfRead.Extract>()
+        assertEquals(0, extracted.page)
         val next = session.reduce(PdfEvent.Extracted(extracted, testPage(TestLine("Read this."))))
         assertTrue(next.translations().isEmpty())
         assertEquals(1, next.read<PdfRead.Extract>().page)
@@ -28,7 +24,7 @@ class PdfSessionTest {
     }
 
     @Test fun `バッチの返事が逆順でも段落がそろったページは一回だけ書く`() {
-        val session = PdfSession<String>()
+        val session = PdfSession()
         val batches = session.start(3,
             testPage(TestLine("First paragraph."), TestLine("Shared paragraph.", y = 680.0)),
             testPage(TestLine("Shared paragraph.", y = 680.0), TestLine("Last paragraph.", y = 660.0)),
@@ -52,7 +48,7 @@ class PdfSessionTest {
     }
 
     @Test fun `中止で古い途中経過と返事を捨て確定した段落を残して再開する`() {
-        val session = PdfSession<String>()
+        val session = PdfSession()
         val (first, second, third) = session.start(3,
             testPage(TestLine("First paragraph."), TestLine("Second paragraph.", y = 680.0), TestLine("Third paragraph.", y = 660.0)),
         )
@@ -76,7 +72,7 @@ class PdfSessionTest {
     }
 
     @Test fun `表示ページを移しても実行中の依頼を残し空いた枠を新しいページに使う`() {
-        val session = PdfSession<String>()
+        val session = PdfSession()
         val pages = (0..3).map { testPage(TestLine("Paragraph $it.", y = 700.0 - it * 2)) }
         val initial = session.start(1, *pages.toTypedArray()).single()
         assertTrue(session.reduce(PdfEvent.Page(3)).isEmpty())
@@ -86,7 +82,7 @@ class PdfSessionTest {
     }
 
     @Test fun `別の文書を開くと翻訳を止め古い文書の書き込みと訳を捨てる`() {
-        val session = PdfSession<String>()
+        val session = PdfSession()
         val (first, second) = session.start(2, testPage(TestLine("First paragraph.")), testPage(TestLine("Last paragraph.")))
         val pending = session.finish(first, "先頭。").writes().single()
         val replacement = session.reduce(PdfEvent.Open("new.pdf", "new.pdf"))
@@ -102,7 +98,7 @@ class PdfSessionTest {
     }
 
     @Test fun `失敗は再開待ちにし成功していた段落の訳を保持する`() {
-        val session = PdfSession<String>()
+        val session = PdfSession()
         val (first, second) = session.start(2,
             testPage(TestLine("First paragraph."), TestLine("Second paragraph.", y = 680.0)))
         session.finish(first, "先頭。")
@@ -113,7 +109,41 @@ class PdfSessionTest {
         assertEquals(listOf("Second paragraph."), session.reduce(PdfEvent.Retry).translations().single().segments.map { it.text })
     }
 
-    private fun PdfSession<String>.start(slots: Int, vararg pages: PdfPageText): List<PdfEffect.Translate> {
+    @Test fun `本文の確定訳をしおりに使い中止後も残し別の文書を開いたら消す`() {
+        val session = PdfSession()
+        val (title, model) = session.start(2, testPage(TestLine("Power Supply", bold = true), TestLine("PD-100 AC", y = 680.0)))
+        session.reduce(PdfEvent.Translated(title.batch, SegmentUpdate.Partial(title.segments.single().id, "途中。")))
+        assertNull(session.state.titleTranslation("POWER SUPPLY"))
+        session.finish(title, "電源")
+        assertEquals("電源", session.state.titleTranslation(" <a1> POWER  SUPPLY </a1> "))
+        session.finish(model, "PD-100 AC")
+        assertNull(session.state.titleTranslation("PD-100 AC"))
+        session.reduce(PdfEvent.Stop)
+        assertEquals(mapOf("power supply" to "電源"), session.state.titleTranslations)
+        session.reduce(PdfEvent.Open("new.pdf", "new.pdf"))
+        assertTrue(session.state.titleTranslations.isEmpty())
+    }
+
+    @Test fun `翻訳中に訳す先を変えると同じ表示ページを起点に新しい言語で頼み直す`() {
+        val session = PdfSession()
+        val pages = arrayOf(testPage(TestLine("First paragraph.")), testPage(TestLine("Last paragraph.")))
+        val initial = session.start(1, *pages).single()
+        session.reduce(PdfEvent.Page(1))
+        val change = session.reduce(PdfEvent.Target(Language.EN))
+        assertTrue(PdfEffect.StopTranslation in change)
+        val open = change.read<PdfRead.Open>()
+        assertEquals("test.pdf", open.path)
+        var effects = session.reduce(PdfEvent.Opened(open, 2))
+        assertEquals(1, session.state.page)
+        for (page in pages) effects = session.reduce(PdfEvent.Extracted(effects.read(), page))
+        val request = effects.translations().single()
+        assertEquals(Language.EN, request.target)
+        assertEquals("Last paragraph.", request.segments.single().text)
+        session.finish(initial, "以前の言語の訳。")
+        assertTrue(session.state.translations.isEmpty())
+    }
+
+    private fun PdfSession.start(slots: Int, vararg pages: PdfPageText): List<PdfEffect.Translate> {
         reduce(PdfEvent.Parallel(slots))
         val open = reduce(PdfEvent.Open("test.pdf", "test.pdf")).read<PdfRead.Open>()
         assertTrue(reduce(PdfEvent.Opened(open, pages.size)).isEmpty())
@@ -126,7 +156,7 @@ class PdfSessionTest {
         return effects.translations()
     }
 
-    private fun PdfSession<String>.finish(effect: PdfEffect.Translate, text: String): List<PdfEffect> =
+    private fun PdfSession.finish(effect: PdfEffect.Translate, text: String): List<PdfEffect> =
         reduce(PdfEvent.Translated(effect.batch, SegmentUpdate.Final(effect.segments.single().id, text)))
 
     private inline fun <reified Read : PdfRead> List<PdfEffect>.read(): Read =
