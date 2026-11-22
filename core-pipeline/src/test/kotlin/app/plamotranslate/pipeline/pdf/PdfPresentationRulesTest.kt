@@ -19,6 +19,9 @@ class PdfPresentationRulesTest {
         assertEquals(PdfColor.White, background.color(PdfBounds(1.0, 3.0, 1.0, 3.0), PdfColor.Black))
         val tie = PdfBackground(intArrayOf(0x00800000, 0x00008000), 2, 1, PdfPageSize(2.0, 1.0))
         assertEquals(PdfColor(128, 0, 0), tie.color(PdfBounds(0.0, 0.0, 1.0, 1.0), PdfColor.Black))
+        // 画素の範囲で渡しても同じ規則で選び、画像の外へはみ出す範囲は画像の内側に収める。
+        assertEquals(PdfColor(234, 234, 234), background.color(0, 1, 3, 2, PdfColor.Black))
+        assertEquals(PdfColor(234, 234, 234), background.color(-5, 1, 99, 2, PdfColor.Black))
     }
 
     @Test fun `しおりはタグ空白大文字小文字を無視し書いた本文の訳文を使う`() {

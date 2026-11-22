@@ -23,9 +23,14 @@ class PdfBackground(
         val right = ceil(bounds.right * scaleX).toInt().coerceIn(0, width - 1)
         val top = floor(height - bounds.top * scaleY).toInt().coerceIn(0, height - 1)
         val bottom = ceil(height - bounds.bottom * scaleY).toInt().coerceIn(0, height - 1)
+        return color(left, top, right, bottom, text)
+    }
+
+    /** 画素の範囲（両端を含む）で取る。回転したページのように、表示側が座標を画素へ直したときに使う。 */
+    fun color(left: Int, top: Int, right: Int, bottom: Int, text: PdfColor): PdfColor {
         val count = mutableMapOf<Int, Int>()
-        for (y in top..bottom) {
-            for (x in left..right) {
+        for (y in top.coerceIn(0, height - 1)..bottom.coerceIn(0, height - 1)) {
+            for (x in left.coerceIn(0, width - 1)..right.coerceIn(0, width - 1)) {
                 val rgb = pixels[y * width + x] and 0x00ffffff
                 val dr = (rgb shr 16) - text.red
                 val dg = ((rgb shr 8) and 255) - text.green

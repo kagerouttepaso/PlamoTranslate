@@ -75,7 +75,9 @@ import app.plamotranslate.desktop.pdf.PdfSearch
 import app.plamotranslate.desktop.pdf.PdfViewport
 import app.plamotranslate.desktop.pdf.PdfZoom
 import app.plamotranslate.log.Logs
+import app.plamotranslate.pipeline.pdf.PdfBackground
 import app.plamotranslate.pipeline.pdf.PdfBounds
+import app.plamotranslate.pipeline.pdf.PdfColor
 import app.plamotranslate.pipeline.pdf.PdfPageSize
 import app.plamotranslate.pipeline.pdf.PdfState
 import kotlinx.coroutines.CancellationException
@@ -508,17 +510,23 @@ private fun PdfPage(
     ) {
         image?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds) }
         if (viewport != null) {
+            val backgrounds = remember(image) { PageBackgrounds(image, pageSize) }
             Canvas(Modifier.fillMaxSize()) {
                 working.forEach { paragraph ->
                     val box = rect(viewport, paragraph.bounds)
-                    drawRect(Color.White.copy(alpha = WORKING_ALPHA), box.topLeft, box.size)
+                    if (box.width < 1 || box.height < 1) return@forEach
+                    val background = backgrounds.color(viewport, paragraph.bounds, paragraph.color)
                     val preview = state.previews[paragraph.text]?.text
-                    if (!preview.isNullOrEmpty() && box.width > 4 && box.height > 4) {
-                        val fontPx = (paragraph.size * scale * density).toFloat().coerceIn(6f, box.height)
+                    // 生成途中の訳が届いたら、原文の文字を背景色で隠してから訳を描く（原文と訳を重ねない）。
+                    // 届くまでは原文を半分だけ隠し、訳している段落だと分かるようにする。
+                    drawRect(background.copy(alpha = if (preview.isNullOrEmpty()) WORKING_ALPHA else 1f), box.topLeft, box.size)
+                    val fontPx = minOf((paragraph.size * scale * density).toFloat() * PREVIEW_SCALE, box.height)
+                    if (!preview.isNullOrEmpty() && fontPx >= MIN_PREVIEW_PX) {
                         drawText(
                             measurer, preview, box.topLeft,
                             TextStyle(color = Color(paragraph.color.red, paragraph.color.green, paragraph.color.blue),
-                                fontSize = (fontPx / density / fontScale * PREVIEW_SCALE).let { androidx.compose.ui.unit.TextUnit(it, androidx.compose.ui.unit.TextUnitType.Sp) }),
+                                fontSize = androidx.compose.ui.unit.TextUnit(fontPx / density / fontScale,
+                                    androidx.compose.ui.unit.TextUnitType.Sp)),
                             overflow = TextOverflow.Clip, size = box.size,
                         )
                     }
@@ -552,5 +560,34 @@ private const val MAX_PIXELS = 12_000_000.0
 private const val RENDER_DELAY_MS = 60L
 /** ブラウザー版と同じく、訳している段落の原文を背景色で半分だけ隠す。 */
 private const val WORKING_ALPHA = 0.45f
+/** これより小さい文字（画素）では生成途中の訳を描かない（読めず、段落の高さにも収まらない）。 */
+private const val MIN_PREVIEW_PX = 3f
+
+/**
+ * 訳している段落を覆う色。書き込みと同じ `PdfBackground`（文字色に近い画素を除いた最頻色）を、表示中の画像から取る。
+ * 回転したページも合うように、段落の範囲は `PdfViewport` で画像の画素へ直して渡す。
+ */
+private class PageBackgrounds(private val image: ImageBitmap?, private val pageSize: PdfPageSize) {
+    private val background by lazy {
+        image?.let { bitmap ->
+            val pixels = IntArray(bitmap.width * bitmap.height)
+            bitmap.readPixels(pixels)
+            PdfBackground(pixels, bitmap.width, bitmap.height, pageSize)
+        }
+    }
+    private val colors = HashMap<PdfBounds, Color>()
+
+    fun color(viewport: PdfViewport, bounds: PdfBounds, text: PdfColor): Color = colors.getOrPut(bounds) {
+        val pixels = background ?: return@getOrPut Color.White
+        val box = viewport.toView(bounds)
+        val width = image!!.width
+        val height = image.height
+        val color = pixels.color(
+            (box.left * width).toInt(), (box.top * height).toInt(),
+            (box.right * width).toInt(), (box.bottom * height).toInt(), text,
+        )
+        Color(color.red, color.green, color.blue)
+    }
+}
 /** 生成途中の訳は原文より長くなりやすいので、原文の文字より少し小さく描く。 */
 private const val PREVIEW_SCALE = 0.85f
