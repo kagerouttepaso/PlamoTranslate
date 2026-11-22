@@ -17,11 +17,18 @@ dependencies {
     implementation(compose.desktop.currentOs)
     implementation(libs.compose.desktop.material3)
     implementation(libs.kotlinx.coroutines.swing)
+    implementation("org.apache.pdfbox:pdfbox:3.0.7")
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
 }
 
 val desktopJava = javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) }
+val desktopNativeDir = rootProject.file(providers.gradleProperty("desktopNativeDir").getOrElse("desktop-native/build/bin"))
+
+tasks.withType<Test>().configureEach {
+    systemProperty("java.library.path", desktopNativeDir.absolutePath)
+    environment("PATH", desktopNativeDir.absolutePath + File.pathSeparator + System.getenv("PATH").orEmpty())
+}
 
 compose.desktop {
     application {
@@ -31,7 +38,7 @@ compose.desktop {
 }
 
 tasks.withType<JavaExec>().matching { it.name == "run" }.configureEach {
-    val nativeDir = rootProject.file(providers.gradleProperty("desktopNativeDir").getOrElse("desktop-native/build/bin"))
+    val nativeDir = desktopNativeDir
     val sherpaVersion = libs.versions.sherpa.onnx.get()
     val sherpaDir = rootProject.file(providers.gradleProperty("desktopSherpaDir")
         .getOrElse("third_party/sherpa-onnx/sherpa-onnx-v$sherpaVersion-win-x64-jni/lib"))

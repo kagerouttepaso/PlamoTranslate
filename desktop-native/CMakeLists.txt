@@ -47,7 +47,17 @@ endif()
 find_package(PDFium CONFIG REQUIRED PATHS "${pdfium_root}" NO_DEFAULT_PATH)
 configure_file("${pdfium_root}/bin/pdfium.dll" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/pdfium.dll" COPYONLY)
 
+set(harfbuzz_src "${REPO_ROOT}/third_party/harfbuzz/harfbuzz-12.3.2/src")
+if(NOT EXISTS "${harfbuzz_src}/harfbuzz-subset.cc")
+    message(FATAL_ERROR "tools/get-harfbuzz.ps1 で HarfBuzz を取得してください")
+endif()
+# リリース付属の統合ソースには HarfBuzz 本体とサブセットが入っている。
+add_library(harfbuzz-subset STATIC "${harfbuzz_src}/harfbuzz-subset.cc")
+target_include_directories(harfbuzz-subset PUBLIC "${harfbuzz_src}")
+target_compile_definitions(harfbuzz-subset PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
+target_compile_options(harfbuzz-subset PRIVATE /utf-8 /bigobj /wd4244 /wd4267)
+
 add_library(mockingword-pdf SHARED pdfium_jni.cpp)
 target_include_directories(mockingword-pdf PRIVATE ${JNI_INCLUDE_DIRS})
 target_compile_options(mockingword-pdf PRIVATE /utf-8)
-target_link_libraries(mockingword-pdf PRIVATE pdfium)
+target_link_libraries(mockingword-pdf PRIVATE pdfium harfbuzz-subset)
