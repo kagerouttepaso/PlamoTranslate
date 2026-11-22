@@ -10,7 +10,7 @@ import java.util.Locale
 /** 出す訳文。失敗したら、そのことを示す文。相手の言語が分かる前の自分の発話は、相手が分かったら訳すと知らせる。 */
 internal val Turn.shownTranslation: String
     get() = failure?.let { "（翻訳に失敗しました：$it）" }
-        ?: if (direction.target == null) "（相手の言語が分かったら訳します）" else translation
+        ?: if (direction.target == null) "（相手の言語が分かったら訳します）" else displayTranslation
 
 /** かかった時間（認識・発話の長さ・翻訳）。 */
 internal val Turn.statsText: String

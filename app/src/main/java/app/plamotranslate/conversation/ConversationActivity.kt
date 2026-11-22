@@ -212,7 +212,7 @@ private fun FollowingList(
             if (!scrolling) follow = !listState.canScrollForward
         }
     }
-    LaunchedEffect(count, state.turns.lastOrNull()?.translation?.length, state.cards.lastOrNull()?.text, state.cards.lastOrNull()?.translation) {
+    LaunchedEffect(count, state.turns.lastOrNull()?.displayTranslation?.length, state.cards.lastOrNull()?.text, state.cards.lastOrNull()?.translation) {
         if (follow && count > 0) listState.scrollToEnd(count)
     }
     LazyColumn(

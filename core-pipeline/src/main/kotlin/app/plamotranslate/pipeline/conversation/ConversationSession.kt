@@ -34,7 +34,14 @@ data class Turn(
     val swappedFrom: Turn? = null,
     /** 言語の入れ替えについての状態（[ConversationSession] が決める。画面はこれだけを見る）。 */
     val swap: SwapState = SwapState.UNAVAILABLE,
-)
+    /** 確定訳の最初の文字を待つ間だけ表示する、聞き取り中のカードの途中訳。 */
+    private val partialTranslation: String = "",
+) {
+    val displayTranslation: String get() = partialTranslation.ifEmpty { translation }
+
+    internal fun withFinalProgress(text: String): Turn =
+        copy(translation = text, partialTranslation = if (text.isBlank()) partialTranslation else "")
+}
 
 /** 確定したカードの言語の入れ替えについての状態（docs/設計/会話翻訳.md「カードの言語の取り違えを直す」）。 */
 enum class SwapState {
@@ -240,13 +247,15 @@ class ConversationSession(
         val effects = mutableListOf<Effect>()
         when (event) {
             is Event.Speech -> onSpeech(event.event, event.specifiedLanguage, effects)
-            is Event.FinalProgress -> if (!isStaleFinal(event.turnId)) updateTurn(event.turnId) { it.copy(translation = event.text) }
+            is Event.FinalProgress -> if (!isStaleFinal(event.turnId)) {
+                updateTurn(event.turnId) { it.withFinalProgress(event.text) }
+            }
             is Event.FinalDone -> {
                 if (!isStaleFinal(event.turnId)) updateTurn(event.turnId) {
                     if (event.failure != null) {
-                        it.copy(translated = true, failure = event.failure)
+                        it.copy(translated = true, failure = event.failure, partialTranslation = "")
                     } else {
-                        it.copy(translation = event.text, translated = true, translateMs = event.millis)
+                        it.copy(translation = event.text, translated = true, translateMs = event.millis, partialTranslation = "")
                     }
                 }
                 if (finalRunning == event.turnId) {
@@ -258,7 +267,11 @@ class ConversationSession(
                 val request = partialRunning?.takeIf { it.id == event.requestId }
                 if (request != null) partialRunning = null
                 // 訳し終えたときにまだ聞き取り中のカードなら、そのカードに出す
-                if (request != null && event.text != null) updateCard(request.card) { it.copy(translation = event.text) }
+                if (request != null && event.text != null) updateCard(request.card) {
+                    if (it.direction?.source == request.source && it.direction.target == request.target) {
+                        it.copy(translation = event.text)
+                    } else it
+                }
             }
             is Event.SelfChanged -> router.self = event.self
             is Event.ModeChanged -> {
@@ -297,11 +310,12 @@ class ConversationSession(
             is SpeechEvent.CardText -> onCardText(event, specifiedLanguage)
             is SpeechEvent.CardClosed -> updateCard(event.card) { it.copy(open = false) }
             is SpeechEvent.CardFinished -> {
+                val card = listeningCards.firstOrNull { it.card == event.card }
                 listeningCards = listeningCards.filterNot { it.card == event.card }
                 event.utterance?.let { utterance ->
                     // 確定訳を優先する：途中訳は止める
                     partialRunning?.let { effects += Effect.CancelPartial(it.id) }
-                    onUtterance(utterance, specifiedLanguage)
+                    onUtterance(utterance, specifiedLanguage, card)
                 }
             }
             // 止めて、話していた分を確定し終えた
@@ -340,12 +354,13 @@ class ConversationSession(
         listeningCards = listeningCards.map { if (it.card == card) change(it) else it }
     }
 
-    private fun onUtterance(utterance: Utterance, specifiedLanguage: Language?) {
+    private fun onUtterance(utterance: Utterance, specifiedLanguage: Language?, card: LiveSpeech?) {
         val direction = specifiedLanguage?.let(router::routeChosen) ?: router.route(utterance.text, utterance.lang)
         val turn = Turn(
             id = nextTurnId++,
             direction = direction,
             original = utterance.text,
+            partialTranslation = card?.takeIf { it.direction == direction }?.translation.orEmpty(),
             timeMillis = clock(),
             durationMs = utterance.durationMs,
             recognizeMs = utterance.recognizeMs,
@@ -371,13 +386,16 @@ class ConversationSession(
         if (stale.isEmpty()) return
         val ids = stale.mapTo(HashSet()) { it.id }
         turns = turns.map {
-            if (it.id in ids) it.copy(direction = it.direction.copy(target = partner), translation = "", translated = false, translateMs = null, failure = null) else it
+            if (it.id in ids) it.forDirection(it.direction.copy(target = partner)) else it
         }
         requeue(ids)
     }
 
     /** 発話を入れ替えたときの話した言語（もう一方の話し手の言語）。相手がまだ決まっていなければ無い。 */
     private fun swappedLanguage(turn: Turn): Language? = if (turn.direction.mine) router.partner else router.self
+
+    private fun Turn.forDirection(direction: Direction) =
+        copy(direction = direction, translation = "", partialTranslation = "", translated = false, translateMs = null, failure = null)
 
     /**
      * 利用者がカードの言語を入れ替えられるか。音声認識が音声を取り置いていて、書き起こし直している最中でなく、もう一方の話し手の
@@ -400,10 +418,7 @@ class ConversationSession(
         if (swapState(turn) != SwapState.AVAILABLE) return
         val language = swappedLanguage(turn) ?: return
         updateTurn(turnId) {
-            it.copy(
-                direction = router.chosen(language), swappedFrom = it,
-                translation = "", translated = false, translateMs = null, failure = null,
-            )
+            it.forDirection(router.chosen(language)).copy(swappedFrom = it)
         }
         unqueue(turnId)
         effects += Effect.Retranscribe(utterance, language)
@@ -425,10 +440,8 @@ class ConversationSession(
         val before = turn.swappedFrom ?: return
         val target = if (before.direction.mine) router.partner else router.self
         val retargeted = before.direction.target != target
-        val restored = before.copy(
-            retained = turn.retained,
-            direction = before.direction.copy(target = target),
-        ).let { if (retargeted) it.copy(translation = "", translated = false, translateMs = null, failure = null) else it }
+        val restored = (if (retargeted) before.forDirection(before.direction.copy(target = target)) else before)
+            .copy(retained = turn.retained)
         updateTurn(turn.id) { restored }
         if (!restored.translated) requeue(setOf(turn.id))
     }
