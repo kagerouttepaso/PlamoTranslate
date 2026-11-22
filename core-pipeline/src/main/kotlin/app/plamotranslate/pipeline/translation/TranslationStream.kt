@@ -63,13 +63,13 @@ class TranslationStream(
     /** [clear] のたびに増やす。古い番号の依頼の結果は捨てる。 */
     private var generation = 0
 
-    private class Pending(val segment: Segment, val at: Long)
+    private class Pending(val segment: Segment, val at: Long, val batch: Long? = null)
 
     /**
      * 頼まれた文。[lines] は元の行ごとのチャンク（空の行はチャンクが0個）。チャンクは改行を含まない。
      * 依頼の行と訳の行を対応させる（逐次のコアのつなぎ方、打ち切りの行数、途中の訳の行送り）ので、改行はチャンクの中に入れず、ここで行に分けて持つ。
      */
-    private class Seg(val lines: List<List<String>>, val at: Long) {
+    private class Seg(val lines: List<List<String>>, val at: Long, val batched: Boolean) {
         val pieces = lines.flatten()
         var fromEngine = false
     }
@@ -99,7 +99,8 @@ class TranslationStream(
     private val queued = HashSet<String>()
     private val jobs = HashMap<Int, Job>()
     private var nextJobId = 0
-    private val tooLong = ArrayList<String>()
+    private val tooLong = ArrayList<Piece>()
+    private var nextBatch = 0L
     private val toStore = LinkedHashMap<String, String>()
     private var core: TranslationCore = SequentialCore()
     private val cacheScope = options.cacheScope
@@ -120,10 +121,22 @@ class TranslationStream(
     private val worker = scope.launch { work() }
 
     /** 文を頼む。結果は [updates] で届く。 */
-    fun submit(segments: List<Segment>) {
+    fun submit(segments: List<Segment>) = submit(segments, batched = false)
+
+    /**
+     * 計画済みのバッチを1件頼む。各文は空白だけでない1行。同じバッチのキャッシュにない行を1回の依頼で訳す。
+     * 1200字を超える単独行は文の切れ目で分ける。結果は [updates] で文ごとに届く。
+     */
+    fun submitBatch(segments: List<Segment>) = submit(segments, batched = true)
+
+    private fun submit(segments: List<Segment>, batched: Boolean) {
         if (segments.isEmpty()) return
+        if (batched) PlannedBatch.validate(segments)
         val now = System.nanoTime()
-        synchronized(lock) { segments.forEach { inbox.addLast(Pending(it, now)) } }
+        synchronized(lock) {
+            val batch = if (batched) ++nextBatch else null
+            segments.forEach { inbox.addLast(Pending(it, now, batch)) }
+        }
         wake.trySend(Unit)
     }
 
@@ -204,7 +217,7 @@ class TranslationStream(
                 }
                 val hits = if (lookup.isNotEmpty() && b.persistent != null) {
                     try {
-                        b.persistent.lookup(cacheScope, b.origin.quality, lookup)
+                        b.persistent.lookup(cacheScope, b.origin.quality, lookup.map { it.text })
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -234,8 +247,8 @@ class TranslationStream(
     }
 
     /** 頼まれた文をチャンクに分け、キャッシュ（メモリ）で決まるチャンクを確定し、永続キャッシュを引くチャンクを返す。[lock] の中で呼ぶ。 */
-    private fun drainInbox(): List<String> {
-        val lookup = LinkedHashSet<String>()
+    private fun drainInbox(): List<Piece> {
+        val lookup = mutableListOf<Piece>()
         while (inbox.isNotEmpty()) {
             val pending = inbox.removeFirst()
             val id = pending.segment.id
@@ -244,7 +257,10 @@ class TranslationStream(
                 continue
             }
             // 行に分けてからチャンクにする（チャンクは改行を含まない。テキスト翻訳は複数行の入力を1つの文として頼む）
-            val seg = Seg(pending.segment.text.lines().map { if (it.isBlank()) emptyList() else TranslationChecks.splitLong(it, core.splitAt) }, pending.at)
+            val batched = pending.batch != null
+            val splitAt = if (batched) TranslationChecks.LONG_TEXT else core.splitAt
+            val lines = pending.segment.text.lines().map { if (it.isBlank()) emptyList() else TranslationChecks.splitLong(it, splitAt) }
+            val seg = Seg(lines, pending.at, batched)
             segments[id] = seg
             for (p in seg.pieces.distinct()) {
                 waiting.getOrPut(p) { LinkedHashSet() }.add(id)
@@ -257,19 +273,20 @@ class TranslationStream(
                             finals[p] = hit
                         } else {
                             queued += p
-                            lookup += p
+                            lookup += Piece(p, single = batched && seg.pieces.size > 1, batch = pending.batch)
                         }
                     }
                 }
             }
             completeIfDone(id)
         }
-        return lookup.toList()
+        return lookup
     }
 
     /** 永続キャッシュを引いた結果で、チャンクを確定するか並べる。[lock] の中で呼ぶ。 */
-    private fun enqueue(texts: List<String>, hits: Map<String, CachedTranslation>) {
-        for (p in texts) {
+    private fun enqueue(pieces: List<Piece>, hits: Map<String, CachedTranslation>) {
+        for (piece in pieces) {
+            val p = piece.text
             if (waiting[p] == null) {
                 // 引いている間にやめた
                 queued.remove(p)
@@ -282,7 +299,7 @@ class TranslationStream(
                 cache.put(cacheScope, p, hit.translation, hit.quality)
                 pieceFinal(p, hit.translation, fromEngine = false)
             } else {
-                queue.addLast(Piece(p))
+                queue.addLast(piece)
             }
         }
     }
@@ -296,7 +313,9 @@ class TranslationStream(
         for (id in ids) {
             val seg = segments[id] ?: continue
             if (fromEngine) seg.fromEngine = true
-            if (!completeIfDone(id)) emit(SegmentUpdate.Partial(id, joined(seg)))
+            if (!completeIfDone(id) && (!seg.batched || p == seg.pieces.first())) {
+                emit(SegmentUpdate.Partial(id, joined(seg), lineComplete = seg.batched))
+            }
         }
     }
 
@@ -322,20 +341,32 @@ class TranslationStream(
         return true
     }
 
-    private fun joined(seg: Seg): String = assemble(seg) { finals[it] ?: current[it]?.toString().orEmpty() }
+    private fun joined(seg: Seg): String {
+        if (!seg.batched) return assemble(seg) { finals[it] ?: current[it]?.toString().orEmpty() }
+        val first = seg.pieces.first()
+        return finals[first] ?: current[first]?.toString().orEmpty()
+    }
 
     /** チャンクの訳を、行の中では [TranslationChecks.joinPieces] でつなぎ、行どうしは元の改行でつなぐ。 */
     private fun assemble(seg: Seg, textOf: (String) -> String): String =
-        seg.lines.joinToString("\n") { line -> TranslationChecks.joinPieces(line.map(textOf)) }
+        seg.lines.joinToString("\n") { line ->
+            val texts = line.map(textOf)
+            if (seg.batched) texts.joinToString(" ") else TranslationChecks.joinPieces(texts)
+        }
 
-    private fun partialFor(p: String) {
-        for (id in waiting[p].orEmpty()) segments[id]?.let { emit(SegmentUpdate.Partial(id, joined(it))) }
+    private fun partialFor(p: String, lineComplete: Boolean = false) {
+        for (id in waiting[p].orEmpty()) {
+            val seg = segments[id] ?: continue
+            if ((!seg.batched && !lineComplete) || (seg.batched && p == seg.pieces.first())) {
+                emit(SegmentUpdate.Partial(id, joined(seg), lineComplete))
+            }
+        }
     }
 
     /** シーケンス1本分に入らなかったチャンクを並べ直す。並べたものがあれば true。[lock] の中で呼ぶ。 */
     private fun requeueTooLong(): Boolean {
         if (tooLong.isEmpty()) return false
-        tooLong.filter { waiting[it] != null }.forEach { queue.addLast(Piece(it, single = true)) }
+        tooLong.filter { waiting[it.text] != null }.forEach { queue.addLast(it.copy(single = true)) }
         tooLong.clear()
         return queue.isNotEmpty()
     }
@@ -344,7 +375,7 @@ class TranslationStream(
     private fun giveUpTooLong() {
         val rest = tooLong.toList()
         tooLong.clear()
-        rest.forEach { pieceFinal(it, "", fromEngine = true) }
+        rest.forEach { pieceFinal(it.text, "", fromEngine = true) }
     }
 
     /** 頼まれていた文を全部失敗にする。 */
@@ -382,7 +413,7 @@ class TranslationStream(
             // 訳している間に頼まれた文：メモリのキャッシュだけ見て並べる
             if (inbox.isNotEmpty()) enqueue(drainInbox(), emptyMap())
             if (queue.isEmpty()) return null
-            val pieces = core.plan(queue)
+            val pieces = if (queue.first().batch == null) core.plan(queue) else PlannedBatch.take(queue)
             val id = nextJobId++
             jobs[id] = Job(pieces, generation)
             pieces.forEach { current[it.text] = StringBuilder() }
@@ -396,7 +427,10 @@ class TranslationStream(
             job.tokens++
             // 改行のたびに次の行（チャンク）へ移る
             text.split('\n').forEachIndexed { k, part ->
-                if (k > 0) job.line++
+                if (k > 0) {
+                    job.pieces.getOrNull(job.line)?.takeIf { it.batch != null }?.let { partialFor(it.text, lineComplete = true) }
+                    job.line++
+                }
                 if (part.isNotEmpty() && job.line < job.pieces.size) {
                     val p = job.pieces[job.line].text
                     if (waiting[p] != null && p !in finals) {
@@ -406,16 +440,18 @@ class TranslationStream(
                 }
             }
             val sourceChars = job.pieces.sumOf { it.text.length } + job.pieces.size - 1
-            job.cut = TranslationChecks.runaway(job.output.toString(), job.pieces.size, sourceChars)
+            val lines = if (job.pieces.size == 1 && job.pieces[0].batch != null) 0 else job.pieces.size
+            job.cut = TranslationChecks.runaway(job.output.toString(), lines, sourceChars)
             if (job.cut > 0) stopped++
             job.cut > 0
         }
 
-        override fun onFinished(id: Int) = synchronized(lock) {
+        override fun onFinished(id: Int): Unit = synchronized(lock) {
             val job = jobs.remove(id) ?: return
             if (job.generation != generation) return
             val output = if (job.cut > 0) job.output.substring(0, job.cut) else job.output.toString()
-            val outcome = core.finish(job.pieces, output, options.target)
+            val outcome = if (job.pieces[0].batch == null) core.finish(job.pieces, output, options.target)
+                else PlannedBatch.finish(job.pieces, output, options.target, job.cut > 0)
             job.pieces.forEach { pieceTokens[it.text] = (pieceTokens[it.text] ?: 0) + job.tokens / job.pieces.size }
             for (p in outcome.retry.asReversed()) {
                 if (waiting[p] == null) {
@@ -425,7 +461,8 @@ class TranslationStream(
                 retried++
                 current[p] = StringBuilder()
                 partialFor(p)
-                queue.addFirst(Piece(p, single = true))
+                val piece = job.pieces.first { it.text == p }
+                queue.addFirst(piece.copy(single = true))
             }
             for ((p, t) in outcome.finals) {
                 piecesTranslated++
@@ -435,9 +472,9 @@ class TranslationStream(
             }
         }
 
-        override fun onTooLong(id: Int) = synchronized(lock) {
+        override fun onTooLong(id: Int): Unit = synchronized(lock) {
             val job = jobs.remove(id) ?: return
-            if (job.generation == generation) tooLong += job.pieces.map { it.text }
+            if (job.generation == generation) tooLong += job.pieces
         }
     }
 

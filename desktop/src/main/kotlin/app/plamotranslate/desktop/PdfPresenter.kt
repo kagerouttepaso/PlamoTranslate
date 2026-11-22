@@ -5,6 +5,7 @@ import app.plamotranslate.pipeline.EventLoop
 import app.plamotranslate.pipeline.pdf.PdfEffect
 import app.plamotranslate.pipeline.pdf.PdfEvent
 import app.plamotranslate.pipeline.pdf.PdfSession
+import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -28,6 +29,7 @@ internal class PdfPresenter(
 
     private var stream: TranslationStream? = null
     private var subscription: Job? = null
+    private val batches = mutableMapOf<Long, Long>()
 
     init {
         scope.launch { reader.events.collect(events::dispatch) }
@@ -38,6 +40,9 @@ internal class PdfPresenter(
     fun page(index: Int) = events.dispatch(PdfEvent.Page(index))
     fun zoom(direction: Int) = events.dispatch(PdfEvent.Zoom(direction))
     fun selectTarget(target: Language) = events.dispatch(PdfEvent.Target(target))
+    fun setParallel(slots: Int) = events.dispatch(PdfEvent.Parallel(slots))
+    fun start() = events.dispatch(PdfEvent.Start)
+    fun stop() = events.dispatch(PdfEvent.Stop)
     fun switchView() = events.dispatch(PdfEvent.SwitchView)
     fun retry() = events.dispatch(PdfEvent.Retry)
 
@@ -60,17 +65,27 @@ internal class PdfPresenter(
     private fun perform(effect: PdfEffect) {
         when (effect) {
             is PdfEffect.Read -> reader.read(effect.request)
+            is PdfEffect.WritePage -> reader.write(effect)
             PdfEffect.StopTranslation -> {
+                batches.clear()
                 subscription?.cancel()
                 subscription = null
                 stream?.close()
                 stream = null
             }
             is PdfEffect.Translate -> {
-                val opened = openTranslation(scope, TranslationStream.Options(source = null, target = effect.target))
-                stream = opened
-                subscription = scope.launch { opened.updates.collect { events.dispatch(PdfEvent.Translated(effect.batch, it)) } }
-                opened.submit(effect.segments)
+                val opened = stream ?: openTranslation(scope, TranslationStream.Options(source = null, target = effect.target))
+                    .also { active ->
+                        stream = active
+                        subscription = scope.launch {
+                            active.updates.collect { update ->
+                                val batch = if (update is SegmentUpdate.Partial) batches[update.id] else batches.remove(update.id)
+                                if (batch != null) events.dispatch(PdfEvent.Translated(batch, update))
+                            }
+                        }
+                    }
+                effect.segments.forEach { batches[it.id] = effect.batch }
+                opened.submitBatch(effect.segments)
             }
         }
     }

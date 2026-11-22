@@ -3,7 +3,7 @@ package app.plamotranslate.pipeline.translation
 import app.plamotranslate.llm.Language
 
 /** 訳すチャンク（文の切れ目で分けた後の1つ）。[single] なら、ほかのチャンクとつながずに1つで訳す（訳し直し）。 */
-data class Piece(val text: String, val single: Boolean = false)
+data class Piece(val text: String, val single: Boolean = false, val batch: Long? = null)
 
 /**
  * 翻訳のコア（docs/設計/翻訳コア.md「翻訳の契約」）。訳すチャンクを1回の依頼にまとめ（[plan]）、終わった依頼の訳をチャンクへ戻す（[finish]）。
@@ -42,14 +42,21 @@ class SequentialCore : TranslationCore {
         var chars = first.text.length
         while (chunk.size < MAX_LINES) {
             val next = queue.firstOrNull() ?: break
-            if (next.single || chars + next.text.length > MAX_CHARS) break
+            if (next.single || next.batch != null || chars + next.text.length > MAX_CHARS) break
             chunk += queue.removeFirst()
             chars += next.text.length
         }
         return chunk
     }
 
-    override fun finish(pieces: List<Piece>, output: String, target: Language): TranslationCore.Outcome {
+    override fun finish(pieces: List<Piece>, output: String, target: Language): TranslationCore.Outcome =
+        finish(pieces, output) { source, translation -> TranslationChecks.untranslated(source, translation, target) }
+
+    internal fun finish(
+        pieces: List<Piece>,
+        output: String,
+        untranslated: (String, String) -> Boolean,
+    ): TranslationCore.Outcome {
         if (pieces.size == 1) return TranslationCore.Outcome(listOf(pieces[0].text to output.trim()), emptyList())
         val lines = output.trim().split('\n').map { it.trim() }
         // 行がずれたら、つないだチャンクを1つずつ訳し直す
@@ -58,7 +65,7 @@ class SequentialCore : TranslationCore {
         val retry = mutableListOf<String>()
         pieces.forEachIndexed { k, p ->
             // 行数が合っても、原文のまま写した行は訳し直す（言語の混ざったブロックで起きる）
-            if (TranslationChecks.untranslated(p.text, lines[k], target)) retry += p.text else finals += p.text to lines[k]
+            if (untranslated(p.text, lines[k])) retry += p.text else finals += p.text to lines[k]
         }
         return TranslationCore.Outcome(finals, retry)
     }
@@ -92,3 +99,32 @@ fun coreFor(parallel: Int): TranslationCore = if (parallel <= 1) SequentialCore(
  * 渡しておく数を絞って、その時点で選ぶ呼び出し（カメラ翻訳）が使う。コアの訳し方を呼ぶ側に漏らさないため、ここで決める。
  */
 fun intakeFor(parallel: Int): Int = if (parallel <= 1) SequentialCore.MAX_LINES else parallel
+
+/** 呼ぶ側が組んだバッチは境界を保ち、分割した長文や訳し直しは単独で依頼する。 */
+internal object PlannedBatch {
+    private val fallback = SequentialCore()
+
+    fun validate(segments: List<Segment>) {
+        require(segments.all { it.text.isNotBlank() && '\n' !in it.text && '\r' !in it.text })
+        require(segments.size == 1 || (segments.size <= SequentialCore.MAX_LINES &&
+            segments.sumOf { it.text.length } <= SequentialCore.MAX_CHARS))
+    }
+
+    fun take(queue: ArrayDeque<Piece>): List<Piece> {
+        val first = queue.removeFirst()
+        if (first.single) return listOf(first)
+        return buildList {
+            add(first)
+            while (queue.firstOrNull()?.let { it.batch == first.batch && !it.single } == true) {
+                add(queue.removeFirst())
+            }
+        }
+    }
+
+    fun finish(pieces: List<Piece>, output: String, target: Language, cut: Boolean): TranslationCore.Outcome {
+        if (cut && pieces.size > 1) return TranslationCore.Outcome(emptyList(), pieces.map { it.text })
+        return fallback.finish(pieces, output) { source, translation ->
+            TranslationChecks.untranslatedMarked(source, translation, target)
+        }
+    }
+}

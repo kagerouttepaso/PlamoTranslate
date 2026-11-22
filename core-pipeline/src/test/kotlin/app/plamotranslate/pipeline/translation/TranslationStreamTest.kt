@@ -125,6 +125,42 @@ class TranslationStreamTest {
         updates.filterIsInstance<SegmentUpdate.Final>().associate { it.id to it.text }
 
     @Test
+    fun 計画済みのバッチは並列時にも一緒に訳し隣のバッチとは混ぜない() {
+        for (parallel in listOf(1, 4)) {
+            val engine = FakeEngine(parallel)
+            val stream = stream(engine)
+            stream.submitBatch(listOf(Segment(1, "Input"), Segment(2, "Output")))
+            stream.submitBatch(listOf(Segment(3, "Voltage"), Segment(4, "Current")))
+            val updates = stream.collectUntilDone(setOf(1, 2, 3, 4))
+            assertEquals(listOf("Input\nOutput", "Voltage\nCurrent"), engine.requests)
+            assertEquals(mapOf(1L to "訳「Input」", 2L to "訳「Output」", 3L to "訳「Voltage」", 4L to "訳「Current」"), finals(updates))
+            assertTrue(updates.filterIsInstance<SegmentUpdate.Partial>().any { it.id == 1L && it.lineComplete })
+        }
+    }
+
+    @Test
+    fun 計画済みのバッチで行対応が崩れたら途中訳を取り消して単独でやり直す() {
+        val requests = mutableListOf<String>()
+        val engine = object : JobEngine {
+            override val parallel = 4
+            override suspend fun run(slots: Int, source: JobSource, maxTokens: Int): Int {
+                while (true) {
+                    val (id, request) = source.next() ?: return 0
+                    requests += request.text
+                    source.onText(id, if ('\n' in request.text) "ずれた行。" else "訳「${request.text}」")
+                    source.onFinished(id)
+                }
+            }
+        }
+        val stream = stream(engine)
+        stream.submitBatch(listOf(Segment(1, "Power Supply"), Segment(2, "Test Result")))
+        val updates = stream.collectUntilDone(setOf(1, 2))
+        assertEquals(listOf("Power Supply\nTest Result", "Power Supply", "Test Result"), requests)
+        assertTrue(updates.filterIsInstance<SegmentUpdate.Partial>().any { it.id == 1L && it.text.isEmpty() })
+        assertEquals(mapOf(1L to "訳「Power Supply」", 2L to "訳「Test Result」"), finals(updates))
+    }
+
+    @Test
     fun 複数行の文は全部の行を訳し改行を残す() {
         // テキスト翻訳は入力の全体を1つの文として頼む。チャンクは1行に限るので、行ごとに分けてから訳し、元の改行へ戻す
         for (parallel in listOf(1, 4)) {

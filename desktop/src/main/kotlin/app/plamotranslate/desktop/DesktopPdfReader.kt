@@ -3,10 +3,13 @@ package app.plamotranslate.desktop
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import app.plamotranslate.pipeline.pdf.PdfEvent
+import app.plamotranslate.pipeline.pdf.PdfEffect
+import app.plamotranslate.pipeline.pdf.PdfBounds
+import app.plamotranslate.pipeline.pdf.PdfColor
 import app.plamotranslate.pipeline.pdf.PdfGlyph
-import app.plamotranslate.pipeline.pdf.PdfLayout
+import app.plamotranslate.pipeline.pdf.PdfPageSize
+import app.plamotranslate.pipeline.pdf.PdfPageText
 import app.plamotranslate.pipeline.pdf.PdfRead
-import app.plamotranslate.pipeline.pdf.PdfRect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +26,7 @@ internal data class PdfPageImage(val bitmap: ImageBitmap, val width: Float, val 
 internal interface PdfReader {
     val events: Flow<PdfEvent<PdfPageImage>>
     fun read(request: PdfRead)
+    fun write(request: PdfEffect.WritePage)
 }
 
 internal class DesktopPdfReader(scope: CoroutineScope) : PdfReader {
@@ -48,8 +52,7 @@ internal class DesktopPdfReader(scope: CoroutineScope) : PdfReader {
                             is PdfRead.Render -> PdfEvent.Rendered(request, if (request.document == document && handle != 0L)
                                 renderPdf(handle, request.page, request.zoom) else null)
                             is PdfRead.Extract -> PdfEvent.Extracted(request, if (request.document == document && handle != 0L) {
-                                val size = pdfSize(handle, request.page)
-                                PdfLayout.paragraphs(readPdfGlyphs(handle, request.page), size[0] / size[1])
+                                readPdfPageText(handle, request.page)
                             } else null)
                         }
                     } catch (cancelled: CancellationException) {
@@ -73,6 +76,10 @@ internal class DesktopPdfReader(scope: CoroutineScope) : PdfReader {
         requests.trySend(request)
     }
 
+    override fun write(request: PdfEffect.WritePage) {
+        results.trySend(PdfEvent.Written(request.document, request.page, success = false))
+    }
+
     private fun failure(request: PdfRead): PdfEvent<PdfPageImage> = when (request) {
         is PdfRead.Open -> PdfEvent.Opened(request, 0)
         is PdfRead.Render -> PdfEvent.Rendered(request, null)
@@ -84,23 +91,30 @@ internal fun pdfSize(handle: Long, page: Int): FloatArray = checkNotNull(PdfNati
     check(size.all { it.isFinite() && it > 0 })
 }
 
-internal fun readPdfGlyphs(handle: Long, page: Int): List<PdfGlyph> {
+// 詳細な文字情報を返す JNI へ接続するまで、旧 API の矩形を PDF のポイントに戻す。
+internal fun readPdfPageText(handle: Long, page: Int): PdfPageText {
+    val (width, height) = pdfSize(handle, page)
     val data = checkNotNull(PdfNative.glyphs(handle, page))
-    var space = false
-    return buildList {
+    val glyphs = buildList {
+        var previous: PdfGlyph? = null
         for (index in data.indices step 5) {
             val code = data[index].toInt()
             if (!Character.isValidCodePoint(code) || code in 0xD800..0xDFFF) continue
             val text = String(Character.toChars(code))
-            val box = PdfRect(data[index + 1], data[index + 2], data[index + 3], data[index + 4])
-            if (text.isBlank()) {
-                space = true
-            } else if (box.left >= 0 && box.top >= 0 && box.right <= 1 && box.bottom <= 1) {
-                add(PdfGlyph(text, box, spaceBefore = space))
-                space = false
-            }
+            val left = data[index + 1].toDouble() * width
+            val top = (1 - data[index + 2].toDouble()) * height
+            val right = data[index + 3].toDouble() * width
+            val bottom = (1 - data[index + 4].toDouble()) * height
+            val bounds = PdfBounds(left, bottom, right, top)
+            val size = bounds.height
+            val nearby = previous?.takeIf { kotlin.math.abs(it.originY - bottom) < it.size * 0.4 }
+            val glyph = PdfGlyph(index / 5, text, left, nearby?.originY ?: bottom, bounds,
+                "", 400, PdfColor.Black, null, nearby?.size ?: size)
+            add(glyph)
+            if (!text.isBlank()) previous = glyph
         }
     }
+    return PdfPageText(PdfPageSize(width.toDouble(), height.toDouble()), glyphs)
 }
 
 internal fun renderPdf(handle: Long, page: Int, zoom: Int): PdfPageImage {

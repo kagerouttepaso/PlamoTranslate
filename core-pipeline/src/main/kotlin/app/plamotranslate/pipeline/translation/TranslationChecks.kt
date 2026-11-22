@@ -28,14 +28,33 @@ object TranslationChecks {
      */
     fun untranslated(source: String, output: String, target: Language): Boolean {
         val plain = normalize(source)
+        if (shortLatinLabel(plain)) return false
+        return looksUntranslated(plain, normalize(output), target)
+    }
+
+    /** マーカー付き文では、マーカーを除いた原文と訳文を点検する。短いラベルだけの段落も原文のままでよい。 */
+    internal fun untranslatedMarked(source: String, output: String, target: Language): Boolean {
+        val plain = normalize(source.replace(markTag, ""))
+        if (shortLatinLabel(plain)) return false
+        val outsideCode = source.replace(markCode, " ")
+        val labels = markLabel.findAll(outsideCode).map { normalize(it.groupValues[2].replace(markTag, "")) }
+            .filter { hasLetter.containsMatchIn(it) }.toList()
+        val outside = outsideCode.replace(markLabel, " ").replace(markTag, "")
+        if (labels.isNotEmpty() && !hasLetter.containsMatchIn(outside) && labels.all(::shortLatinLabel)) return false
+        return looksUntranslated(plain, normalize(output.replace(markTag, "")), target)
+    }
+
+    private fun shortLatinLabel(plain: String): Boolean {
         val latinOnly = plain.codePoints().allMatch { cp ->
             when (UnicodeScript.of(cp)) {
                 UnicodeScript.LATIN, UnicodeScript.COMMON, UnicodeScript.INHERITED -> true
                 else -> false
             }
         }
-        if (latinOnly && plain.split(' ').size <= 3 && plain.length <= 24) return false
-        val out = normalize(output)
+        return latinOnly && plain.split(' ').size <= 3 && plain.length <= 24
+    }
+
+    private fun looksUntranslated(plain: String, out: String, target: Language): Boolean {
         if (plain == out) return true
         if (target != Language.JA) return false
         return plain.any { it.isLetter() } && out.codePoints().noneMatch(::isJapanese)
@@ -95,6 +114,10 @@ object TranslationChecks {
 
     private val SENTENCE = Regex("[^.!?。！？\\n]+[.!?。！？]*\\s*|\\n")
     private val SPACES = Regex("\\s+")
+    private val markTag = Regex("""</?[acv][0-9]+/?>""")
+    private val markCode = Regex("""<c([0-9]+)>[\s\S]*?</c\1>""")
+    private val markLabel = Regex("""<a([0-9]+)>([\s\S]*?)</a\1>""")
+    private val hasLetter = Regex("""\p{L}""")
 
     private fun normalize(s: String) = s.replace(SPACES, " ").trim()
 

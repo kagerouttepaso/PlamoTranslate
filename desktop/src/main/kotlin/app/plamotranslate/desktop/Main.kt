@@ -13,6 +13,7 @@ import app.plamotranslate.llm.Language
 import app.plamotranslate.log.LogSink
 import app.plamotranslate.log.Logs
 import app.plamotranslate.pipeline.translation.ModelHost
+import app.plamotranslate.pipeline.translation.ModelState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -92,6 +93,9 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
             fileFilter = FileNameExtensionFilter("PDF (*.pdf)", "pdf")
         }
         if (chooser.showOpenDialog(owner()) == JFileChooser.APPROVE_OPTION) chooser.selectedFile.toPath() else null
+    }
+    scope.launch {
+        models.state.collect { state -> if (state is ModelState.Ready) pdf.setParallel(state.parallel) }
     }
     scope.launch {
         settings.translationTarget.collect { target ->

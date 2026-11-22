@@ -8,7 +8,7 @@ sealed interface SegmentUpdate {
     val id: Long
 
     /** 訳している途中の訳（その時点までの全体）。 */
-    data class Partial(override val id: Long, val text: String) : SegmentUpdate
+    data class Partial(override val id: Long, val text: String, val lineComplete: Boolean = false) : SegmentUpdate
 
     /**
      * 確定した訳。[cached] はキャッシュから返したか。[millis] は頼んでから確定までの時間、[tokens] はおおよその生成トークン数

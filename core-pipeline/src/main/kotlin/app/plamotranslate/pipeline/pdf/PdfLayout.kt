@@ -1,147 +1,119 @@
 package app.plamotranslate.pipeline.pdf
 
-import app.plamotranslate.pipeline.layout.TextGrouper
-import kotlin.math.abs
+data class PdfPiece(val text: String, val bold: Boolean = false, val link: Int? = null, val source: Boolean = false)
 
-data class PdfRect(val left: Float, val top: Float, val right: Float, val bottom: Float) {
-    val width get() = right - left
-    val height get() = bottom - top
-    val centerY get() = (top + bottom) / 2
+data class PdfRun(val text: String, val width: Double, val x: Double, val bold: Boolean, val link: Int?, val source: Boolean)
 
-    fun union(other: PdfRect) = PdfRect(
-        minOf(left, other.left), minOf(top, other.top), maxOf(right, other.right), maxOf(bottom, other.bottom),
-    )
-}
+data class PdfPlacedLine(val baseline: Double, val runs: List<PdfRun>)
 
-data class PdfGlyph(val text: String, val box: PdfRect, val spaceBefore: Boolean = false)
+data class PdfPlacement(val size: Double, val leading: Double, val shrunk: Boolean, val lines: List<PdfPlacedLine>)
 
-data class PdfParagraph(val text: String, val lines: List<PdfRect>) {
-    val box = lines.reduce(PdfRect::union)
-}
+data class PdfParagraphGeometry(
+    val masked: Boolean,
+    val bounds: PdfBounds,
+    val x: Double,
+    val baseline: Double,
+    val width: Double,
+    val floor: Double,
+    val size: Double,
+    val leading: Double,
+)
 
+typealias PdfMeasure = (text: String, bold: Boolean, size: Double) -> Double
+
+/** 途中表示と PDF 書き込みで使う配置。位置と字幅は PDF のポイント。 */
 object PdfLayout {
-    private data class Line(val text: String, val box: PdfRect)
-    private class GlyphRow(val center: Float, val height: Float, val glyphs: MutableList<PdfGlyph>)
-    private val caption = Regex("^(?:fig(?:ure)?\\.?|table)\\s+\\d+\\s*[:：]", RegexOption.IGNORE_CASE)
+    private val noStart = Regex("""^[、。，．・：；？！ー）」』】〕”’ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ々.,:;!?)\]]""")
+    private val noEnd = Regex("""[（「『【〔“‘(\[]$""")
+    private val atom = Regex("""[\x21-\x7e -ɏ–’µ®°×]+|$pdfWhitespace+|.""")
+    private val whitespace = Regex("$pdfWhitespace+")
 
-    fun paragraphs(glyphs: List<PdfGlyph>, pageAspect: Float): List<PdfParagraph> {
-        require(pageAspect.isFinite() && pageAspect > 0)
-        val visible = glyphs.filter { it.text.isNotBlank() && it.box.width > 0 && it.box.height > 0 }.distinct()
-        if (visible.isEmpty()) return emptyList()
-        val typical = visible.map { it.box.height }.sorted()[visible.size / 2]
-        val rows = mutableListOf<GlyphRow>()
-        val (letters, marks) = visible.partition { it.text.any(Char::isLetterOrDigit) }
-        for (glyph in letters.sortedBy { it.box.centerY }) {
-            val box = glyph.box
-            val row = rows.lastOrNull()?.takeIf {
-                abs(it.center - box.centerY) <= minOf(it.height.coerceAtLeast(typical), box.height.coerceAtLeast(typical)) * 0.52f
-            }
-            if (row == null) rows += GlyphRow(box.centerY, box.height, mutableListOf(glyph)) else row.glyphs += glyph
+    private data class Atom(val text: String, val width: Double, val piece: PdfPiece)
+
+    fun paragraphGeometry(paragraph: PdfParagraph, page: List<PdfParagraph>): PdfParagraphGeometry {
+        val masked = paragraph.objectPaths.any { it.size > 1 }
+        val box = paragraph.translationBounds ?: paragraph.bounds
+        val below = page.asSequence().filter { other ->
+            other !== paragraph && other.baseline < paragraph.bottomBaseline - 1 &&
+                other.x < paragraph.right && other.right > paragraph.x
+        }.maxByOrNull { it.baseline }
+        val floor = if (below == null) paragraph.bottomBaseline
+            else minOf(paragraph.bottomBaseline, below.baseline + below.size * 1.15)
+        val width = if (!masked) paragraph.right - paragraph.x
+            else (box.right - paragraph.x) * if (paragraph.lineDetails.size > 1) 1.0 else 1.15
+        return PdfParagraphGeometry(masked, box, paragraph.x, paragraph.baseline, width + 0.5, floor - 0.5,
+            paragraph.size, paragraph.leading)
+    }
+
+    fun planParagraph(geometry: PdfParagraphGeometry, pieces: List<PdfPiece>, measure: PdfMeasure): PdfPlacement {
+        val translation = pieces.filterNot { it.source }
+        var step = 0
+        var size: Double
+        var leading: Double
+        var lines: List<List<Atom>>
+        while (true) {
+            val scale = 1 - step * 0.05
+            size = geometry.size * scale
+            leading = geometry.leading * scale
+            lines = wrap(translation, geometry.width, size, measure)
+            if (geometry.baseline - (lines.size - 1) * leading >= geometry.floor || step == 6) break
+            step++
         }
-        for (glyph in marks) {
-            val box = glyph.box
-            val row = rows.minByOrNull { abs(it.center - box.centerY) }?.takeIf {
-                abs(it.center - box.centerY) <= it.height.coerceAtLeast(typical) * 0.75f
+        if (pieces.size != translation.size) lines = wrap(pieces, geometry.width, size, measure)
+        return PdfPlacement(size, leading, step > 0, lines.mapIndexedNotNull { index, line ->
+            val baseline = geometry.baseline - index * leading
+            var x = geometry.x
+            val runs = mutableListOf<PdfRun>()
+            for (a in line) {
+                val (bold, link, source) = a.piece.let { Triple(it.bold, it.link, it.source) }
+                if (source && (baseline < geometry.floor || x + a.width > geometry.x + geometry.width)) break
+                val last = runs.lastOrNull()
+                if (last != null && last.bold == bold && last.link == link && last.source == source) {
+                    runs[runs.lastIndex] = last.copy(text = last.text + a.text, width = last.width + a.width)
+                } else {
+                    runs += PdfRun(a.text, a.width, x, bold, link, source)
+                }
+                x += a.width
             }
-            if (row == null) rows += GlyphRow(box.centerY, box.height, mutableListOf(glyph)) else row.glyphs += glyph
-        }
-        return readRows(rows.sortedBy { it.center }.map { row ->
-            val heights = row.glyphs.filter { it.text.any(Char::isLetterOrDigit) }.map { it.box.height }.sorted()
-            spans(row.glyphs, (heights.getOrNull(heights.size / 2) ?: typical) / pageAspect)
+            if (runs.isEmpty()) null else PdfPlacedLine(baseline, runs)
         })
     }
 
-    private fun spans(glyphs: List<PdfGlyph>, letterHeight: Float): List<Line> {
-        val ordered = glyphs.sortedBy { it.box.left }
-        val output = mutableListOf<Line>()
-        var box = ordered.first().box
-        val text = StringBuilder()
-        for (glyph in ordered) {
-            val gap = glyph.box.left - box.right
-            if (text.isNotEmpty() && gap > letterHeight * 2.3f) {
-                output += Line(text.toString(), box)
-                text.clear()
-                box = glyph.box
-            } else if (text.isNotEmpty() && (gap > letterHeight * 0.40f ||
-                    (glyph.spaceBefore && gap > letterHeight * 0.12f))) {
-                text.append(' ')
-            }
-            box = box.union(glyph.box)
-            text.append(glyph.text)
-        }
-        output += Line(text.toString(), box)
-        return output
-    }
-
-    private fun readRows(rows: List<List<Line>>): List<PdfParagraph> {
-        if (rows.isEmpty()) return emptyList()
-        val gutter = columnGutter(rows) ?: return readSingleColumn(rows)
-        val output = mutableListOf<PdfParagraph>()
-        val left = mutableListOf<List<Line>>()
-        val right = mutableListOf<List<Line>>()
-        val spanning = mutableListOf<List<Line>>()
-        fun flushColumns() {
-            output += readRows(left.toList())
-            output += readRows(right.toList())
-            left.clear()
-            right.clear()
-        }
-        for (row in rows) {
-            if (row.any { it.box.left < gutter && it.box.right > gutter }) {
-                flushColumns()
-                spanning += row
-            } else {
-                output += readSingleColumn(spanning)
-                spanning.clear()
-                row.filter { it.box.right <= gutter }.takeIf { it.isNotEmpty() }?.let(left::add)
-                row.filter { it.box.left >= gutter }.takeIf { it.isNotEmpty() }?.let(right::add)
+    private fun wrap(pieces: List<PdfPiece>, width: Double, size: Double, measure: PdfMeasure): List<List<Atom>> {
+        val atoms = pieces.asSequence().flatMap { piece ->
+            atom.findAll(piece.text).map {
+                val text = if (whitespace.matches(it.value)) " " else it.value
+                Atom(text, measure(text, piece.bold, size), piece)
             }
         }
-        output += readSingleColumn(spanning)
-        flushColumns()
-        return output
-    }
-
-    private fun columnGutter(rows: List<List<Line>>): Float? {
-        val pairs = rows.mapNotNull { row ->
-            if (row.size != 2 || row.any { it.text.count(Char::isLetter) < 18 }) null else row[0] to row[1]
-        }
-        return pairs.map { (left, right) -> (left.box.right + right.box.left) / 2 }
-            .map { gap -> gap to pairs.count { (left, right) -> gap > left.box.right && gap < right.box.left } }
-            .filter { (_, support) -> support >= 2 }
-            .maxByOrNull { (_, support) -> support }?.first
-    }
-
-    private fun readSingleColumn(rows: List<List<Line>>): List<PdfParagraph> {
-        val output = mutableListOf<PdfParagraph>()
-        val paragraph = mutableListOf<Line>()
-        fun flush() {
-            if (paragraph.isNotEmpty()) {
-                output += PdfParagraph(paragraph.joinToString(" ") { it.text }, paragraph.map { it.box })
-                paragraph.clear()
-            }
-        }
-        for (row in rows) {
-            if (row.size > 1) {
-                flush()
-                output += row.map { PdfParagraph(it.text, listOf(it.box)) }
+        val lines = mutableListOf(mutableListOf<Atom>())
+        var used = 0.0
+        for (a in atoms) {
+            val line = lines.last()
+            if (a.text == " " && line.isEmpty()) continue
+            if (used + a.width > width && line.isNotEmpty()) {
+                if (a.text == " ") {
+                    lines.add(mutableListOf())
+                    used = 0.0
+                    continue
+                }
+                if (a.text.length <= 2 && noStart.containsMatchIn(a.text) && line.last().piece.source == a.piece.source) {
+                    line += a
+                    used += a.width
+                    continue
+                }
+                val carry = ArrayDeque<Atom>()
+                while (line.size > 1 && line.last().piece.source == a.piece.source && noEnd.containsMatchIn(line.last().text)) {
+                    carry.addFirst(line.removeLast())
+                }
+                while (line.lastOrNull()?.text == " ") line.removeLast()
+                lines += (carry + a).toMutableList()
+                used = carry.sumOf { it.width } + a.width
                 continue
             }
-            val line = row.single()
-            val previous = paragraph.lastOrNull()
-            if (previous != null && !continues(previous, line)) flush()
-            paragraph += line
+            line += a
+            used += a.width
         }
-        flush()
-        return output
-    }
-
-    private fun continues(previous: Line, next: Line): Boolean {
-        val upper = previous.box
-        val lower = next.box
-        return !caption.containsMatchIn(next.text) && !TextGrouper.ITEM_START.containsMatchIn(next.text) &&
-            lower.top - upper.bottom <= maxOf(upper.height, lower.height) &&
-            maxOf(upper.height, lower.height) <= minOf(upper.height, lower.height) * 1.45f &&
-            minOf(upper.right, lower.right) > maxOf(upper.left, lower.left)
+        return lines.map { it.dropLastWhile { a -> a.text == " " } }.filter { it.isNotEmpty() }
     }
 }
