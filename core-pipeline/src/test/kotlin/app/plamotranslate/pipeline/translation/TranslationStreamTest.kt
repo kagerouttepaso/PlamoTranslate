@@ -161,6 +161,36 @@ class TranslationStreamTest {
     }
 
     @Test
+    fun キャッシュのあるバッチを訳し直しても古い生成の行を別の段落へ表示しない() {
+        val texts = listOf("Alpha paragraph.", "Beta has three sentences. One. Two.", "Gamma paragraph.", "Delta paragraph.")
+        val want = listOf("アルファの段落。", "ベータは3文ある。\nその1。\nその2。", "ガンマの段落。", "デルタの段落。")
+        val engine = object : JobEngine {
+            override val parallel = 4
+            override suspend fun run(slots: Int, source: JobSource, maxTokens: Int): Int {
+                val (old, batch) = source.next() ?: return 0
+                assertEquals(listOf(texts[0], texts[1], texts[3]), batch.text.lines())
+                source.onText(old, "アルファの段落。\nずれた行。")
+                source.onFinished(old)
+                while (true) {
+                    val (id, request) = source.next() ?: return 0
+                    assertTrue(source.onText(old, "以前の生成。"))
+                    source.onText(id, want[texts.indexOf(request.text)])
+                    source.onFinished(id)
+                }
+            }
+        }
+        val cache = MemoryCache()
+        cache.put(TranslationStream.Options(Language.EN, Language.JA).cacheScope, texts[2], want[2], SMALL.quality)
+        val stream = stream(engine, cache)
+        stream.submitBatch(texts.mapIndexed { index, text -> Segment(index.toLong(), text) })
+        val updates = stream.collectUntilDone(setOf(0, 1, 2, 3))
+        val partials = updates.filterIsInstance<SegmentUpdate.Partial>()
+        assertTrue(partials.none { it.id == 2L || "以前の生成。" in it.text })
+        assertEquals(setOf(0L, 1L, 3L), partials.filter { it.text.isEmpty() }.map { it.id }.toSet())
+        assertEquals(want, (0L..3L).map { finals(updates)[it] })
+    }
+
+    @Test
     fun 長い段落の先頭のチャンクが終わっても段落の残りの原文を消さない() {
         val first = "A".repeat(900) + ". "
         val second = "B".repeat(600) + "."

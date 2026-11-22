@@ -29,6 +29,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
@@ -59,10 +60,6 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.drawText
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.plamotranslate.desktop.pdf.PdfBookmark
 import app.plamotranslate.desktop.pdf.PdfDestination
@@ -75,10 +72,10 @@ import app.plamotranslate.desktop.pdf.PdfSearch
 import app.plamotranslate.desktop.pdf.PdfViewport
 import app.plamotranslate.desktop.pdf.PdfZoom
 import app.plamotranslate.log.Logs
-import app.plamotranslate.pipeline.pdf.PdfBackground
 import app.plamotranslate.pipeline.pdf.PdfBounds
 import app.plamotranslate.pipeline.pdf.PdfColor
 import app.plamotranslate.pipeline.pdf.PdfPageSize
+import app.plamotranslate.pipeline.pdf.pageMarks
 import app.plamotranslate.pipeline.pdf.PdfState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -99,8 +96,7 @@ import kotlin.math.sqrt
 /*
  * PDF のビューアのページ部分。ブラウザー版の pdf.js が受け持っていた、連続スクロール・拡大縮小・見開き・リンク・
  * 文字の選択・検索の強調を、PDFium の文書（PdfDocument）から描く。訳を書き込んだページは最新の版の文書から描き、
- * 原文/訳文の切り替えは描く版を変えるだけにする（上に訳を重ねない）。訳している最中の段落だけ、背景色を半透明で重ねて
- * 生成途中の訳を見せる（ブラウザー版と同じ）。
+ * ページの画像を差し替えるまでは、保存時と同じ配置で段落の途中訳と確定訳を重ねる。
  */
 
 private data class RenderKey(val version: Long, val page: Int, val width: Int)
@@ -109,31 +105,33 @@ private data class LinkKey(val version: Long, val page: Int)
 /** 選択した文字。[boxes] はページの PDF ポイント座標。 */
 internal data class PdfTextSelection(val page: Int, val version: Long, val text: String, val boxes: List<PdfBounds>)
 
-/** 1つの文書を開いている間のビューアの状態。文書を開き直すと作り直す。 */
-@Stable
-internal class PdfViewerModel(private val scope: CoroutineScope, private val openExternal: (String) -> Unit) {
-    var sizes by mutableStateOf<List<PdfPageSize>>(emptyList())
-        private set
-    var viewports by mutableStateOf<Map<Int, PdfViewport>>(emptyMap())
-        private set
-    var outline by mutableStateOf<List<PdfBookmark>>(emptyList())
-        private set
-    var history by mutableStateOf(PdfHistory())
-        private set
-    var search by mutableStateOf(PdfSearch())
-        private set
-    var searchOpen by mutableStateOf(false)
-    var selection by mutableStateOf<PdfTextSelection?>(null)
-        private set
-    var currentPage by mutableStateOf(0)
-        internal set
+internal data class PdfNavigation(
+    val sizes: List<PdfPageSize> = emptyList(),
+    val viewports: Map<Int, PdfViewport> = emptyMap(),
+    val outline: List<PdfBookmark> = emptyList(),
+    val history: PdfHistory = PdfHistory(),
+    val search: PdfSearch = PdfSearch(),
+    val searchOpen: Boolean = false,
+    val selection: PdfTextSelection? = null,
+    val dpPerPoint: Float = PdfScale.POINT,
+)
 
-    val listState = LazyListState()
+/** PDFium の画像キャッシュとスクロール操作は文書ごとに持ち、表示する値は Presenter に返す。 */
+@Stable
+internal class PdfViewerModel(private val scope: CoroutineScope, private val presenter: PdfPresenter,
+                              private val documentId: Long, private val openExternal: (String) -> Unit) {
+    private val navigation get() = presenter.state.value.view.navigation
+    private val currentPage get() = presenter.state.value.translation.page
+    private fun update(change: (PdfNavigation) -> PdfNavigation) = presenter.navigate(documentId, change)
+    private val search get() = navigation.search
+    private fun setSearch(value: PdfSearch) = update { it.copy(search = value) }
+    fun showSearch(open: Boolean) = update { it.copy(searchOpen = open) }
+    fun scale(value: Float) = update { it.copy(dpPerPoint = value) }
+
+    val listState = LazyListState(firstVisibleItemIndex = presenter.state.value.view.settings.spread
+        .rows(presenter.state.value.translation.pageCount).indexOfFirst { currentPage in it }.coerceAtLeast(0))
     internal var rows: List<List<Int>> = emptyList()
     internal var pixelsPerPoint = 1f
-    /** 今描いている倍率（PDF の1ポイントあたりの dp）。拡大率の表示と、拡大・縮小の起点に使う。 */
-    var dpPerPoint by mutableStateOf(PdfScale.POINT)
-        internal set
 
     private val links = mutableStateMapOf<LinkKey, List<PdfLink>>()
     private val images = object : LinkedHashMap<RenderKey, ImageBitmap>(32, 0.75f, true) {
@@ -154,12 +152,11 @@ internal class PdfViewerModel(private val scope: CoroutineScope, private val ope
                 pageSizes += document.pageSize(page)
                 pageViewports[page] = document.viewport(page)
             }
-            viewports = pageViewports
-            sizes = pageSizes
-            outline = try { document.outline() } catch (error: Exception) {
+            val outline = try { document.outline() } catch (error: Exception) {
                 if (error is CancellationException) throw error
                 emptyList()
             }
+            update { it.copy(sizes = pageSizes, viewports = pageViewports, outline = outline) }
         } catch (error: Exception) {
             if (error is CancellationException) throw error
             Logs.w("PDF のページ情報を読めません", error)
@@ -171,10 +168,11 @@ internal class PdfViewerModel(private val scope: CoroutineScope, private val ope
     fun cached(version: Long, page: Int, width: Int): ImageBitmap? = images[RenderKey(version, page, width)]
 
     /** 同じページの別の倍率・別の版の画像。新しい画像ができるまでの仮の表示に使う。 */
-    fun fallback(page: Int): ImageBitmap? = images.entries.lastOrNull { it.key.page == page }?.value
+    fun fallback(version: Long, page: Int): ImageBitmap? =
+        images.entries.lastOrNull { it.key.version == version && it.key.page == page }?.value
 
-    suspend fun render(version: PdfViewVersion, page: Int, width: Int, height: Int): ImageBitmap? {
-        val key = RenderKey(version.number, page, width)
+    suspend fun render(version: PdfViewVersion, imageVersion: Long, page: Int, width: Int, height: Int): ImageBitmap? {
+        val key = RenderKey(imageVersion, page, width)
         images[key]?.let { return it }
         val lease = version.acquire() ?: return null
         val pixels = try {
@@ -222,20 +220,20 @@ internal class PdfViewerModel(private val scope: CoroutineScope, private val ope
     }
 
     fun goTo(page: Int, top: Double? = null, remember: Boolean = true) {
-        if (page !in sizes.indices) return
-        if (remember) history = history.visit(currentPage, page)
+        if (page !in navigation.sizes.indices) return
+        if (remember) update { it.copy(history = it.history.visit(currentPage, page)) }
         scope.launch { scroll(page, top, centered = false) }
     }
 
     fun back() {
-        val (page, next) = history.back(currentPage) ?: return
-        history = next
+        val (page, next) = navigation.history.back(currentPage) ?: return
+        update { it.copy(history = next) }
         scope.launch { scroll(page, null, centered = false) }
     }
 
     fun forward() {
-        val (page, next) = history.forward(currentPage) ?: return
-        history = next
+        val (page, next) = navigation.history.forward(currentPage) ?: return
+        update { it.copy(history = next) }
         scope.launch { scroll(page, null, centered = false) }
     }
 
@@ -252,7 +250,7 @@ internal class PdfViewerModel(private val scope: CoroutineScope, private val ope
                 val start = near(from) ?: return@launch
                 val end = near(to) ?: return@launch
                 val chosen = document.selection(page, minOf(start, end), abs(end - start) + 1)
-                selection = PdfTextSelection(page, version.number, chosen.text, chosen.boxes)
+                update { it.copy(selection = PdfTextSelection(page, version.number, chosen.text, chosen.boxes)) }
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
             } finally {
@@ -263,17 +261,17 @@ internal class PdfViewerModel(private val scope: CoroutineScope, private val ope
 
     fun clearSelection() {
         selecting?.cancel()
-        selection = null
+        update { it.copy(selection = null) }
     }
 
     /** 表示中のページから順に、表示している版（原文または訳文）の文字を探す。 */
     fun find(query: String, versionFor: (Int) -> PdfViewVersion?) {
         searching?.cancel()
         val from = currentPage
-        search = PdfSearch(query = query)
+        setSearch(PdfSearch(query = query))
         if (query.isBlank()) return
         searching = scope.launch {
-            val count = sizes.size
+            val count = navigation.sizes.size
             for (step in 0 until count) {
                 val page = (from + step) % count
                 val version = versionFor(page) ?: continue
@@ -287,22 +285,21 @@ internal class PdfViewerModel(private val scope: CoroutineScope, private val ope
                     lease.close()
                 }
                 val hadSelection = search.selected != null
-                search = search.add(hits.map { PdfFound(page, it.boxes) }, from).copy(searchedPages = step + 1)
+                setSearch(search.add(hits.map { PdfFound(page, it.boxes) }, from).copy(searchedPages = step + 1))
                 if (!hadSelection && search.selected != null) reveal()
             }
-            search = search.copy(done = true)
+            setSearch(search.copy(done = true))
         }
     }
 
     fun moveSearch(direction: Int) {
-        search = search.move(direction)
+        setSearch(search.move(direction))
         reveal()
     }
 
     fun closeSearch() {
         searching?.cancel()
-        searchOpen = false
-        search = PdfSearch()
+        update { it.copy(searchOpen = false, search = PdfSearch()) }
     }
 
     private fun reveal() {
@@ -313,8 +310,8 @@ internal class PdfViewerModel(private val scope: CoroutineScope, private val ope
     private suspend fun scroll(page: Int, top: Double?, centered: Boolean) {
         val row = rows.indexOfFirst { page in it }
         if (row < 0) return
-        val size = sizes.getOrNull(page) ?: return
-        val y = top?.let { viewports[page]?.toView(0.0, it)?.y } ?: 0.0
+        val size = navigation.sizes.getOrNull(page) ?: return
+        val y = top?.let { navigation.viewports[page]?.toView(0.0, it)?.y } ?: 0.0
         val margin = if (centered) listState.layoutInfo.viewportSize.height / 3 else 0
         val offset = (y * size.height * pixelsPerPoint).roundToInt() - margin
         if (offset >= 0) listState.scrollToItem(row, offset) else {
@@ -342,11 +339,15 @@ internal fun PdfPages(
     state: PdfState,
     documents: PdfDocuments,
     view: PdfViewState,
-    setZoom: (PdfZoom) -> Unit,
-    pageChanged: (Int) -> Unit,
+    presenter: PdfPresenter,
     modifier: Modifier = Modifier,
 ) {
-    val sizes = model.sizes
+    val sizes = view.navigation.sizes
+    val document = documents.documentId ?: return
+    val original = documents.original ?: return
+    val fonts = (documents.fonts as? PdfFontStatus.Ready)?.fonts
+    val typefaces = remember(fonts) { PdfOverlayFonts(fonts) }
+    DisposableEffect(typefaces) { onDispose { typefaces.close() } }
     val settings = view.settings
     val rows = remember(settings.spread, sizes.size) { settings.spread.rows(sizes.size) }
     model.rows = rows
@@ -356,7 +357,7 @@ internal fun PdfPages(
         val viewHeight = maxHeight.value
         val scale = PdfScale.dpPerPoint(settings.zoom, sizes, rows, viewWidth, viewHeight)
         model.pixelsPerPoint = scale * density
-        SideEffect { model.dpPerPoint = scale }
+        SideEffect { model.scale(scale) }
         val contentWidth = max(viewWidth, rows.maxOfOrNull { row ->
             row.sumOf { sizes[it].width }.toFloat() * scale + (row.size + 1) * PdfScale.GAP
         } ?: viewWidth)
@@ -374,11 +375,16 @@ internal fun PdfPages(
         // 並べ方を変えたら、見ていたページへ戻る。
         var shownSpread by remember(model) { mutableStateOf(settings.spread) }
         LaunchedEffect(settings.spread) {
-            if (shownSpread != settings.spread) model.goTo(model.currentPage, remember = false)
+            if (shownSpread != settings.spread) model.goTo(state.page, remember = false)
             shownSpread = settings.spread
         }
+        DisposableEffect(document) { onDispose { presenter.visible(document, emptySet()) } }
+        LaunchedEffect(document, rows) {
+            snapshotFlow { model.listState.layoutInfo.visibleItemsInfo.flatMap { rows.getOrNull(it.index).orEmpty() }.toSet() }
+                .collect { presenter.visible(document, it) }
+        }
         // 表示の中心にある行のページを、訳す順番の起点として知らせる。
-        LaunchedEffect(model) {
+        LaunchedEffect(model, rows) {
             snapshotFlow {
                 val info = model.listState.layoutInfo
                 val center = (info.viewportStartOffset + info.viewportEndOffset) / 2
@@ -386,8 +392,7 @@ internal fun PdfPages(
                     ?: info.visibleItemsInfo.firstOrNull())?.index
             }.filterNotNull().distinctUntilChanged().collect { row ->
                 val page = model.rows.getOrNull(row)?.first() ?: return@collect
-                model.currentPage = page
-                pageChanged(page)
+                presenter.page(page)
             }
         }
 
@@ -396,7 +401,7 @@ internal fun PdfPages(
             Modifier.fillMaxSize().horizontalScroll(horizontal).onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
                 if (!event.keyboardModifiers.isCtrlPressed) return@onPointerEvent
                 val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: return@onPointerEvent
-                if (delta != 0f) setZoom(PdfScale.step(PdfScale.percent(scale), -delta.sign.toInt()))
+                if (delta != 0f) presenter.setZoom(PdfScale.step(PdfScale.percent(scale), -delta.sign.toInt()))
                 event.changes.forEach { it.consume() }
             },
         ) {
@@ -412,7 +417,8 @@ internal fun PdfPages(
                     ) {
                         rows[index].forEach { page ->
                             val version = documents.versionFor(page, view.showTranslation) ?: return@forEach
-                            PdfPage(model, page, version, sizes[page], scale, state, view.showTranslation)
+                            PdfPage(model, page, version, original, sizes[page], scale, state, view, typefaces, documents.backgrounds[page],
+                                onRendered = { presenter.rendered(document, page) }, onFaded = { presenter.faded(document, page) })
                         }
                     }
                 }
@@ -445,10 +451,15 @@ private fun PdfPage(
     model: PdfViewerModel,
     page: Int,
     version: PdfViewVersion,
+    original: PdfViewVersion,
     pageSize: PdfPageSize,
     scale: Float,
     state: PdfState,
-    showTranslation: Boolean,
+    view: PdfViewState,
+    fonts: PdfOverlayFonts,
+    backgrounds: Map<Int, PdfColor>?,
+    onRendered: () -> Unit,
+    onFaded: () -> Unit,
 ) {
     val density = LocalDensity.current.density
     val widthPx = pageSize.width * scale * density
@@ -457,24 +468,36 @@ private fun PdfPage(
     val limit = minOf(1.0, MAX_SIDE / max(widthPx, heightPx).toDouble(), sqrt(MAX_PIXELS / (widthPx.toDouble() * heightPx)))
     val pixelsWide = (widthPx * limit).roundToInt().coerceAtLeast(1)
     val pixelsHigh = (heightPx * limit).roundToInt().coerceAtLeast(1)
-    var image by remember(page) { mutableStateOf(model.fallback(page)) }
-    LaunchedEffect(version.number, page, pixelsWide) {
-        model.cached(version.number, page, pixelsWide)?.let { image = it; return@LaunchedEffect }
-        // スクロールや拡大の途中で通り過ぎるページは描かない。
-        delay(RENDER_DELAY_MS)
-        model.render(version, page, pixelsWide, pixelsHigh)?.let { image = it }
+    // 書き込み済みのページは以後の版でも同じ内容。画像を共有し、別のページの完成で描き直さない。
+    val translated = version !== original
+    val imageVersion = if (translated) -original.number else original.number
+    val replacing = page in view.replacing
+    var image by remember(model, page, view.showTranslation) {
+        mutableStateOf(model.fallback(imageVersion, page) ?: if (replacing) model.fallback(original.number, page) else null)
+    }
+    LaunchedEffect(version.number, page, pixelsWide, replacing) {
+        val rendered = model.cached(imageVersion, page, pixelsWide) ?: run {
+            delay(RENDER_DELAY_MS)
+            model.render(version, imageVersion, page, pixelsWide, pixelsHigh)
+        }
+        if (rendered != null) {
+            image = rendered
+            if (replacing && translated) onRendered()
+        }
     }
     LaunchedEffect(version.number, page) { model.loadLinks(version, page) }
 
-    val viewport = model.viewports[page]
+    val viewport = view.navigation.viewports[page]
     var overLink by remember { mutableStateOf(false) }
-    val measurer = rememberTextMeasurer()
-    val selection = model.selection?.takeIf { it.page == page && it.version == version.number }
-    val hits = model.search.hits.filter { it.page == page }
-    val selectedHit = model.search.selected?.takeIf { it.page == page }
-    val working = if (showTranslation) state.layouts[page].orEmpty().filter { paragraph ->
-        paragraph.text in state.working && paragraph.elements.none { it.original != null }
-    } else emptyList()
+    val selection = view.navigation.selection?.takeIf { it.page == page && it.version == version.number }
+    val hits = view.navigation.search.hits.filter { it.page == page }
+    val selectedHit = view.navigation.search.selected?.takeIf { it.page == page }
+    val fading = page in view.fading
+    val showMarks = backgrounds != null && view.showTranslation && (!translated || replacing || fading)
+    val marks = remember(page, showMarks, state.layouts[page], state.translations[page], state.confirmedMarks,
+        state.previews, state.working, state.writeFailed) {
+        if (showMarks) state.pageMarks(page) else emptyList()
+    }
     val highlight = MaterialTheme.colorScheme.primary
 
     Box(
@@ -510,27 +533,13 @@ private fun PdfPage(
     ) {
         image?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds) }
         if (viewport != null) {
-            val backgrounds = remember(image) { PageBackgrounds(image, pageSize) }
-            Canvas(Modifier.fillMaxSize()) {
-                working.forEach { paragraph ->
-                    val box = rect(viewport, paragraph.bounds)
-                    if (box.width < 1 || box.height < 1) return@forEach
-                    val background = backgrounds.color(viewport, paragraph.bounds, paragraph.color)
-                    val preview = state.previews[paragraph.text]?.text
-                    // 生成途中の訳が届いたら、原文の文字を背景色で隠してから訳を描く（原文と訳を重ねない）。
-                    // 届くまでは原文を半分だけ隠し、訳している段落だと分かるようにする。
-                    drawRect(background.copy(alpha = if (preview.isNullOrEmpty()) WORKING_ALPHA else 1f), box.topLeft, box.size)
-                    val fontPx = minOf((paragraph.size * scale * density).toFloat() * PREVIEW_SCALE, box.height)
-                    if (!preview.isNullOrEmpty() && fontPx >= MIN_PREVIEW_PX) {
-                        drawText(
-                            measurer, preview, box.topLeft,
-                            TextStyle(color = Color(paragraph.color.red, paragraph.color.green, paragraph.color.blue),
-                                fontSize = androidx.compose.ui.unit.TextUnit(fontPx / density / fontScale,
-                                    androidx.compose.ui.unit.TextUnitType.Sp)),
-                            overflow = TextOverflow.Clip, size = box.size,
-                        )
-                    }
+            if (marks.isNotEmpty()) {
+                PdfOverlay(marks, viewport, fonts, fading, onFaded) { mark ->
+                    val color = backgrounds?.get(mark.index) ?: PdfColor.White
+                    Color(color.red, color.green, color.blue)
                 }
+            } else if (fading) LaunchedEffect(fading) { onFaded() }
+            Canvas(Modifier.fillMaxSize()) {
                 hits.forEach { hit ->
                     val color = if (hit == selectedHit) Color(0xFFFF9800).copy(alpha = 0.5f) else Color(0xFFFFEB3B).copy(alpha = 0.45f)
                     hit.boxes.forEach { drawBox(viewport, it, color) }
@@ -558,36 +567,3 @@ private const val SCROLLBAR = 12f
 private const val MAX_SIDE = 4096.0
 private const val MAX_PIXELS = 12_000_000.0
 private const val RENDER_DELAY_MS = 60L
-/** ブラウザー版と同じく、訳している段落の原文を背景色で半分だけ隠す。 */
-private const val WORKING_ALPHA = 0.45f
-/** これより小さい文字（画素）では生成途中の訳を描かない（読めず、段落の高さにも収まらない）。 */
-private const val MIN_PREVIEW_PX = 3f
-
-/**
- * 訳している段落を覆う色。書き込みと同じ `PdfBackground`（文字色に近い画素を除いた最頻色）を、表示中の画像から取る。
- * 回転したページも合うように、段落の範囲は `PdfViewport` で画像の画素へ直して渡す。
- */
-private class PageBackgrounds(private val image: ImageBitmap?, private val pageSize: PdfPageSize) {
-    private val background by lazy {
-        image?.let { bitmap ->
-            val pixels = IntArray(bitmap.width * bitmap.height)
-            bitmap.readPixels(pixels)
-            PdfBackground(pixels, bitmap.width, bitmap.height, pageSize)
-        }
-    }
-    private val colors = HashMap<PdfBounds, Color>()
-
-    fun color(viewport: PdfViewport, bounds: PdfBounds, text: PdfColor): Color = colors.getOrPut(bounds) {
-        val pixels = background ?: return@getOrPut Color.White
-        val box = viewport.toView(bounds)
-        val width = image!!.width
-        val height = image.height
-        val color = pixels.color(
-            (box.left * width).toInt(), (box.top * height).toInt(),
-            (box.right * width).toInt(), (box.bottom * height).toInt(), text,
-        )
-        Color(color.red, color.green, color.blue)
-    }
-}
-/** 生成途中の訳は原文より長くなりやすいので、原文の文字より少し小さく描く。 */
-private const val PREVIEW_SCALE = 0.85f

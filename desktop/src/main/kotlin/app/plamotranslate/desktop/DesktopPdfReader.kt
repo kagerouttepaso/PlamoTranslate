@@ -91,6 +91,7 @@ internal class DesktopPdfReader(
                         is Command.Read -> when (val request = command.request) {
                             is PdfRead.Open -> open(request)
                             is PdfRead.Extract -> extract(request)
+                            is PdfRead.Backgrounds -> sample(request)
                         }
                         is Command.Write -> writePage(command.request)
                         is Command.Publish -> active?.takeIf { it.id == command.document }?.let {
@@ -175,8 +176,21 @@ internal class DesktopPdfReader(
 
     private suspend fun extract(request: PdfRead.Extract) {
         val current = active?.takeIf { it.id == request.document } ?: return
+        if (documents.value.fonts == PdfFontStatus.NotLoaded) loadFonts()
         val page = pdfAttempt { current.source.pageText(request.page) }
         results.send(PdfEvent.Extracted(request, page.getOrNull()))
+    }
+
+    private suspend fun sample(request: PdfRead.Backgrounds) {
+        val current = active?.takeIf { it.id == request.document } ?: return
+        val colors = pdfAttempt {
+            current.source.backgroundColors(request.page, request.paragraphs.filter { it.skip == null })
+        }.getOrNull().orEmpty()
+        val indexed = buildMap {
+            request.paragraphs.forEachIndexed { index, paragraph -> colors[paragraph]?.let { put(index, it) } }
+        }
+        val state = documents.value
+        mutableDocuments.value = state.copy(backgrounds = state.backgrounds + (request.page to indexed))
     }
 
     private suspend fun writePage(request: PdfEffect.WritePage) {
@@ -188,10 +202,8 @@ internal class DesktopPdfReader(
             return
         }
         val result = pdfAttempt {
-            val masked = request.paragraphs.filter { paragraph ->
-                paragraph.text in request.translations && paragraph.objectPaths.any { it.size > 1 }
-            }
-            val backgrounds = current.source.backgroundColors(request.page, masked)
+            val backgrounds = documents.value.backgrounds[request.page].orEmpty()
+                .mapKeys { (index, _) -> request.paragraphs[index] }
             current.writer.writePage(request.page, request.paragraphs, request.translations, fonts, backgrounds)
         }
         val state = documents.value

@@ -41,6 +41,26 @@ class PdfPresentationRulesTest {
         assertEquals("", PdfPreview.text("<c1>定数", complete = true))
     }
 
+    @Test fun `小数と閉じ括弧とアラビア語の疑問符で文末を区別する`() {
+        for ((line, expected) in listOf(
+            "「1.23です。」次の文" to "「1.23です。」",
+            "The value is 1.23. Next" to "The value is 1.23.",
+            "أين الملف؟ الجملة التالية" to "أين الملف؟",
+        )) assertEquals(PdfPreviewLine(expected, 1, false), PdfPreview.line(line, complete = false))
+    }
+
+    @Test fun `同じ原文の途中訳と確定訳は出現箇所ごとの書式で表示する`() {
+        val first = testParagraphs(TestLine("First. Second sentence.")).single()
+        val second = first.copy(bold = true, color = PdfColor(1, 2, 3))
+        val state = PdfState(layouts = mapOf(0 to listOf(first), 1 to listOf(second)), working = setOf(first.text),
+            previews = mapOf(first.text to PdfPreview.line("最初です。次", false)))
+        assertEquals(listOf(false, true), (0..1).map { state.pageMarks(it).single().pieces.first().bold })
+        assertEquals(PdfColor(1, 2, 3), state.pageMarks(1).single().paragraph.color)
+        assertTrue(state.pageMarks(1).single().pieces.last().source)
+        val confirmed = state.copy(translations = mapOf(1 to mapOf(0 to "確定した訳文。")), confirmedMarks = setOf(first.text))
+        assertEquals(listOf(PdfPiece("確定した訳文。", bold = true)), confirmed.pageMarks(1).single().pieces)
+    }
+
     @Test fun `途中表示では対応する文まで原文を落とし残りを後ろに置く`() {
         val paragraph = testParagraphs(TestLine("First sentence. Remaining source.")).single()
         val preview = PdfPreview.line("最初の文です。次の", complete = false)

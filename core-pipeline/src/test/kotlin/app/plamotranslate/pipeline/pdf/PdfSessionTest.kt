@@ -59,6 +59,7 @@ class PdfSessionTest {
         assertEquals(PdfPhase.Paused, session.state.phase)
         assertTrue(session.state.working.isEmpty())
         assertTrue(session.state.previews.isEmpty())
+        assertTrue(session.state.pageMarks(0).isEmpty())
         val resumed = session.reduce(PdfEvent.Start).translations()
         assertEquals(listOf("Second paragraph.", "Third paragraph."), resumed.flatMap { it.segments.map { segment -> segment.text } })
         session.reduce(PdfEvent.Translated(second.batch, SegmentUpdate.Partial(second.segments.single().id, "古い途中経過。")))
@@ -95,6 +96,15 @@ class PdfSessionTest {
         assertEquals("new.pdf", session.state.name)
         assertEquals(PdfPhase.Idle, session.state.phase)
         assertTrue(session.reduce(PdfEvent.Target(Language.EN)).isEmpty())
+    }
+
+    @Test fun `差し替える段落が無いページは原文のまま終了する`() {
+        val session = PdfSession()
+        val batch = session.start(1, testPage(TestLine("PD-100 AC"))).single()
+        assertTrue(session.finish(batch, "PD-100 AC").writes().isEmpty())
+        assertTrue(session.state.pageMarks(0).isEmpty())
+        assertTrue(session.state.writtenPages.isEmpty())
+        assertEquals(PdfPhase.Finished, session.state.phase)
     }
 
     @Test fun `失敗は再開待ちにし成功していた段落の訳を保持する`() {

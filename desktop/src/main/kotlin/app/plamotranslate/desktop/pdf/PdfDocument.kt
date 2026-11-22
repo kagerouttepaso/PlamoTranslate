@@ -110,8 +110,7 @@ class PdfDocument private constructor() {
     }
 
     suspend fun viewport(page: Int): PdfViewport = call {
-        val points = checkNotNull(PdfEditingNative.viewport(it, page))
-        PdfViewport(PdfPoint(points[0], points[1]), PdfPoint(points[2], points[3]), PdfPoint(points[4], points[5]))
+        viewport(it, page)
     }
 
     suspend fun links(page: Int): List<PdfLink> = call { packet(PdfEditingNative.links(it, page)).links() }
@@ -215,6 +214,11 @@ private fun size(handle: Long, page: Int): PdfPageSize {
     return PdfPageSize(width.toDouble(), height.toDouble())
 }
 
+private fun viewport(handle: Long, page: Int): PdfViewport {
+    val points = checkNotNull(PdfEditingNative.viewport(handle, page))
+    return PdfViewport(PdfPoint(points[0], points[1]), PdfPoint(points[2], points[3]), PdfPoint(points[4], points[5]))
+}
+
 private fun backgrounds(handle: Long, page: Int, paragraphs: List<PdfParagraph>): Map<PdfParagraph, PdfColor> {
     if (paragraphs.isEmpty()) return emptyMap()
     val size = size(handle, page)
@@ -223,5 +227,10 @@ private fun backgrounds(handle: Long, page: Int, paragraphs: List<PdfParagraph>)
     val height = ceil(size.height * scale).toInt().coerceIn(1, 4096)
     val pixels = checkNotNull(PdfNative.render(handle, page, width, height)) { "PDF の背景色を取得できません" }
     val background = PdfBackground(pixels, width, height, size)
-    return paragraphs.associateWith { background.color(it.translationBounds ?: it.bounds, it.color) }
+    val viewport = viewport(handle, page)
+    return paragraphs.associateWith {
+        val box = viewport.toView(it.translationBounds ?: it.bounds)
+        background.color(kotlin.math.floor(box.left * width).toInt(), kotlin.math.floor(box.top * height).toInt(),
+            ceil(box.right * width).toInt(), ceil(box.bottom * height).toInt(), it.color)
+    }
 }

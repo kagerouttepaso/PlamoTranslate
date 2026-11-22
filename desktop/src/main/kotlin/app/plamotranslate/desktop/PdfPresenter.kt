@@ -8,7 +8,9 @@ import app.plamotranslate.pipeline.EventLoop
 import app.plamotranslate.pipeline.pdf.PdfEffect
 import app.plamotranslate.pipeline.pdf.PdfEvent
 import app.plamotranslate.pipeline.pdf.PdfPhase
+import app.plamotranslate.pipeline.pdf.PdfRead
 import app.plamotranslate.pipeline.pdf.PdfSession
+import app.plamotranslate.pipeline.pdf.PdfState
 import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
 import kotlinx.coroutines.CoroutineScope
@@ -25,8 +27,17 @@ internal data class PdfViewSettings(
     val outline: Boolean = true,
 )
 
-/** 画面だけが持つ状態。[showTranslation] は訳を書き込んだページを訳文で見せるか（原文/訳文の切り替え）。 */
+/** 画面が購読する、翻訳・PDF の版・表示の状態。 */
+internal data class PdfScreenState(
+    val translation: PdfState,
+    val documents: PdfDocuments,
+    val view: PdfViewState,
+)
+
 internal data class PdfViewState(
+    val navigation: PdfNavigation = PdfNavigation(),
+    val replacing: Set<Int> = emptySet(),
+    val fading: Set<Int> = emptySet(),
     val settings: PdfViewSettings = PdfViewSettings(),
     val showTranslation: Boolean = true,
     val saving: Boolean = false,
@@ -48,15 +59,27 @@ internal class PdfPresenter(
     private val preferences: PdfViewPreferences? = null,
 ) {
     private val session = PdfSession()
-    private val mutableState = MutableStateFlow(session.state)
+    private val mutableState = MutableStateFlow(PdfScreenState(session.state, PdfDocuments(),
+        PdfViewState(settings = preferences?.load() ?: PdfViewSettings())))
     val state = mutableState.asStateFlow()
-    val documents = reader.documents
-    private val mutableView = MutableStateFlow(PdfViewState(preferences?.load() ?: PdfViewSettings()))
-    val view = mutableView.asStateFlow()
+    private val documentId get() = state.value.documents.documentId
+    private var visiblePages = emptySet<Int>()
+    private var view: PdfViewState
+        get() = state.value.view
+        set(value) { mutableState.value = state.value.copy(view = value) }
+
     private val events = EventLoop<PdfEvent, PdfEffect>({ event ->
         val before = session.state.phase
         session.reduce(event).also {
-            mutableState.value = session.state
+            val opening = it.filterIsInstance<PdfEffect.Read>().firstOrNull()?.request as? PdfRead.Open
+            if (opening != null) {
+                visiblePages = emptySet()
+                mutableState.value = PdfScreenState(session.state, PdfDocuments(opening.document),
+                    view.copy(navigation = PdfNavigation(), replacing = emptySet(), fading = emptySet(), saving = false))
+            } else {
+                val next = if (session.state.phase == PdfPhase.Paused) view.copy(replacing = emptySet(), fading = emptySet()) else view
+                mutableState.value = state.value.copy(translation = session.state, view = next)
+            }
             val after = session.state.phase
             // 止めた・訳し終えたら、間隔を待たずに最新のページを画面と保存に出す。
             if (before == PdfPhase.Translating && after != PdfPhase.Translating) reader.flush()
@@ -69,6 +92,15 @@ internal class PdfPresenter(
 
     init {
         scope.launch { reader.events.collect(events::dispatch) }
+        scope.launch {
+            reader.documents.collect { documents ->
+                if (documents.documentId != documentId) return@collect
+                val published = if (view.showTranslation && session.state.phase != PdfPhase.Paused)
+                    (documents.writtenPages - state.value.documents.writtenPages).intersect(visiblePages) else emptySet()
+                mutableState.value = state.value.copy(documents = documents,
+                    view = view.copy(replacing = view.replacing + published))
+            }
+        }
     }
 
     fun choose() { chooseFile()?.let(::open) }
@@ -82,7 +114,7 @@ internal class PdfPresenter(
     fun setParallel(slots: Int) = events.dispatch(PdfEvent.Parallel(slots))
 
     fun start() {
-        mutableView.value = mutableView.value.copy(showTranslation = true, notice = null)
+        view = view.copy(showTranslation = true, notice = null)
         events.dispatch(PdfEvent.Start)
     }
 
@@ -90,26 +122,47 @@ internal class PdfPresenter(
     fun retry() = events.dispatch(PdfEvent.Retry)
 
     fun showTranslation(show: Boolean) {
-        mutableView.value = mutableView.value.copy(showTranslation = show)
+        if (show != view.showTranslation) view = view.copy(showTranslation = show, replacing = emptySet(), fading = emptySet())
+    }
+
+    fun navigate(document: Long, change: (PdfNavigation) -> PdfNavigation) {
+        if (document == documentId) view = view.copy(navigation = change(view.navigation))
+    }
+
+    fun visible(document: Long, pages: Set<Int>) {
+        if (document != documentId) return
+        visiblePages = pages
+        view = view.copy(replacing = view.replacing.intersect(pages), fading = view.fading.intersect(pages))
+    }
+
+    fun rendered(document: Long, page: Int) {
+        if (document == documentId && page in view.replacing)
+            view = view.copy(replacing = view.replacing - page, fading = view.fading + page)
+    }
+
+    fun faded(document: Long, page: Int) {
+        if (document == documentId && page in view.fading) view = view.copy(fading = view.fading - page)
     }
 
     fun setZoom(zoom: PdfZoom) = updateSettings { it.copy(zoom = zoom) }
     fun setSpread(spread: PdfSpread) = updateSettings { it.copy(spread = spread) }
     fun toggleOutline() = updateSettings { it.copy(outline = !it.outline) }
     fun dismissNotice() {
-        mutableView.value = mutableView.value.copy(notice = null)
+        view = view.copy(notice = null)
     }
 
     /** 今までに訳したページを入れた PDF を保存する。訳している途中でも、書き込み済みのページで保存できる。 */
     fun save() {
         val current = session.state
         val name = current.name ?: return
-        if (mutableView.value.saving) return
+        if (view.saving) return
+        val savingDocument = documentId
         val path = chooseSave(savedName(name, current.target)) ?: return
-        mutableView.value = mutableView.value.copy(saving = true, notice = null)
+        if (documentId != savingDocument) return
+        view = view.copy(saving = true, notice = null)
         scope.launch {
             val notice = try {
-                val finished = reader.save(path, session.state.titleTranslations)
+                val finished = reader.save(path, current.titleTranslations)
                 val pages = session.state.writtenPages.size
                 buildString {
                     append("${path.fileName} に保存しました（訳したページ $pages / ${session.state.pageCount}")
@@ -120,7 +173,7 @@ internal class PdfPresenter(
                 Logs.w("PDF を保存できません", error)
                 "保存できませんでした：${error.message ?: error.javaClass.simpleName}" to true
             }
-            mutableView.value = mutableView.value.copy(saving = false, notice = notice.first, noticeIsError = notice.second)
+            if (documentId == savingDocument) view = view.copy(saving = false, notice = notice.first, noticeIsError = notice.second)
         }
     }
 
@@ -137,14 +190,14 @@ internal class PdfPresenter(
 
     private fun open(path: Path) {
         val normalized = path.toAbsolutePath().normalize()
-        mutableView.value = mutableView.value.copy(showTranslation = true, notice = null)
+        view = view.copy(showTranslation = true, notice = null)
         events.dispatch(PdfEvent.Open(normalized.toString(), normalized.fileName.toString()))
     }
 
     private fun updateSettings(change: (PdfViewSettings) -> PdfViewSettings) {
-        val settings = change(mutableView.value.settings)
-        if (settings == mutableView.value.settings) return
-        mutableView.value = mutableView.value.copy(settings = settings)
+        val settings = change(view.settings)
+        if (settings == view.settings) return
+        view = view.copy(settings = settings)
         preferences?.save(settings)
     }
 

@@ -82,9 +82,7 @@ private fun DesktopPages(components: DesktopComponents, settings: SettingsState)
                     }
                     Page.PDF -> {
                         val pdf by components.pdf.state.collectAsState()
-                        val documents by components.pdf.documents.collectAsState()
-                        val view by components.pdf.view.collectAsState()
-                        PdfScreen(pdf, documents, view, components.pdf, components.selectTranslationTarget)
+                        PdfScreen(pdf.translation, pdf.documents, pdf.view, components.pdf, components.selectTranslationTarget)
                     }
                 }
             }

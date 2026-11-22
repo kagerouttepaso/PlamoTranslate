@@ -19,6 +19,8 @@ data class PdfState(
     val titleTranslations: Map<String, String> = emptyMap(),
     val working: Set<String> = emptySet(),
     val previews: Map<String, PdfPreviewLine> = emptyMap(),
+    /** 中止後も保存用の確定訳を残し、画面に重ねていた確定訳だけを消す。 */
+    val confirmedMarks: Set<String> = emptySet(),
     val writtenPages: Set<Int> = emptySet(),
     val writeFailed: Set<Int> = emptySet(),
     val translationPage: Int? = null,
@@ -32,6 +34,7 @@ data class PdfState(
 sealed interface PdfRead {
     val document: Long
     data class Open(override val document: Long, val path: String) : PdfRead
+    data class Backgrounds(override val document: Long, val page: Int, val paragraphs: List<PdfParagraph>) : PdfRead
     data class Extract(override val document: Long, val page: Int) : PdfRead
 }
 
@@ -76,6 +79,7 @@ class PdfSession {
     private var plan: PdfTranslationPlan? = null
     private val confirmed = mutableMapOf<String, String>()
     private val inflight = linkedMapOf<Long, MutableMap<Long, String>>()
+    private val sampledPages = mutableSetOf<Int>()
     private val writing = mutableSetOf<Int>()
 
     fun reduce(event: PdfEvent): List<PdfEffect> = buildList {
@@ -99,7 +103,7 @@ class PdfSession {
             }
             PdfEvent.Stop -> if (state.phase == PdfPhase.Translating) {
                 cancel(this)
-                state = state.copy(phase = PdfPhase.Paused)
+                state = state.copy(phase = PdfPhase.Paused, confirmedMarks = emptySet())
             }
             is PdfEvent.Opened -> if (accept(event.request)) {
                 state = state.copy(opening = false, pageCount = event.count.coerceAtLeast(0),
@@ -110,7 +114,10 @@ class PdfSession {
                 state = if (event.pageText == null) state.copy(unreadable = state.unreadable + event.request.page) else
                     state.copy(layouts = state.layouts + (event.request.page to PdfParagraphs.page(event.pageText)))
             }
-            is PdfEvent.Translated -> translateResult(event, this)
+            is PdfEvent.Translated -> {
+                translateResult(event, this)
+                if (event.update is SegmentUpdate.Partial) return@buildList
+            }
             is PdfEvent.Written -> if (event.document == document && writing.remove(event.page)) {
                 state = if (event.success) state.copy(writtenPages = state.writtenPages + event.page) else
                     state.copy(writeFailed = state.writeFailed + event.page)
@@ -130,6 +137,7 @@ class PdfSession {
         this.path = path
         plan = null
         confirmed.clear()
+        sampledPages.clear()
         writing.clear()
         state = PdfState(target = target, name = name, page = page, opening = true, phase = phase)
         val request = PdfRead.Open(++document, path)
@@ -156,6 +164,9 @@ class PdfSession {
         }).also { plan = it }
         val working = state.working.toMutableSet()
         for (part in queue.batches(state.page, parallel - inflight.size, confirmed.keys + working)) {
+            for (text in part) for (page in queue.pagesFor(text)) {
+                if (sampledPages.add(page)) effects += PdfEffect.Read(PdfRead.Backgrounds(document, page, state.layouts.getValue(page)))
+            }
             val segments = part.map { text -> Segment(++nextSegment, text) }
             val batch = ++nextBatch
             inflight[batch] = segments.associateTo(linkedMapOf()) { it.id to it.text }
@@ -182,7 +193,7 @@ class PdfSession {
             return
         }
         if (update is SegmentUpdate.Failed) {
-            state = state.copy(phase = PdfPhase.Paused, untranslated = queue.pagesFor(text).associateWith { page ->
+            state = state.copy(phase = PdfPhase.Paused, confirmedMarks = emptySet(), untranslated = queue.pagesFor(text).associateWith { page ->
                 state.layouts.getValue(page).indices.filter { state.layouts.getValue(page)[it].text == text }.toSet()
             })
             cancel(effects)
@@ -197,7 +208,7 @@ class PdfSession {
         for (page in queue.pagesFor(text)) {
             val updates = buildMap {
                 state.layouts.getValue(page).forEachIndexed { index, paragraph ->
-                    if (paragraph.text == text && PdfMarkupTranslation.shouldReplace(paragraph, update.text)) {
+                    if (paragraph.text == text && PdfMarkupTranslation.prepare(paragraph, update.text) != null) {
                         put(index, update.text)
                         replaced += paragraph
                     }
@@ -207,10 +218,11 @@ class PdfSession {
         }
         val titles = PdfTitles.titleTranslations(replaced, mapOf(text to update.text))
         state = state.copy(translations = byPage, titleTranslations = state.titleTranslations + titles,
+            confirmedMarks = if (replaced.isEmpty()) state.confirmedMarks else state.confirmedMarks + text,
             working = state.working - text, previews = state.previews - text)
         val ready = queue.completedPages(listOf(text), confirmed.keys)
         for (page in ready) {
-            if (!writing.add(page)) continue
+            if (byPage[page].isNullOrEmpty() || !writing.add(page)) continue
             val paragraphs = state.layouts.getValue(page)
             val results = paragraphs.mapNotNull { p -> confirmed[p.text]?.let { p.text to it } }.toMap()
             effects += PdfEffect.WritePage(document, page, paragraphs, results)

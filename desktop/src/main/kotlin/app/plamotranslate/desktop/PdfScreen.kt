@@ -115,7 +115,7 @@ internal fun PdfScreen(
             EmptyState(state, presenter)
         } else {
             val scope = rememberCoroutineScope()
-            val model = remember(documents.documentId) { PdfViewerModel(scope, ::openExternal) }
+            val model = remember(documents.documentId) { PdfViewerModel(scope, presenter, checkNotNull(documents.documentId), ::openExternal) }
             LaunchedEffect(model, original) { model.load(original) }
             Viewer(model, state, documents, view, presenter)
         }
@@ -141,7 +141,7 @@ private fun TranslationBar(
         LanguageMenu("訳す先：${state.target.label} ▾", Language.entries, selectTarget)
         if (opened) {
             SingleChoiceSegmentedButtonRow {
-                val canCompare = documents.writtenPages.isNotEmpty()
+                val canCompare = state.phase != PdfPhase.Idle
                 SegmentedButton(
                     selected = !view.showTranslation || !canCompare, onClick = { presenter.showTranslation(false) },
                     colors = desktopSegmentColors(), shape = SegmentedButtonDefaults.itemShape(0, 2), enabled = canCompare,
@@ -237,17 +237,17 @@ private fun Viewer(model: PdfViewerModel, state: PdfState, documents: PdfDocumen
     val focus = remember { FocusRequester() }
     val searchFocus = remember { FocusRequester() }
     LaunchedEffect(model) { focus.requestFocus() }
-    val scale = PdfScale.percent(model.dpPerPoint)
+    val scale = PdfScale.percent(view.navigation.dpPerPoint)
     Row(
         Modifier.fillMaxSize().focusRequester(focus).focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when {
-                    event.isCtrlPressed && event.key == Key.F -> { model.searchOpen = true; searchFocus.requestFocus(); true }
-                    event.key == Key.Escape && model.searchOpen -> { model.closeSearch(); focus.requestFocus(); true }
-                    event.key == Key.Escape && model.selection != null -> { model.clearSelection(); true }
-                    event.isCtrlPressed && event.key == Key.C && model.selection != null -> {
-                        model.selection?.text?.let(::copyText); true
+                    event.isCtrlPressed && event.key == Key.F -> { model.showSearch(true); searchFocus.requestFocus(); true }
+                    event.key == Key.Escape && view.navigation.searchOpen -> { model.closeSearch(); focus.requestFocus(); true }
+                    event.key == Key.Escape && view.navigation.selection != null -> { model.clearSelection(); true }
+                    event.isCtrlPressed && event.key == Key.C && view.navigation.selection != null -> {
+                        view.navigation.selection?.text?.let(::copyText); true
                     }
                     event.isAltPressed && event.key == Key.DirectionLeft -> { model.back(); true }
                     event.isAltPressed && event.key == Key.DirectionRight -> { model.forward(); true }
@@ -271,32 +271,32 @@ private fun Viewer(model: PdfViewerModel, state: PdfState, documents: PdfDocumen
                 }
             },
     ) {
-        if (view.settings.outline && model.outline.isNotEmpty()) {
-            OutlinePane(model, state, view.showTranslation, Modifier.width(232.dp).fillMaxHeight())
+        if (view.settings.outline && view.navigation.outline.isNotEmpty()) {
+            OutlinePane(model, state, view, Modifier.width(232.dp).fillMaxHeight())
             Spacer(Modifier.width(DesktopSize.gap))
         }
         Column(Modifier.weight(1f).fillMaxHeight()) {
-            PageBar(model, view, scale, presenter)
-            if (model.searchOpen) {
+            PageBar(model, view, state.page, scale, presenter)
+            if (view.navigation.searchOpen) {
                 SearchBar(model, documents, view, searchFocus) { model.closeSearch(); focus.requestFocus() }
             }
-            PdfPages(model, state, documents, view, presenter::setZoom, presenter::page, Modifier.weight(1f).fillMaxWidth())
+            PdfPages(model, state, documents, view, presenter, Modifier.weight(1f).fillMaxWidth())
         }
     }
 }
 
 /** 戻る/進む・ページ番号・拡大率・並べ方・見出しの欄・検索。 */
 @Composable
-private fun PageBar(model: PdfViewerModel, view: PdfViewState, scale: Int, presenter: PdfPresenter) {
+private fun PageBar(model: PdfViewerModel, view: PdfViewState, page: Int, scale: Int, presenter: PdfPresenter) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Row(Modifier.fillMaxWidth().padding(horizontal = DesktopSize.small), verticalAlignment = Alignment.CenterVertically) {
-            if (model.outline.isNotEmpty()) {
+            if (view.navigation.outline.isNotEmpty()) {
                 DesktopLink(onClick = presenter::toggleOutline) { Text("見出し") }
             }
-            DesktopLink(onClick = model::back, enabled = model.history.canBack) { Text("‹ 戻る", maxLines = 1) }
-            DesktopLink(onClick = model::forward, enabled = model.history.canForward) { Text("進む ›", maxLines = 1) }
+            DesktopLink(onClick = model::back, enabled = view.navigation.history.canBack) { Text("‹ 戻る", maxLines = 1) }
+            DesktopLink(onClick = model::forward, enabled = view.navigation.history.canForward) { Text("進む ›", maxLines = 1) }
             Spacer(Modifier.width(DesktopSize.gap))
-            PageField(model)
+            PageField(model, page, view.navigation.sizes.size)
             Spacer(Modifier.weight(1f))
             DesktopLink(onClick = { presenter.setZoom(PdfScale.step(scale, -1)) }) { Text("−") }
             ChoiceMenu(
@@ -306,15 +306,15 @@ private fun PageBar(model: PdfViewerModel, view: PdfViewState, scale: Int, prese
             )
             DesktopLink(onClick = { presenter.setZoom(PdfScale.step(scale, 1)) }) { Text("+") }
             ChoiceMenu(view.settings.spread.short, PdfSpread.entries, { it.label }, presenter::setSpread)
-            DesktopLink(onClick = { model.searchOpen = !model.searchOpen }) { Text("検索", maxLines = 1) }
+            DesktopLink(onClick = { model.showSearch(!view.navigation.searchOpen) }) { Text("検索", maxLines = 1) }
         }
     }
 }
 
 /** 今のページの番号。番号を打って Enter でそのページへ移る。 */
 @Composable
-private fun PageField(model: PdfViewerModel) {
-    var text by remember(model.currentPage) { mutableStateOf((model.currentPage + 1).toString()) }
+private fun PageField(model: PdfViewerModel, page: Int, count: Int) {
+    var text by remember(page) { mutableStateOf((page + 1).toString()) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.small) {
             BasicTextField(
@@ -333,7 +333,7 @@ private fun PageField(model: PdfViewerModel) {
                     },
             )
         }
-        Text(" / ${model.sizes.size}", style = MaterialTheme.typography.bodyMedium)
+        Text(" / $count", style = MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -344,7 +344,7 @@ private fun SearchBar(model: PdfViewerModel, documents: PdfDocuments, view: PdfV
     val run = { model.find(query) { page -> documents.versionFor(page, view.showTranslation) } }
     LaunchedEffect(Unit) { focus.requestFocus() }
     // 原文/訳文を切り替えたら、表示している側で探し直す。
-    LaunchedEffect(view.showTranslation) { if (model.search.active) run() }
+    LaunchedEffect(view.showTranslation) { if (view.navigation.search.active) run() }
     Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh) {
         Row(Modifier.fillMaxWidth().padding(horizontal = DesktopSize.gap, vertical = DesktopSize.small), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
@@ -357,7 +357,7 @@ private fun SearchBar(model: PdfViewerModel, documents: PdfDocuments, view: PdfV
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         when (event.key) {
                             Key.Enter, Key.NumPadEnter -> {
-                                if (model.search.query != query) run() else model.moveSearch(if (event.isShiftPressed) -1 else 1)
+                                if (view.navigation.search.query != query) run() else model.moveSearch(if (event.isShiftPressed) -1 else 1)
                                 true
                             }
                             Key.Escape -> { close(); true }
@@ -366,7 +366,7 @@ private fun SearchBar(model: PdfViewerModel, documents: PdfDocuments, view: PdfV
                     },
                 )
             }
-            val search = model.search
+            val search = view.navigation.search
             Text(
                 when {
                     !search.active -> "Enter で検索"
@@ -386,7 +386,7 @@ private fun SearchBar(model: PdfViewerModel, documents: PdfDocuments, view: PdfV
 
 /** 見出しの欄。訳文を見ているときは、訳した見出しを訳で出す。▸ で子の見出しを開く。 */
 @Composable
-private fun OutlinePane(model: PdfViewerModel, state: PdfState, showTranslation: Boolean, modifier: Modifier) {
+private fun OutlinePane(model: PdfViewerModel, state: PdfState, view: PdfViewState, modifier: Modifier) {
     val expanded = remember(model) { mutableStateMapOf<PdfBookmark, Boolean>() }
     val rows = buildList {
         fun visit(items: List<PdfBookmark>, depth: Int) {
@@ -395,7 +395,7 @@ private fun OutlinePane(model: PdfViewerModel, state: PdfState, showTranslation:
                 if (expanded[item] == true) visit(item.children, depth + 1)
             }
         }
-        visit(model.outline, 0)
+        visit(view.navigation.outline, 0)
     }
     Surface(modifier, color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.medium) {
         Column {
@@ -403,7 +403,7 @@ private fun OutlinePane(model: PdfViewerModel, state: PdfState, showTranslation:
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             LazyColumn(Modifier.fillMaxSize()) {
                 items(rows) { (item, depth) ->
-                    val title = if (showTranslation) state.titleTranslation(item.title) ?: item.title else item.title
+                    val title = if (view.showTranslation) state.titleTranslation(item.title) ?: item.title else item.title
                     Row(
                         Modifier.fillMaxWidth().clickable { model.follow(item.destination) }
                             .padding(start = (8 + depth * 14).dp, end = 8.dp, top = 6.dp, bottom = 6.dp),

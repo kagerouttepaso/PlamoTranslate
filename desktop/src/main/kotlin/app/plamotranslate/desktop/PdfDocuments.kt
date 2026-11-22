@@ -2,6 +2,7 @@ package app.plamotranslate.desktop
 
 import app.plamotranslate.desktop.pdf.PdfDocument
 import app.plamotranslate.desktop.pdf.PdfFonts
+import app.plamotranslate.pipeline.pdf.PdfColor
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal sealed interface PdfFontStatus {
@@ -17,6 +18,7 @@ internal data class PdfDocuments(
     val latest: PdfViewVersion? = null,
     /** [latest] を開き直した文書で表示できるページ。 */
     val writtenPages: Set<Int> = emptySet(),
+    val backgrounds: Map<Int, Map<Int, PdfColor>> = emptyMap(),
     val fonts: PdfFontStatus = PdfFontStatus.NotLoaded,
     val error: String? = null,
 )
