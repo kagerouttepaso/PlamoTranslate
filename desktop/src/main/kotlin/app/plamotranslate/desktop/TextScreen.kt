@@ -174,9 +174,5 @@ private fun Pane(modifier: Modifier, title: String, accent: Color, content: @Com
 @Composable
 private fun PaneBar(content: @Composable androidx.compose.foundation.layout.FlowRowScope.() -> Unit) {
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    androidx.compose.foundation.layout.FlowRow(
-        Modifier.fillMaxWidth().padding(horizontal = DesktopSize.small),
-        itemVerticalAlignment = Alignment.CenterVertically,
-        content = content,
-    )
+    DesktopToolbar(content)
 }

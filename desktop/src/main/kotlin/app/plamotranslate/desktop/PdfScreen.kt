@@ -277,7 +277,7 @@ private fun Viewer(model: PdfViewerModel, state: PdfState, documents: PdfDocumen
             Spacer(Modifier.width(DesktopSize.gap))
         }
         Column(Modifier.weight(1f).fillMaxHeight()) {
-            PageBar(model, view, state.page, scale, presenter)
+            PdfPageBar(model, view, state.page, scale, presenter)
             if (view.navigation.searchOpen) {
                 SearchBar(model, documents, view, searchFocus) { model.closeSearch(); focus.requestFocus() }
             }
@@ -288,9 +288,9 @@ private fun Viewer(model: PdfViewerModel, state: PdfState, documents: PdfDocumen
 
 /** 戻る/進む・ページ番号・拡大率・並べ方・見出しの欄・検索。 */
 @Composable
-private fun PageBar(model: PdfViewerModel, view: PdfViewState, page: Int, scale: Int, presenter: PdfPresenter) {
+internal fun PdfPageBar(model: PdfViewerModel, view: PdfViewState, page: Int, scale: Int, presenter: PdfPresenter) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = DesktopSize.small), verticalAlignment = Alignment.CenterVertically) {
+        DesktopToolbar {
             if (view.navigation.outline.isNotEmpty()) {
                 DesktopLink(onClick = presenter::toggleOutline) { Text("見出し") }
             }
@@ -299,13 +299,15 @@ private fun PageBar(model: PdfViewerModel, view: PdfViewState, page: Int, scale:
             Spacer(Modifier.width(DesktopSize.gap))
             PageField(model, page, view.navigation.sizes.size)
             Spacer(Modifier.weight(1f))
-            DesktopLink(onClick = { presenter.setZoom(PdfScale.step(scale, -1)) }) { Text("−") }
-            ChoiceMenu(
-                "$scale%",
-                listOf(PdfZoom.FitWidth, PdfZoom.FitPage) + listOf(50, 75, 100, 125, 150, 200, 300).map(PdfZoom::Scale),
-                { it.label }, presenter::setZoom,
-            )
-            DesktopLink(onClick = { presenter.setZoom(PdfScale.step(scale, 1)) }) { Text("+") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DesktopLink(onClick = { presenter.setZoom(PdfScale.step(scale, -1)) }) { Text("−") }
+                ChoiceMenu(
+                    "$scale%",
+                    listOf(PdfZoom.FitWidth, PdfZoom.FitPage) + listOf(50, 75, 100, 125, 150, 200, 300).map(PdfZoom::Scale),
+                    { it.label }, presenter::setZoom,
+                )
+                DesktopLink(onClick = { presenter.setZoom(PdfScale.step(scale, 1)) }) { Text("+") }
+            }
             ChoiceMenu(view.settings.spread.short, PdfSpread.entries, { it.label }, presenter::setSpread)
             DesktopLink(onClick = { model.showSearch(!view.navigation.searchOpen) }) { Text("検索", maxLines = 1) }
         }

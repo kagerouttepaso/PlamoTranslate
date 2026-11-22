@@ -3,6 +3,8 @@ package app.plamotranslate.desktop
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.FlowRowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
@@ -18,6 +20,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+
+/** 操作は左から順に置き、帯の幅に収まらない項目を次の行に送る。 */
+@Composable
+internal fun DesktopToolbar(content: @Composable FlowRowScope.() -> Unit) {
+    FlowRow(
+        Modifier.fillMaxWidth().padding(horizontal = DesktopSize.small),
+        itemVerticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
 
 @Composable
 private fun Modifier.controlFocus(): Modifier {
