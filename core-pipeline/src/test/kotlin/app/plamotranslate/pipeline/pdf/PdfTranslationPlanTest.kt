@@ -44,6 +44,13 @@ class PdfTranslationPlanTest {
         assertEquals(listOf(1, 1), chars.batches(0, 2).map { it.size })
     }
 
+    @Test fun `後続ページも今回空いた枠数で分割し入りきらない分は次に選ぶ`() {
+        val next = (1..4).map { TestLine("Next paragraph $it.", y = 750.0 - it * 25) }
+        val plan = PdfTranslationPlan(mapOf(0 to testParagraphs(TestLine("Focus.")), 1 to testParagraphs(*next.toTypedArray())))
+        assertEquals(listOf(listOf("Focus."), listOf("Next paragraph 1.")), plan.batches(0, 3).take(2))
+        assertEquals(listOf("Next paragraph 2."), plan.batches(0, 3).last())
+    }
+
     @Test fun `同じ原文をページ横断で共有し必要な原文が全てそろったページを返す`() {
         val shared = TestLine("Shared paragraph.", y = 680.0)
         val plan = PdfTranslationPlan(mapOf(

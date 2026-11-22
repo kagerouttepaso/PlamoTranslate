@@ -26,7 +26,7 @@ class PdfTranslationPlan(pages: Map<Int, List<PdfParagraph>>) {
         return buildList {
             for (page in ordered.keys.sortedBy { distance(it, focus) }) {
                 val items = ordered.getValue(page).filterNot { it.text in scheduled }
-                for (part in pageBatches(items, slots - size)) {
+                for (part in pageBatches(items, slots)) {
                     val texts = part.map { it.text }
                     add(texts)
                     scheduled.addAll(texts)
