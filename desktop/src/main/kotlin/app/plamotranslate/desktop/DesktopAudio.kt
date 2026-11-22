@@ -82,7 +82,11 @@ internal class DesktopAsr(private val models: Path) {
     fun hasRequiredFiles(model: SpeechModel): Boolean =
         DesktopSpeechModels.requiredFiles(model).all { DesktopSpeechModels.isInstalled(models, it) }
 
-    fun load(settings: DesktopRecognitionSettings): SpeechEngine {
+    fun load(selection: AudioSelection): SpeechEngine = load(selection.recognition, selection.specifiedCode)
+
+    fun load(settings: DesktopRecognitionSettings): SpeechEngine = load(settings, null)
+
+    private fun load(settings: DesktopRecognitionSettings, specified: String?): SpeechEngine {
         val qwen = File(directory, Qwen3Recognizer.DIR)
         val vad = models.resolve(SharedModelCatalog.sileroVad.path).toFile()
         val identify = supportsAutomatic(settings.model)
@@ -108,7 +112,7 @@ internal class DesktopAsr(private val models: Path) {
                         throw error
                     }
                 }
-                SpeechModel.SENSE_VOICE -> JvmSenseVoice(directory, threads)
+                SpeechModel.SENSE_VOICE -> JvmSenseVoice(directory, threads, specified)
             }
             SpeechPipeline(voice, recognizer, profile, heavy = settings.model.heavy, retainUtterances = UtteranceRetention.KEEP_UTTERANCES)
         } catch (error: Throwable) {

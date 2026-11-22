@@ -48,11 +48,17 @@ class JvmWhisperIdentifier(directory: File, threads: Int) : LanguageIdentifier {
     }
 }
 
-class JvmSenseVoice(private val directory: File, private val threads: Int) : SpeechRecognizer {
-    private val automatic = create("auto")
+class JvmSenseVoice(private val directory: File, private val threads: Int, initialLanguage: String? = null) : SpeechRecognizer {
+    private val automatic = lazy { create("auto") }
     private var pinned: Pair<String, OfflineRecognizer>? = null
 
-    override fun recognize(samples: FloatArray): Recognition = recognizeWith(automatic, samples)
+    init {
+        // 再生音は言語が決まっている。最初の音声を受け取る前に、その言語の認識器だけを用意する。
+        if (initialLanguage != null && initialLanguage in codes) pinned = initialLanguage to create(initialLanguage)
+        else automatic.value
+    }
+
+    override fun recognize(samples: FloatArray): Recognition = recognizeWith(automatic.value, samples)
 
     @Synchronized
     override fun recognizeAs(samples: FloatArray, language: String?): Recognition {
@@ -111,7 +117,7 @@ class JvmSenseVoice(private val directory: File, private val threads: Int) : Spe
     override fun close() {
         pinned?.second?.release()
         pinned = null
-        automatic.release()
+        if (automatic.isInitialized()) automatic.value.release()
     }
 
     companion object {

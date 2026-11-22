@@ -60,6 +60,8 @@ internal data class AudioSelection(
             AudioSource.PLAYBACK -> playbackFrom
         }
 
+    val specifiedCode: String? get() = spoken?.let { if (it == Language.ZH_HANT) "yue" else it.code }
+
     fun session(): ConversationSession = when (source) {
         AudioSource.MICROPHONE -> ConversationSession(PartnerMode(partner), self, languages)
         AudioSource.PLAYBACK -> ConversationSession(PartnerMode(playbackFrom), playbackTo, languages)
@@ -108,7 +110,7 @@ internal data class AudioState(
 internal class AudioPresenter(
     private val scope: CoroutineScope,
     private val capture: AudioCapture,
-    private val loadEngine: (DesktopRecognitionSettings) -> SpeechEngine,
+    private val loadEngine: (AudioSelection) -> SpeechEngine,
     private val openTranslation: (CoroutineScope, TranslationStream.Options) -> TranslationStream,
     initialSelection: AudioSelection = AudioSelection(),
     private val saveSelection: (AudioSelection) -> Unit = {},
@@ -268,7 +270,7 @@ internal class AudioPresenter(
         run.input = scope.launch {
             var loaded: SpeechEngine? = null
             try {
-                val asr = engine ?: withContext(io) { loadEngine(run.selection.recognition).also { loaded = it } }.also { engine = it }
+                val asr = engine ?: withContext(io) { loadEngine(run.selection).also { loaded = it } }.also { engine = it }
                 run.engine = asr
                 val current = session
                 val language = run.selection.spoken
@@ -350,8 +352,7 @@ internal class AudioPresenter(
 
     private fun languagesFor(current: ConversationSession, selection: AudioSelection): SpeechLanguages {
         val language = selection.spoken ?: return current.speechLanguages
-        val code = if (language == Language.ZH_HANT) "yue" else language.code
-        return SpeechLanguages(separateChinese = language.isChinese, specified = code)
+        return SpeechLanguages(separateChinese = language.isChinese, specified = selection.specifiedCode)
     }
 
     private fun publish(current: ConversationSession) {

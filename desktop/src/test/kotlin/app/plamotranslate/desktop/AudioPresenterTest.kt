@@ -55,13 +55,17 @@ class AudioPresenterTest {
         val speech = FakeSpeech()
         val engine = FakeTranslationEngine()
         val capture = FakeCapture()
+        var preparedLanguage: String? = null
         val presenter = AudioPresenter(
-            backgroundScope, capture, { speech }, engine::open, AudioSelection(source = AudioSource.PLAYBACK),
+            backgroundScope, capture, { selection -> preparedLanguage = selection.specifiedCode; speech },
+            engine::open, AudioSelection(source = AudioSource.PLAYBACK),
             io = StandardTestDispatcher(testScheduler),
         )
         presenter.start()
         runCurrent()
         assertEquals(AudioSource.PLAYBACK, capture.source)
+        assertEquals("en", preparedLanguage)
+        assertEquals(preparedLanguage, speech.languages.specified)
         assertTrue(presenter.state.value.subtitleVisible)
         assertEquals(SubtitleLine("A partial sentence.", "途中訳"), presenter.state.value.subtitle)
 
