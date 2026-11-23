@@ -28,6 +28,7 @@
 #include "ggml-cpu.h"
 #include "llama.h"
 #include "llama_jni.h"
+#include "mtmd-helper.h"
 
 #define TAG "PlamoTranslate"
 #define LOGI(...) plamo_log(LOG_PRIORITY_INFO, __VA_ARGS__)
@@ -263,6 +264,10 @@ ggml_backend_dev_t gpu_device() {
     return device ? device : ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU);
 }
 
+void log_audio_stage(int64_t request, const char *stage) {
+    LOGI("ASR #%lld %s", static_cast<long long>(request), stage);
+}
+
 namespace {
 void find_cpu_functions() {
     ggml_backend_dev_t cpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
@@ -355,6 +360,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_app_plamotranslate_llm_LlamaNative_nativeInitCpu(JNIEnv *env, jobject, jstring jlib_dir, jstring jcpu_variant) {
     const std::string lib_dir = to_std_string(env, jlib_dir);
     llama_log_set(log_callback, nullptr);
+    mtmd_helper_log_set(log_callback, nullptr);
     startup_stage("バックエンド初期化 開始");
 #if defined(__ANDROID__)
     const std::string cpu_variant = to_std_string(env, jcpu_variant);

@@ -169,7 +169,7 @@ class ConversationReplayTest {
             for (lane in RecognitionLane.entries) {
                 if (lane in running) continue
                 val job = queue.take(lane) ?: continue
-                val output = runner.run(job)
+                val output = kotlinx.coroutines.runBlocking { runner.run(job) }
                 running[lane] = Triple(job, output, now + DeviceTiming.millis(job, model) * SAMPLE_RATE / 1000)
             }
         }

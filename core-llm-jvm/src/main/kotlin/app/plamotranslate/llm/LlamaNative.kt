@@ -41,7 +41,9 @@ internal object LlamaNative {
     external fun nativeFree(handle: Long)
 
     external fun nativeLoadAudio(model: String, projector: String, gpu: Boolean, encoderThreads: Int, batchThreads: Int, generationThreads: Int): Long
-    external fun nativeTranscribe(handle: Long, samples: FloatArray, language: String): ByteArray
+    external fun nativeNewAudioRequest(): java.nio.ByteBuffer
+    external fun nativeCancel(request: java.nio.ByteBuffer)
+    external fun nativeTranscribe(handle: Long, request: java.nio.ByteBuffer, samples: FloatArray, language: String): ByteArray?
     external fun nativeFreeAudio(handle: Long)
 
     /** [nativeTranslateJobs] の受け渡し口。どれも推論のスレッドから呼ばれる。 */

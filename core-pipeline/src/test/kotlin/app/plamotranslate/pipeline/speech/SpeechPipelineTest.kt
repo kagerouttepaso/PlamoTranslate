@@ -5,6 +5,11 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import org.junit.Assert.*
 import org.junit.Test
 
 /**
@@ -24,6 +29,53 @@ class SpeechPipelineTest {
     private class BrokenRecognizer : SpeechRecognizer {
         override fun recognize(samples: FloatArray): Recognition = throw OutOfMemoryError("偽の失敗")
         override fun close() = Unit
+    }
+
+    @Test(timeout = 10000)
+    fun `閉じたカードの途中認識を中断して二枚の確定を順番どおり一度ずつ届ける`() {
+        val events = interruptAndSpeakAgain(SpeechPipeline::cut)
+        val cards = events.filterIsInstance<SpeechEvent.CardOpened>().map { it.card }
+        assertEquals(2, cards.size)
+        assertEquals(cards, events.filterIsInstance<SpeechEvent.CardFinished>().map { it.card })
+    }
+
+    @Test(timeout = 10000)
+    fun `途中認識中に再開始したら新しいカードだけを確定する`() {
+        val events = interruptAndSpeakAgain(SpeechPipeline::reset)
+        val cards = events.filterIsInstance<SpeechEvent.CardOpened>().map { it.card }
+        assertEquals(2, cards.distinct().size)
+        assertEquals(listOf(cards.last()), events.filterIsInstance<SpeechEvent.CardFinished>().map { it.card })
+    }
+
+    private fun interruptAndSpeakAgain(interrupt: (SpeechPipeline) -> Unit) = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val cancelled = CompletableDeferred<Unit>()
+        val recognizer = object : SpeechRecognizer {
+            override fun recognize(samples: FloatArray) = error("言語を指定する")
+            override suspend fun transcribe(samples: FloatArray, language: String?, priority: RecognitionPriority): Recognition {
+                if (priority == RecognitionPriority.PARTIAL) {
+                    entered.complete(Unit)
+                    try { awaitCancellation() } finally { cancelled.complete(Unit) }
+                }
+                return Recognition("This is final.", language, source = LanguageSource.SPECIFIED)
+            }
+            override fun close() = Unit
+        }
+        val pipeline = SpeechPipeline(LoudVad(), recognizer, heavy = true)
+        pipeline.languages = SpeechLanguages(specified = "en")
+        try {
+            val events = async(start = CoroutineStart.UNDISPATCHED) { pipeline.events.takeWhile { it != SpeechEvent.Flushed }.toList() }
+            fun speak() = repeat(30) { pipeline.accept(FloatArray(1600) { 0.5f }) }
+            speak()
+            entered.await()
+            interrupt(pipeline)
+            cancelled.await()
+            speak()
+            pipeline.flush()
+            val observed = events.await()
+            assertTrue(observed.filterIsInstance<SpeechEvent.CardFinished>().all { it.utterance?.text == "This is final." })
+            observed
+        } finally { pipeline.close() }
     }
 
     private fun expectFlush(commands: (SpeechPipeline) -> Unit) = runBlocking {

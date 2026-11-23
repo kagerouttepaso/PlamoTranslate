@@ -176,7 +176,7 @@ class SpeechSegmenterTest {
                         is RecognitionJob.Seam -> seamLatencyChunks
                         else -> languageLatencyChunks
                     }
-                    waiting.addLast(Pending(chunks + delay, job.lane, job.id, runner.run(job)))
+                    waiting.addLast(Pending(chunks + delay, job.lane, job.id, kotlinx.coroutines.runBlocking { runner.run(job) }))
                 }
                 val due = waiting.filter { all || it.due <= chunks }.minByOrNull { it.due } ?: return
                 waiting.remove(due)
@@ -803,7 +803,7 @@ class SpeechSegmenterTest {
             segmenter.accept(FloatArray(FRAME) { 0f })
             while (true) {
                 val job = queue.take(RecognitionLane.TRANSCRIBE) ?: queue.take(RecognitionLane.IDENTIFY) ?: break
-                segmenter.onResult(job.id, runner.run(job))
+                segmenter.onResult(job.id, kotlinx.coroutines.runBlocking { runner.run(job) })
             }
         }
         val card = finals(events).single()

@@ -166,7 +166,7 @@ enum class LanguageSource {
 /** 認識した文の切れ目。[sentence] が true なら文の終わり（句点・疑問符・感嘆符）、false なら読点。 */
 data class SpeechBreak(val at: Int, val sentence: Boolean)
 
-/** インターフェース：音声を文字にし、言語を判定する。実装は `core-asr`（SenseVoice・Qwen3-ASR）。 */
+/** 音声を文字にし、言語を判定する。sherpa-onnx と llama.cpp の実装がある。 */
 interface SpeechRecognizer : AutoCloseable {
     fun recognize(samples: FloatArray): Recognition
 
@@ -175,6 +175,9 @@ interface SpeechRecognizer : AutoCloseable {
      * 結果の [Recognition.source] は、指定した言語で書き起こしたら [LanguageSource.SPECIFIED]。
      */
     fun recognizeAs(samples: FloatArray, language: String?): Recognition = recognize(samples)
+
+    /** ワーカーの要求。中断できる認識器はこのコルーチンの取消に従い、GPU を使うときは [priority] で利用権を待つ。 */
+    suspend fun transcribe(samples: FloatArray, language: String?, priority: RecognitionPriority): Recognition = recognizeAs(samples, language)
 
     /**
      * 会話の言語 [language] を、この認識器に指定する言語のコード（[recognizeAs]）にする。既定は言語のコードで、中国語は字体によらず

@@ -69,16 +69,16 @@ class IdentifiedRecognizer(
      * 言語を指定せずに書き起こすとき（テキスト翻訳の音声入力など）は、識別して一番の言語を指定する。判定できなければ
      * [fallback] として書き起こす。言語を指定しないと、Qwen3-ASR が中国語で書くことがある。
      */
-    fun identifyAndRecognize(samples: FloatArray, languages: SpeechLanguages, fallback: String? = null): Recognition {
+    suspend fun identifyAndRecognize(samples: FloatArray, languages: SpeechLanguages, fallback: String? = null, priority: RecognitionPriority): Recognition {
         val groups = languages.groups
         val identified = SpeakerJudge.decide(identifier.groupedScores(samples, languages), languages.copy(primary = null), 0f)
-        if (identified != null) return recognizeAs(samples, identified, groups, LanguageSource.JUDGED)
-        return recognizeAs(samples, fallback?.takeIf { groups == null || it in groups }, groups, LanguageSource.SPECIFIED)
+        if (identified != null) return recognizeAs(samples, identified, groups, LanguageSource.JUDGED, priority)
+        return recognizeAs(samples, fallback?.takeIf { groups == null || it in groups }, groups, LanguageSource.SPECIFIED, priority)
     }
 
     /** [lang] として書き起こす（[source] はその言語の出どころ）。言語が無ければ指定せずに書き起こし、文字の種類から推定する。 */
-    private fun recognizeAs(samples: FloatArray, lang: String?, groups: Set<String>?, source: LanguageSource): Recognition {
-        val r = recognizer.recognizeAs(samples, lang)
+    private suspend fun recognizeAs(samples: FloatArray, lang: String?, groups: Set<String>?, source: LanguageSource, priority: RecognitionPriority): Recognition {
+        val r = recognizer.transcribe(samples, lang, priority)
         return if (lang != null) r.copy(lang = lang, source = source) else r.copy(lang = ScriptLanguage.guess(r.text, groups), source = LanguageSource.GUESSED)
     }
 

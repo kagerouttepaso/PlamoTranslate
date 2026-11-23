@@ -20,3 +20,13 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     testImplementation(libs.junit)
 }
+
+tasks.test {
+    val fixtures = providers.environmentVariable("MOCKINGWORD_ASR_FIXTURES")
+    inputs.property("asrFixtures", fixtures.orElse(""))
+    outputs.upToDateWhen { !fixtures.isPresent }
+    providers.environmentVariable("MOCKINGWORD_ASR_NATIVE").orNull?.let { directory ->
+        systemProperty("java.library.path", directory)
+        environment("PATH", directory + File.pathSeparator + System.getenv("PATH"))
+    }
+}
