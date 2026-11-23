@@ -10,7 +10,7 @@ object QwenTranscript {
         "fa" to "Persian", "el" to "Greek", "hu" to "Hungarian", "mk" to "Macedonian", "ro" to "Romanian",
     )
     private val codes = names.entries.associate { it.value.lowercase() to it.key }
-    private val roleWords = setOf("system", "システム", "시스템")
+    private val roleWords = setOf("system", "user", "assistant", "システム", "시스템")
     private val nonWord = Regex("[^\\p{L}\\p{N}]+")
 
     fun parse(raw: String, specified: String?): Recognition {

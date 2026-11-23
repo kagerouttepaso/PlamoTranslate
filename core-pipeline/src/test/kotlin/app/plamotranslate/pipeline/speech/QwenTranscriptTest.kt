@@ -13,10 +13,10 @@ class QwenTranscriptTest {
     }
 
     @Test fun 役だけなら空にし文の中の語は残す() {
-        listOf("system", "System.", "システム。", "시스템", "The system.", "<|im_end|>").forEach {
+        listOf("system", "System.", "システム。", "시스템", "The system.", "language English<asr_text>User.", "assistant<|im_end|>", "<|im_end|>").forEach {
             assertEquals("", QwenTranscript.parse(it, null).text)
         }
-        listOf("This system is not well.", "全体のシステムの協調性", "", "the").forEach {
+        listOf("This system is not well.", "Ask the assistant.", "A user can speak.", "全体のシステムの協調性", "", "the").forEach {
             assertEquals(it, QwenTranscript.parse(it, null).text)
         }
     }
