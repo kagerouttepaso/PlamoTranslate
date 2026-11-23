@@ -1,5 +1,8 @@
 package app.plamotranslate.desktop
 
+import app.plamotranslate.pipeline.diagnostics.InferenceRole
+import app.plamotranslate.pipeline.speech.TranscriptionPreference
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -75,6 +78,16 @@ internal fun BackendSettings(state: SettingsState, presenter: SettingsPresenter)
     if (!state.cpuOnly) Text("CPU 専用で起動した後に Vulkan を有効にするには、アプリを起動し直してください。", style = MaterialTheme.typography.bodySmall)
     state.gpuFallback?.let {
         Text("CPU に切り替えました：$it")
-        DesktopOutline(onClick = presenter::retryGpu, enabled = enabled) { Text("GPU をもう一度試す") }
+        DesktopOutline(onClick = { presenter.retryGpu(InferenceRole.Translation) }, enabled = enabled) { Text("翻訳の GPU をもう一度試す") }
     }
+    Text("Qwen3-ASR の書き起こし（次の準備から適用）")
+    Row(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
+        TranscriptionPreference.entries.forEach { preference ->
+            DesktopOutline(onClick = { presenter.setTranscriptionPreference(preference) }, enabled = enabled && preference != state.transcriptionPreference) {
+                Text(if (preference == TranscriptionPreference.AUTO) "自動" else preference.name)
+            }
+        }
+    }
+    state.transcriptionFallback?.let { Text("書き起こしは CPU に切り替えました：$it") }
+    DesktopOutline(onClick = { presenter.retryGpu(InferenceRole.Transcription) }, enabled = enabled) { Text("書き起こしの GPU をもう一度試す") }
 }

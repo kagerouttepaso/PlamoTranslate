@@ -1,6 +1,7 @@
 package app.plamotranslate.desktop
 
 import app.plamotranslate.pipeline.diagnostics.InferenceRole
+import app.plamotranslate.pipeline.speech.TranscriptionPreference
 import app.plamotranslate.llm.CpuOptions
 import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.log.Logs
@@ -45,6 +46,8 @@ internal data class SettingsState(
     val cacheNotice: String? = null,
     val cpuOnly: Boolean = false,
     val gpuFallback: String? = null,
+    val transcriptionFallback: String? = null,
+    val transcriptionPreference: TranscriptionPreference = TranscriptionPreference.AUTO,
     val detailedLogs: Boolean = false,
 ) {
     val modelStatus get() = model.toStatus()
@@ -183,7 +186,7 @@ internal class SettingsPresenter(
 
     fun setCpuOptions(options: CpuOptions) = changeBackend { settings.saveCpuOptions(options) }
 
-    fun resetPerformance() = changeBackend(settings::resetPerformance)
+    fun resetPerformance() = changeBackend { settings.resetPerformance() }
 
     fun measureSpeed() {
         val current = state.value
@@ -246,7 +249,11 @@ internal class SettingsPresenter(
         }
     }
 
-    fun retryGpu() = changeBackend { settings.retryGpu(InferenceRole.Translation) }
+    fun retryGpu(role: InferenceRole) = changeBackend(role) { settings.retryGpu(role) }
+
+    fun setTranscriptionPreference(preference: TranscriptionPreference) = changeBackend(InferenceRole.Transcription) {
+        settings.saveTranscriptionPreference(preference)
+    }
 
     fun setDetailedLogs(enabled: Boolean) {
         if (state.value.busy || state.value.detailedLogs == enabled) return
@@ -259,11 +266,12 @@ internal class SettingsPresenter(
         }
     }
 
-    private fun changeBackend(save: () -> Unit) {
+    private fun changeBackend(role: InferenceRole = InferenceRole.Translation, save: () -> Unit) {
         if (state.value.busy || state.value.model is ModelState.Loading) return
+        if (role == InferenceRole.Transcription && !audio.state.value.canConfigure) return
         mutableState.update { it.copy(busy = true) }
         scope.launch {
-            if (updateSettings("実行先を保存できませんでした。", save)) models.reload()
+            if (updateSettings("実行先を保存できませんでした。", save) && role == InferenceRole.Translation) models.reload()
         }
     }
 
@@ -344,6 +352,8 @@ internal class SettingsPresenter(
             theme = settings.appearance,
             cpuOptions = settings.cpuOptions,
             gpuFallback = settings.gpuFallback(InferenceRole.Translation),
+            transcriptionFallback = settings.gpuFallback(InferenceRole.Transcription),
+            transcriptionPreference = settings.transcriptionPreference,
             detailedLogs = settings.detailedLogs,
         )
     }

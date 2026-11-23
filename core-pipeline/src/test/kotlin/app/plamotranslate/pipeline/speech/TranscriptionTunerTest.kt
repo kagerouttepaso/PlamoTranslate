@@ -1,0 +1,54 @@
+package app.plamotranslate.pipeline.speech
+
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.*
+import org.junit.Test
+
+class TranscriptionTunerTest {
+    private val cpus = TranscriptionTuner.cpuCandidates(2)
+    private val reference = TranscriptionTuner.Reference("Hello!", "en")
+    private var environment = TranscriptionTuner.Environment("a", "b", "c", "d", "e", "f", "g")
+    private val choices = mutableMapOf<String, TranscriptionChoice>()
+    private val store = object : TranscriptionTuner.Store {
+        override fun read(key: String) = choices[key]
+        override fun write(key: String, choice: TranscriptionChoice) { choices[key] = choice }
+    }
+    private var open = 0
+    private var gpuLoads = 0
+    private var fallback: String? = null
+    private var clock = 0L
+    private suspend fun prepare(duration: Long, valid: Boolean = true, preference: TranscriptionPreference = TranscriptionPreference.AUTO): Boolean {
+        class Engine(val gpu: Boolean) : AutoCloseable { override fun close() { open-- } }
+        val (engine, choice) = TranscriptionTuner.prepare(cpus, fallback == null, preference, environment, reference, store,
+            { true }, { fallback = it }, { candidate ->
+                check(open++ == 0)
+                if (candidate.gpu) gpuLoads++
+                Engine(candidate.gpu)
+            }, { engine ->
+                val start = clock
+                clock += if (engine.gpu) duration else 100
+                TranscriptionTuner.Sample(Recognition("hello", if (!engine.gpu || valid) "en" else "ja"), clock - start)
+            })
+        engine.close()
+        return choice.candidate.gpu
+    }
+
+    @Test fun `境界を含めて採用し一致時は採用先だけをならす`() = runTest {
+        assertTrue(prepare(80)); val before = clock
+        assertTrue(prepare(90)); assertEquals(90L, clock - before)
+        environment = environment.copy(projector = "別")
+        assertFalse(prepare(81)); assertNull(fallback)
+    }
+
+    @Test fun `強制GPUでも正解不一致は退避しCPUの準備をやり直す`() = runTest {
+        assertFalse(prepare(1, false, TranscriptionPreference.GPU)); assertNotNull(fallback)
+        val before = gpuLoads
+        assertFalse(prepare(1, true, TranscriptionPreference.GPU)); assertEquals(before, gpuLoads)
+        assertTrue(choices.isEmpty())
+    }
+
+    @Test fun `CPU指定はGPUに触れずスレッド数はCPU数を越えない`() = runTest {
+        assertFalse(prepare(1, preference = TranscriptionPreference.CPU)); assertEquals(0, gpuLoads)
+        assertEquals(listOf(TranscriptionCandidate(false, 2, 2)), cpus)
+    }
+}

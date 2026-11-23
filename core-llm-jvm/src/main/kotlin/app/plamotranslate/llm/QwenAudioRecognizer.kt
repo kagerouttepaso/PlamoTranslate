@@ -5,6 +5,7 @@ import app.plamotranslate.pipeline.diagnostics.GpuWork
 import app.plamotranslate.pipeline.speech.RecognitionPriority
 import app.plamotranslate.pipeline.speech.QwenTranscript
 import app.plamotranslate.pipeline.speech.Recognition
+import app.plamotranslate.pipeline.speech.TranscriptionTuner
 import app.plamotranslate.pipeline.speech.SpeechRecognizer
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CancellationException
@@ -33,7 +34,16 @@ class QwenAudioRecognizer private constructor(private val handle: Long, private 
         transcribe(samples, language, RecognitionPriority.PARTIAL)
     }
 
-    override suspend fun transcribe(samples: FloatArray, language: String?, priority: RecognitionPriority): Recognition = coroutineScope {
+    override suspend fun transcribe(samples: FloatArray, language: String?, priority: RecognitionPriority): Recognition =
+        run(samples, language, priority) {}
+
+    suspend fun trial(samples: FloatArray, clock: () -> Long = System::nanoTime): TranscriptionTuner.Sample {
+        var started = 0L
+        val result = run(samples, null, RecognitionPriority.PARTIAL) { started = clock() }
+        return TranscriptionTuner.Sample(result, clock() - started)
+    }
+
+    private suspend fun run(samples: FloatArray, language: String?, priority: RecognitionPriority, started: () -> Unit): Recognition = coroutineScope {
         val job = coroutineContext.job
         synchronized(requests) {
             check(!closing) { "認識器は閉じています" }
@@ -45,6 +55,7 @@ class QwenAudioRecognizer private constructor(private val handle: Long, private 
                 val work = if (priority.urgent) GpuWork.FinalTranscript else GpuWork.Regular
                 val raw = if (samples.isEmpty()) "" else LlamaRuntime.process.onDevice(gpu, work) {
                     coroutineContext.ensureActive()
+                    started()
                     suspendCancellableCoroutine<ByteArray> { result ->
                         LlamaRuntime.process.native {
                             val request = LlamaNative.nativeNewAudioRequest()
@@ -80,6 +91,7 @@ class QwenAudioRecognizer private constructor(private val handle: Long, private 
             val runtime = LlamaRuntime.process
             return runtime.onDevice(target.useGpu) {
                 val gpu = runtime.initialize(nativeDir, cpuVariant, target)
+                check(!target.useGpu || gpu) { "GPU を使用できません。CPU 専用で起動した場合は再起動が必要です" }
                 val handle = runtime.native { LlamaNative.nativeLoadAudio(model.absolutePath, projector.absolutePath, gpu, threads.encoder, threads.batch, threads.generation) }
                 QwenAudioRecognizer(handle, gpu)
             }

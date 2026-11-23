@@ -30,6 +30,14 @@ class QwenAudioJniTest {
         return QwenAudioRecognizer.load(File(directory, "Qwen3-ASR-0.6B-Q8_0.gguf"), File(directory, "mmproj-Qwen3-ASR-0.6B-Q8_0.gguf"), nativeDir!!, "", InferenceTarget(true, gpu))
     }
 
+    @Test fun 同梱の試走音声をCPUで書き起こして本文と言語が一致する() = runBlocking {
+        load(gpu = false).use { recognizer ->
+            val result = recognizer.trial(QwenTrialAudio.samples).result
+            println("CPU 試走：$result")
+            assertTrue(result.toString(), QwenTrialAudio.reference.matches(result))
+        }
+    }
+
     private fun pcm(id: String): FloatArray {
         val buffer = ByteBuffer.wrap(File(directory, "$id.pcm").readBytes()).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
         return FloatArray(buffer.remaining()).also { buffer.get(it) }
