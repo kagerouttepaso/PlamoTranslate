@@ -64,8 +64,9 @@ class SpeechSegmenter(
     private val retain: (Long, FloatArray) -> Unit = { _, _ -> },
     /** ジョブの番号の採番（同じエンジンの中でほかにジョブを出す部品と同じものを渡す）。 */
     jobIds: JobIds = JobIds(),
+    private val judgesFinalTranscript: Boolean = false,
 ) {
-    private val requests = RecognitionRequests(identifies, heavy, submit, clock, jobIds)
+    private val requests = RecognitionRequests(identifies, heavy, submit, clock, jobIds, judgesFinalTranscript)
 
     private val prerollSamples = (profile.prerollSeconds * SAMPLE_RATE).toInt()
     private val splitAfterSamples = (profile.splitAfterSeconds * SAMPLE_RATE).toInt()
@@ -550,7 +551,7 @@ class SpeechSegmenter(
         if (events.finished(card.id)) return
         val r = card.text.final() ?: return
         val label = card.track.label(closing.end)
-        val lang = label ?: r.lang
+        val lang = card.fixedLanguage ?: label ?: r.lang.takeUnless { judgesFinalTranscript }
         val waitedMs = (clock() - closing.startedAt) / 1_000_000
         if (label != card.lang) trace { "カードの表示の言語 $label（書き起こしの言語。区間と文の全体では ${card.lang}）" }
         trace { "確定（${closing.reason}）${at(closing.start)}〜${at(closing.end)}: [$lang] ${r.text} ／ 直前の途中 ${card.text.shown}（区切ってから${waitedMs}ms）" }

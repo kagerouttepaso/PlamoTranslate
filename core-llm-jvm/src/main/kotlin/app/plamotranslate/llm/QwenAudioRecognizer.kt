@@ -20,6 +20,7 @@ import kotlin.coroutines.resume
 import java.io.File
 
 class QwenAudioRecognizer private constructor(private val handle: Long, private val gpu: Boolean) : SpeechRecognizer {
+    override val judgesFinalTranscript = true
     data class Threads(val encoder: Int = 6, val batch: Int = 6, val generation: Int = 6) {
         init { require(encoder > 0 && batch > 0 && generation > 0) }
     }

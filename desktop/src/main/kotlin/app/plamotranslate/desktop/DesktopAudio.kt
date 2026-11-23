@@ -1,6 +1,5 @@
 package app.plamotranslate.desktop
 
-import app.plamotranslate.asr.Qwen3Recognizer
 import app.plamotranslate.asr.JvmSenseVoice
 import app.plamotranslate.asr.JvmWhisperIdentifier
 import app.plamotranslate.asr.SileroVoiceActivity
@@ -67,7 +66,7 @@ internal object WindowsAudio : AudioCapture {
     private external fun close(handle: Long)
 }
 
-internal class DesktopAsr(private val models: Path) {
+internal class DesktopAsr(private val models: Path, private val qwen: DesktopQwen) {
     private val directory = models.resolve("asr").toFile()
     private val runtime by lazy {
         val sherpa = checkNotNull(System.getProperty("compose.application.resources.dir")) { "sherpa-onnx の DLL の場所を指定してください。" }
@@ -81,31 +80,28 @@ internal class DesktopAsr(private val models: Path) {
     fun hasRequiredFiles(model: SpeechModel): Boolean =
         DesktopSpeechModels.requiredFiles(model).all { DesktopSpeechModels.isInstalled(models, it) }
 
-    fun load(selection: AudioSelection): SpeechEngine = load(selection.recognition, selection.specifiedCode)
+    suspend fun load(selection: AudioSelection): SpeechEngine = load(selection.recognition, selection.specifiedCode)
 
-    fun load(settings: DesktopRecognitionSettings): SpeechEngine = load(settings, null)
-
-    private fun load(settings: DesktopRecognitionSettings, specified: String?): SpeechEngine {
-        val qwen = File(directory, Qwen3Recognizer.DIR)
+    suspend fun load(settings: DesktopRecognitionSettings, specified: String?): SpeechEngine {
         val vad = models.resolve(SharedModelCatalog.sileroVad.path).toFile()
         val identify = supportsAutomatic(settings.model)
         val missing = DesktopSpeechModels.requiredFiles(settings.model)
             .firstOrNull { !DesktopSpeechModels.isInstalled(models, it) }
-        require(missing == null) { "音声認識モデルがありません。設定の「音声認識」からダウンロードしてください。\n${missing?.path}" }
+        require(missing == null) { if (missing in SharedModelCatalog.qwenGguf) "Qwen3-ASR のモデル更新が必要です。設定の「音声認識」で取得量を確認してください。"
+            else "音声認識モデルがありません。設定の「音声認識」からダウンロードしてください。\n${missing?.path}" }
 
         runtime
         val profile = SegmentationProfile.CONVERSATION.copy(cardLanguageSeconds = settings.cardLanguageSeconds)
         val voice = SileroVoiceActivity.load(vad, profile.phraseSilenceSeconds, settings.vadThreshold, settings.vadMinSpeechSeconds)
         return try {
-            val maxThreads = if (settings.model == SpeechModel.SENSE_VOICE) 4 else Qwen3Recognizer.THREADS
             val threads = settings.transcribeThreads.takeIf { it > 0 }
-                ?: (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, maxThreads)
+                ?: (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4)
             val recognizer = when (settings.model) {
-                SpeechModel.QWEN3_ASR -> Qwen3Recognizer.load(qwen, threads)
+                SpeechModel.QWEN3_ASR -> qwen.load(settings.transcribeThreads)
                 SpeechModel.SENSE_VOICE -> JvmSenseVoice(directory, threads, specified)
             }
             val identifier = try {
-                if (identify && settings.model == SpeechModel.QWEN3_ASR) JvmWhisperIdentifier(directory, settings.identifyThreads) else null
+                if (specified == null && identify && settings.model == SpeechModel.QWEN3_ASR) JvmWhisperIdentifier(directory, settings.identifyThreads) else null
             } catch (error: Throwable) {
                 recognizer.close()
                 throw error

@@ -6,6 +6,7 @@ import app.plamotranslate.llm.CpuOptions
 import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.log.Logs
 import app.plamotranslate.pipeline.models.ModelFile
+import app.plamotranslate.pipeline.models.SharedModelCatalog
 import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.pipeline.translation.ModelHost
 import app.plamotranslate.pipeline.translation.ModelState
@@ -47,6 +48,9 @@ internal data class SettingsState(
     val cpuOnly: Boolean = false,
     val gpuFallback: String? = null,
     val transcriptionFallback: String? = null,
+    val transcriptionStatus: String = "未準備",
+    val canChangeRecognition: Boolean = false,
+    val legacyFiles: List<ModelFile>? = null,
     val transcriptionPreference: TranscriptionPreference = TranscriptionPreference.AUTO,
     val detailedLogs: Boolean = false,
 ) {
@@ -54,6 +58,12 @@ internal data class SettingsState(
     fun availableBytes(file: ModelFile): Long = catalogStatus[file] ?: 0L
 
     fun hasRecognition(model: SpeechModel): Boolean = DesktopSpeechModels.requiredFiles(model).all { availableBytes(it) == it.size }
+
+    fun updateNotice(model: SpeechModel): String? {
+        if (model != SpeechModel.QWEN3_ASR) return null
+        val remaining = SharedModelCatalog.qwenGguf.sumOf { it.size - availableBytes(it) }
+        return if (remaining > 0) "Qwen3-ASR のモデル更新が必要です。取得量：約${(remaining + 1_048_575) / 1_048_576} MiB（本体と音声エンコーダー）。" else null
+    }
 }
 
 internal data class ModelPreparationProgress(
@@ -79,6 +89,7 @@ internal class SettingsPresenter(
     private val audio: AudioPresenter,
     private val caches: List<ClearableTranslationCache>,
     private val logsDirectory: Path,
+    qwen: DesktopQwen,
     private val chooseModel: (Path) -> Path?,
 ) {
     private val benchmark = DesktopTranslationBenchmark(models)
@@ -88,6 +99,8 @@ internal class SettingsPresenter(
     val state = mutableState.asStateFlow()
 
     init {
+        scope.launch { qwen.state.collect { status -> mutableState.update { it.copy(transcriptionStatus = status, transcriptionFallback = settings.gpuFallback(InferenceRole.Transcription)) } } }
+        scope.launch { audio.state.collect { current -> mutableState.update { it.copy(canChangeRecognition = current.canConfigure && current.turns.isEmpty()) } } }
         scope.launch { models.state.collect { current -> mutableState.update { withModel(it, current) } } }
         scope.launch {
             updateSettings("設定を読み込めませんでした。") {
@@ -165,7 +178,7 @@ internal class SettingsPresenter(
     private fun catalogStatus(): Map<ModelFile, Long> = runCatching {
         val translationFiles = DesktopModelCatalog.entries.map { it.file }
         translationFiles.associateWith(downloads::bytesAvailable) + DesktopSpeechModels.files.associateWith { file ->
-            if (hasSpeechFile(file)) file.size else downloads.bytesAvailable(file).coerceAtMost(file.size - 1)
+            if (hasSpeechFile(file)) file.size else downloads.partialBytes(file)
         }
     }.getOrDefault(emptyMap())
 
@@ -173,9 +186,28 @@ internal class SettingsPresenter(
         downloadJob?.cancel()
     }
 
+    fun inspectLegacyFiles() {
+        if (state.value.busy) return
+        mutableState.update { it.copy(busy = true) }
+        scope.launch {
+            var found = emptyList<ModelFile>()
+            if (updateSettings("旧ファイルを確認できませんでした。") { found = LegacySpeechFiles(settings.modelDirectory).inspect() }) {
+                mutableState.update { it.copy(legacyFiles = found) }
+            }
+        }
+    }
+
+    fun finishLegacyFiles(remove: Boolean) {
+        val confirmed = state.value.legacyFiles ?: return
+        mutableState.update { it.copy(legacyFiles = null) }
+        if (!remove || confirmed.isEmpty()) return
+        mutableState.update { it.copy(busy = true) }
+        scope.launch { updateSettings("旧ファイルを整理できませんでした。") { LegacySpeechFiles(settings.modelDirectory).remove(confirmed) } }
+    }
+
     fun setCpuOnly(enabled: Boolean) {
         if (state.value.cpuOnly == enabled) return
-        changeBackend { settings.saveCpuOnly(enabled) }
+        changeBackend(null) { settings.saveCpuOnly(enabled) }
     }
 
     fun selectTheme(mode: ThemeMode) {
@@ -186,7 +218,7 @@ internal class SettingsPresenter(
 
     fun setCpuOptions(options: CpuOptions) = changeBackend { settings.saveCpuOptions(options) }
 
-    fun resetPerformance() = changeBackend { settings.resetPerformance() }
+    fun resetPerformance() = changeBackend(null) { settings.resetPerformance() }
 
     fun measureSpeed() {
         val current = state.value
@@ -266,12 +298,15 @@ internal class SettingsPresenter(
         }
     }
 
-    private fun changeBackend(role: InferenceRole = InferenceRole.Translation, save: () -> Unit) {
+    private fun changeBackend(role: InferenceRole? = InferenceRole.Translation, save: () -> Unit) {
         if (state.value.busy || state.value.model is ModelState.Loading) return
-        if (role == InferenceRole.Transcription && !audio.state.value.canConfigure) return
+        if (role != InferenceRole.Translation && !state.value.canChangeRecognition) return
         mutableState.update { it.copy(busy = true) }
         scope.launch {
-            if (updateSettings("実行先を保存できませんでした。", save) && role == InferenceRole.Translation) models.reload()
+            if (updateSettings("実行先を保存できませんでした。", save)) {
+                if (role != InferenceRole.Translation) audio.resetRecognitionBackend()
+                if (role != InferenceRole.Transcription) models.reload()
+            }
         }
     }
 

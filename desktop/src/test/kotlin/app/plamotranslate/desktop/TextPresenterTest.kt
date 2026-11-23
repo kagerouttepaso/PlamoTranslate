@@ -79,7 +79,7 @@ class TextPresenterTest {
 
     private fun presenter(scope: CoroutineScope, model: ModelHost<Path, FakeEngine>, copy: (String) -> Unit) =
         TextPresenter(scope, model.state, DesktopTranslations(model)::open, { null }, copy,
-            DesktopTextVoice(AudioCapture { _, _, _ -> error("unexpected capture") }, { error("unexpected ASR") }),
+            DesktopTextVoice(AudioCapture { _, _, _ -> error("unexpected capture") }, { _, _ -> error("unexpected ASR") }),
             { DesktopRecognitionSettings() }, {})
 
     private fun host(scope: CoroutineScope, missing: Boolean = false): ModelHost<Path, FakeEngine> =

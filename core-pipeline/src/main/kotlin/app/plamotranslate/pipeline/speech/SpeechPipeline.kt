@@ -86,6 +86,7 @@ class SpeechPipeline(
     private val segmenter = SpeechSegmenter(
         vad,
         identifies = identifier != null,
+        judgesFinalTranscript = recognizer.judgesFinalTranscript,
         profile = profile,
         heavy = heavy,
         emit = { event ->

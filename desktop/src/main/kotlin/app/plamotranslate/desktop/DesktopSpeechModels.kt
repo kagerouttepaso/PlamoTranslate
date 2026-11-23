@@ -8,7 +8,7 @@ import java.nio.file.Path
 
 internal object DesktopSpeechModels {
     fun requiredFiles(model: SpeechModel): List<ModelFile> =
-        listOf(SharedModelCatalog.sileroVad) + SharedModelCatalog.recognition(model)
+        listOf(SharedModelCatalog.sileroVad) + SharedModelCatalog.recognition(model, gguf = true)
 
     fun downloadFiles(model: SpeechModel): List<ModelFile> =
         if (model.identifiesLanguage) requiredFiles(model) else SharedModelCatalog.whisperTiny + requiredFiles(model)
@@ -18,6 +18,7 @@ internal object DesktopSpeechModels {
     // 手動で配置した既存モデルも、読み取れるファイルであれば利用できる。
     fun isInstalled(directory: Path, model: ModelFile): Boolean {
         val path = directory.resolve(model.path)
-        return Files.isRegularFile(path) && Files.isReadable(path)
+        return if (model in SharedModelCatalog.qwenGguf) VerifiedSpeechFiles.matches(path, model)
+        else Files.isRegularFile(path) && Files.isReadable(path)
     }
 }

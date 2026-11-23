@@ -27,13 +27,14 @@ internal sealed interface TextVoiceUpdate {
 
 internal class DesktopTextVoice(
     private val capture: AudioCapture,
-    private val loadEngine: (DesktopRecognitionSettings) -> SpeechEngine,
+    private val loadEngine: suspend (DesktopRecognitionSettings, String?) -> SpeechEngine,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     fun listen(settings: DesktopRecognitionSettings, source: Language?, finish: Deferred<Unit>) = flow {
         var engine: SpeechEngine? = null
         try {
-            withContext(io) { engine = loadEngine(settings) }
+            val specified = source?.speechCode
+            withContext(io) { engine = loadEngine(settings, specified) }
             val recognizer = checkNotNull(engine)
             coroutineScope {
                 val events = Channel<SpeechEvent>(Channel.UNLIMITED)
@@ -45,7 +46,7 @@ internal class DesktopTextVoice(
                         events.send(event)
                     }
                 }
-                recognizer.languages = SpeechLanguages(separateChinese = source?.isChinese == true)
+                recognizer.languages = SpeechLanguages(separateChinese = source?.isChinese == true, specified = specified)
                 recognizer.reset()
                 val input = launch { capture.capture(AudioSource.MICROPHONE, { started.complete(Unit) }, recognizer::accept) }
                 val stop = launch {

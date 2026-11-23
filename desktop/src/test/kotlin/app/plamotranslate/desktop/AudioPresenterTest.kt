@@ -29,6 +29,19 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class AudioPresenterTest {
     @Test
+    fun `会話を開き直すと認識器を再利用し実行先を変えたときだけ再準備する`() = runTest {
+        var loads = 0
+        val presenter = AudioPresenter(backgroundScope, FakeCapture(), { loads++; FakeSpeech() }, FakeTranslationEngine()::open,
+            io = StandardTestDispatcher(testScheduler))
+        presenter.prepare()
+        presenter.prepare()
+        assertEquals(1, loads)
+        presenter.resetRecognitionBackend()
+        presenter.prepare()
+        assertEquals(2, loads)
+        presenter.close()
+    }
+    @Test
     fun `画面の準備と開始が重なっても認識器は一度だけ読み込む`() = runTest {
         var loads = 0
         val capture = FakeCapture()

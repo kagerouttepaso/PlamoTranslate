@@ -28,6 +28,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -62,7 +63,7 @@ internal data class AudioSelection(
             AudioSource.PLAYBACK -> playbackFrom
         }
 
-    val specifiedCode: String? get() = spoken?.let { if (it == Language.ZH_HANT) "yue" else it.code }
+    val specifiedCode: String? get() = spoken?.speechCode
 
     fun session(): ConversationSession = when (source) {
         AudioSource.MICROPHONE -> ConversationSession(PartnerMode(partner), self, languages)
@@ -108,11 +109,13 @@ internal data class AudioState(
     val canStart get() = canConfigure && (selection.source == AudioSource.PLAYBACK || automaticAvailable)
 }
 
+internal val Language.speechCode: String get() = if (this == Language.ZH_HANT) "yue" else code
+
 /** UI スレッドでセッションに出来事を渡し、返された処理を接続する。 */
 internal class AudioPresenter(
     private val scope: CoroutineScope,
     private val capture: AudioCapture,
-    private val loadEngine: (AudioSelection) -> SpeechEngine,
+    private val loadEngine: suspend (AudioSelection) -> SpeechEngine,
     private val openTranslation: (CoroutineScope, TranslationStream.Options) -> TranslationStream,
     initialSelection: AudioSelection = AudioSelection(),
     private val saveSelection: (AudioSelection) -> Unit = {},
@@ -136,6 +139,7 @@ internal class AudioPresenter(
     private var subscription: Job? = null
     private var engine: SpeechEngine? = null
     private val loading = Mutex()
+    private var preparing: Job? = null
     private var closed = false
     private var active: CaptureRun? = null
     private var partialJob: Pair<Long, Job>? = null
@@ -202,8 +206,9 @@ internal class AudioPresenter(
     }
 
     /** 音の出どころ・認識の設定・再生音の言語。止めているときだけ変え、認識器とセッションを作り直す。 */
-    private fun configure(updated: AudioSelection) {
-        if (!state.value.canConfigure || closed || updated == selection) return
+    private fun configure(updated: AudioSelection, reload: Boolean = false) {
+        if (!state.value.canConfigure || closed || (!reload && updated == selection)) return
+        preparing?.cancel()
         subscription?.cancel()
         engine?.close()
         engine = null
@@ -217,6 +222,8 @@ internal class AudioPresenter(
     fun showSubtitle(visible: Boolean) {
         if (selection.source == AudioSource.PLAYBACK) mutableState.value = state.value.copy(subtitleVisible = visible)
     }
+
+    fun resetRecognitionBackend() = configure(selection, reload = true)
 
     fun start() {
         if (!state.value.canStart || closed) return
@@ -288,7 +295,10 @@ internal class AudioPresenter(
         val requested = selection
         var loaded: SpeechEngine? = null
         try {
-            val asr = withContext(io) { loadEngine(requested).also { loaded = it } }
+            val asr = coroutineScope {
+                preparing = currentCoroutineContext()[Job]
+                withContext(io) { loadEngine(requested).also { loaded = it } }
+            }
             if (closed || current !== session) throw CancellationException("認識の設定が変わりました")
             engine = asr
             subscription = scope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -312,6 +322,7 @@ internal class AudioPresenter(
         } finally {
             // JNI の読み込み中に画面を離れた場合も、作成済みの認識器を解放する。
             loaded?.takeUnless { it === engine }?.close()
+            preparing = null
         }
     }
 
@@ -457,6 +468,7 @@ internal class AudioPresenter(
     override fun close() {
         if (closed) return
         closed = true
+        preparing?.cancel()
         active?.input?.cancel()
         active = null
         translations.cancel()

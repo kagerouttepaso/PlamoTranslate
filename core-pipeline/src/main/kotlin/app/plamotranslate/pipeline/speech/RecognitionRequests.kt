@@ -22,6 +22,7 @@ internal class RecognitionRequests(
     private val clock: () -> Long,
     /** ジョブの番号の採番（同じエンジンの中でほかにジョブを出す部品と同じものを渡す）。 */
     private val jobIds: JobIds,
+    private val judgesFinalTranscript: Boolean = false,
 ) {
     /** スコアを頼むワーカー。 */
     private val languageLane = if (identifies) RecognitionLane.IDENTIFY else RecognitionLane.TRANSCRIBE
@@ -72,7 +73,9 @@ internal class RecognitionRequests(
     ) {
         val submittedAt = clock()
         val instruction = when {
-            language != null && (identifies || languages.specified != null) -> TranscriptLanguage.Specified(language)
+            languages.specified != null -> TranscriptLanguage.Specified(languages.specified)
+            judgesFinalTranscript && priority.urgent -> TranscriptLanguage.Unspecified
+            language != null && (identifies || judgesFinalTranscript) -> TranscriptLanguage.Specified(language)
             identifies -> TranscriptLanguage.Identify(languages, fallback)
             else -> TranscriptLanguage.Unspecified
         }

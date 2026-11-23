@@ -102,7 +102,7 @@ object SharedModelCatalog {
      */
     private const val QWEN3 = "$HF/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a"
     private const val WHISPER = "$HF/csukuangfj/sherpa-onnx-whisper-tiny/resolve/65176e2deb88badc814a94058666cadccc29b61c"
-    private val qwen3Asr = listOf(
+    val qwen3Asr = listOf(
         asrFile("Qwen3-ASR conv_frontend", "$QWEN3/conv_frontend.onnx", "qwen3-asr/conv_frontend.onnx", 44_148_281, "d22dc4423e0940e49884e903d2ea2f7e5567c14fc1aed97e4e26d6b8f208ef9e"),
         asrFile("Qwen3-ASR encoder", "$QWEN3/encoder.int8.onnx", "qwen3-asr/encoder.int8.onnx", 182_491_662, "60748d3e6744a57c9c91e1b17424a6c2990567e8adceb0783940c03ed98fa9d9"),
         asrFile("Qwen3-ASR decoder", "$QWEN3/decoder.int8.onnx", "qwen3-asr/decoder.int8.onnx", 755_914_231, "4f6885be5959ae26af3089d38ee7972c5fafbeeb1cf8d5e76eab6d8b61ca5771"),
@@ -116,9 +116,15 @@ object SharedModelCatalog {
         asrFile("言語の識別（Whisper tiny）decoder", "$WHISPER/tiny-decoder.int8.onnx", "whisper-tiny/tiny-decoder.int8.onnx", 89_855_401, "d2fece8dd42771f1df975c6c0445770d0c292bf7547c2cae04a6c0cc57540925"),
     )
 
-    fun recognition(model: SpeechModel): List<ModelFile> = when (model) {
+    private const val QWEN_GGUF = "$HF/ggml-org/Qwen3-ASR-0.6B-GGUF/resolve/b98bf4381df3b400b929dcaff0dc83b6dafe221b"
+    private fun gguf(name: String, size: Long, digest: String) = asrFile(name, "$QWEN_GGUF/$name", "qwen3-asr-gguf/$name", size, digest)
+    val qwenWeights = gguf("Qwen3-ASR-0.6B-Q8_0.gguf", 804_749_536, "05c9e10cecb37f6fc0cac0e786195dba82f12c15021f0b8a09473dbf3b6f090d")
+    val qwenProjector = gguf("mmproj-Qwen3-ASR-0.6B-Q8_0.gguf", 214_392_544, "3b5e371a03e7d14bc1b5a66f38ff3c5eec3a99b3f96deb72b3814da9adafb16d")
+    val qwenGguf = listOf(qwenWeights, qwenProjector)
+
+    fun recognition(model: SpeechModel, gguf: Boolean = false): List<ModelFile> = when (model) {
         SpeechModel.SENSE_VOICE -> senseVoice
-        SpeechModel.QWEN3_ASR -> qwen3Asr
+        SpeechModel.QWEN3_ASR -> if (gguf) qwenGguf else qwen3Asr
     }
 
     private fun asrFile(label: String, url: String, path: String, size: Long, sha256: String) =

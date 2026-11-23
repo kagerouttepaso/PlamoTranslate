@@ -15,11 +15,13 @@ import java.util.HexFormat
 
 internal data class ModelDownloadProgress(val bytes: Long, val verifying: Boolean = false)
 
-internal class DesktopModelDownloads(private val directory: Path) {
+internal class DesktopModelDownloads(private val directory: Path, private val space: (Path) -> Long = { Files.getFileStore(it).usableSpace }) {
     fun bytesAvailable(model: ModelFile): Long {
         val target = directory.resolve(model.path)
-        return if (sizeOf(target) == model.size) model.size else sizeOf(partial(target)).coerceIn(0L, model.size - 1)
+        return if (sizeOf(target) == model.size) model.size else partialBytes(model)
     }
+
+    fun partialBytes(model: ModelFile): Long = sizeOf(partial(directory.resolve(model.path))).coerceIn(0L, model.size - 1)
 
     suspend fun prepare(model: ModelFile, publish: (ModelDownloadProgress) -> Unit) {
         val target = directory.resolve(model.path)
@@ -31,7 +33,10 @@ internal class DesktopModelDownloads(private val directory: Path) {
         Files.createDirectories(target.parent)
         val partial = partial(target)
         val offset = sizeOf(partial).takeIf { it in 1..model.size } ?: 0L
-        if (offset < model.size) transfer(model, partial, offset, publish)
+        if (offset < model.size) {
+            if (space(target.parent) < model.size - offset) throw IOException("モデルを保存する空き容量が足りません。")
+            transfer(model, partial, offset, publish)
+        }
 
         publish(ModelDownloadProgress(model.size, verifying = true))
         if (!verify(partial, model)) {
@@ -104,13 +109,17 @@ internal class DesktopModelDownloads(private val directory: Path) {
         private fun sizeOf(path: Path): Long = if (Files.isRegularFile(path)) Files.size(path) else 0L
 
         suspend fun verify(path: Path, model: ModelFile): Boolean {
-            if (sizeOf(path) != model.size) return false
             val context = currentCoroutineContext()
+            return verifyBytes(path, model) { context.ensureActive() }
+        }
+
+        fun verifyBytes(path: Path, model: ModelFile, checkpoint: () -> Unit): Boolean {
+            if (sizeOf(path) != model.size) return false
             val digest = MessageDigest.getInstance("SHA-256")
             Files.newInputStream(path).use { input ->
                 val buffer = ByteArray(128 * 1024)
                 while (true) {
-                    context.ensureActive()
+                    checkpoint()
                     val count = input.read(buffer)
                     if (count < 0) break
                     digest.update(buffer, 0, count)

@@ -83,7 +83,7 @@ internal class DesktopSettings(private val directory: Path) : TranscriptionTuner
     }
 
     fun resetPerformance() = update {
-        listOf("threads", "spinWait", "threadPool", "mmap", "cpuOnly",
+        listOf("threads", "spinWait", "threadPool", "mmap", "cpuOnly", "asr.preference",
             parallelKey("manual", model, false), parallelKey("tuned", model, false),
             parallelKey("manual", model, true), parallelKey("tuned", model, true)).forEach(::remove)
     }

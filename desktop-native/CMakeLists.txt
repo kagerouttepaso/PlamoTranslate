@@ -32,10 +32,10 @@ get_filename_component(REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 add_subdirectory("${REPO_ROOT}/third_party/llama.cpp" build-llama)
 
 set(llm_src "${REPO_ROOT}/core-llm/src/main/cpp")
-add_library(plamo-llm SHARED "${llm_src}/plamo_llm.cpp" "${llm_src}/qwen_audio.cpp")
+add_library(plamo-llm SHARED "${llm_src}/plamo_llm.cpp" "${llm_src}/qwen_audio.cpp" display_driver.cpp)
 target_include_directories(plamo-llm PRIVATE ${JNI_INCLUDE_DIRS})
 target_compile_options(plamo-llm PRIVATE /utf-8)
-target_link_libraries(plamo-llm PRIVATE mtmd llama ggml)
+target_link_libraries(plamo-llm PRIVATE mtmd llama ggml user32 advapi32)
 
 add_library(mockingword-audio SHARED wasapi_capture.cpp)
 target_include_directories(mockingword-audio PRIVATE ${JNI_INCLUDE_DIRS})

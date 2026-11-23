@@ -1,6 +1,8 @@
 package app.plamotranslate.desktop
 
 import app.plamotranslate.pipeline.models.ModelFile
+import app.plamotranslate.pipeline.models.SharedModelCatalog
+import app.plamotranslate.pipeline.speech.SpeechModel
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
@@ -26,6 +28,49 @@ class DesktopModelDownloadsTest {
 
     private val content = ByteArray(512 * 1024) { (it % 251).toByte() }
     private val range = AtomicReference<String?>()
+
+    @Test
+    fun `容量不足では通信前に停止し以前のファイルを消さない`() = withModelServer { model ->
+        val directory = temporary.root.toPath()
+        val target = directory.resolve(model.path)
+        Files.createDirectories(target.parent)
+        Files.write(target, byteArrayOf(42))
+        val downloads = DesktopModelDownloads(directory) { 0L }
+        assertThrows(IOException::class.java) { runBlocking { downloads.prepare(model.copy(url = "offline:")) {} } }
+        assertArrayEquals(byteArrayOf(42), Files.readAllBytes(target))
+    }
+
+    @Test
+    fun `PC の旧版と片方だけの新版では使用可にしない`() {
+        val catalog = SharedModelCatalog
+        val directory = temporary.root.toPath()
+        val files = DesktopSpeechModels.requiredFiles(SpeechModel.QWEN3_ASR)
+        assertTrue(files.containsAll(catalog.qwenGguf))
+        assertTrue(catalog.recognition(SpeechModel.QWEN3_ASR).none { it in catalog.qwenGguf })
+        catalog.qwen3Asr.forEach { file ->
+            val target = directory.resolve(file.path)
+            Files.createDirectories(target.parent)
+            Files.write(target, byteArrayOf(1))
+        }
+        assertTrue(LegacySpeechFiles(directory).inspect().isEmpty())
+        val old = SettingsState(defaultPath = directory, catalogStatus = catalog.qwen3Asr.associateWith { it.size })
+        assertFalse(old.hasRecognition(SpeechModel.QWEN3_ASR))
+        assertFalse(old.copy(catalogStatus = mapOf(catalog.qwenWeights to catalog.qwenWeights.size)).hasRecognition(SpeechModel.QWEN3_ASR))
+        assertTrue(old.copy(catalogStatus = files.associateWith { it.size }).hasRecognition(SpeechModel.QWEN3_ASR))
+    }
+
+    @Test
+    fun `手動配置は通信せず照合し同じ容量でも異なる内容を拒む`() = withModelServer { model ->
+        val directory = temporary.root.toPath()
+        val target = directory.resolve(model.path)
+        Files.createDirectories(target.parent)
+        Files.write(target, content.reversedArray())
+        assertFalse(VerifiedSpeechFiles.matches(target, model))
+        Files.write(target, content)
+        assertTrue(VerifiedSpeechFiles.matches(target, model))
+        runBlocking { DesktopModelDownloads(directory).prepare(model.copy(url = "offline:")) {} }
+        assertArrayEquals(content, Files.readAllBytes(target))
+    }
 
     @Test
     fun resumesIntoNestedModelDirectory() = withModelServer { model ->

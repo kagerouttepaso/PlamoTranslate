@@ -30,6 +30,7 @@ dependencies {
     // 言語の識別のスコア（Whisper tiny を直接動かす）。漫画用OCRと同じ版（sherpa-onnx は ONNX Runtime を静的に組み込んでいて、名前がぶつからない）
     implementation(libs.onnxruntime.android)
     testImplementation(libs.junit)
+    testImplementation(project(":core-llm-jvm"))
     testImplementation(libs.kotlinx.coroutines.core)
     testImplementation(libs.onnxruntime.jvm)
     // 会話の録音を PC でリプレイする試験（ConversationReplayTest）が、端末と同じ VAD と書き起こしを使うため。
@@ -40,8 +41,9 @@ dependencies {
 // リプレイの試験は、PLAMO_SHERPA_LIB（sherpa-onnx の Windows 版の JNI の lib）があるときだけ動く（docs/手順/開発環境.md「会話の録音をリプレイする」）
 tasks.withType<Test>().configureEach {
     System.getenv("PLAMO_SHERPA_LIB")?.let { lib ->
-        systemProperty("java.library.path", lib)
-        environment("PATH", lib + File.pathSeparator + System.getenv("PATH"))
+        val directories = listOfNotNull(System.getenv("MOCKINGWORD_ASR_NATIVE"), lib).joinToString(File.pathSeparator)
+        systemProperty("java.library.path", directories)
+        environment("PATH", directories + File.pathSeparator + System.getenv("PATH"))
     }
 }
 

@@ -96,7 +96,7 @@ private fun PerformanceSettings(state: SettingsState, presenter: SettingsPresent
     FlowRow(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
         DesktopOutline(presenter::measureSpeed, enabled = ready) { Text("速さを測る") }
         DesktopOutline(presenter::tuneParallel, enabled = ready) { Text("同時に訳す数を自動調整") }
-        DesktopLink(presenter::resetPerformance, enabled = enabled) { Text("既定に戻す") }
+        DesktopLink(presenter::resetPerformance, enabled = enabled && state.canChangeRecognition) { Text("既定に戻す") }
     }
     state.tuningStatus?.let { Text(it) }
 }

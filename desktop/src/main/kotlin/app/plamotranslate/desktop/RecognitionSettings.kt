@@ -3,6 +3,7 @@ package app.plamotranslate.desktop
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -32,6 +33,16 @@ internal fun RecognitionSettings(
     Text("Qwen3-ASR の話者自動判定には Whisper tiny が必要です。",
         style = MaterialTheme.typography.bodySmall)
     val files = DesktopSpeechModels.downloadFiles(settings.model)
+    models.updateNotice(settings.model)?.let { Text(it) }
+    if (settings.model == SpeechModel.QWEN3_ASR && models.hasRecognition(settings.model)) {
+        DesktopLink({ modelPresenter.inspectLegacyFiles() }, enabled = enabled && !models.busy) { Text("旧 Qwen3-ASR のファイルを確認…") }
+        models.legacyFiles?.let { old ->
+            AlertDialog(onDismissRequest = { modelPresenter.finishLegacyFiles(false) }, title = { Text("旧モデルの整理") },
+                text = { Text(if (old.isEmpty()) "削除対象はありません。" else old.joinToString("\n") { it.path } + "\n合計 ${old.sumOf { it.size } / 1_048_576} MiB を削除しますか？") },
+                confirmButton = { DesktopButton({ modelPresenter.finishLegacyFiles(old.isNotEmpty()) }) { Text(if (old.isEmpty()) "閉じる" else "削除") } },
+                dismissButton = { if (old.isNotEmpty()) DesktopLink({ modelPresenter.finishLegacyFiles(false) }) { Text("取り消す") } })
+        }
+    }
     if (files.any { models.availableBytes(it) < it.size }) {
         DesktopOutline(
             onClick = { modelPresenter.prepareModels(recognition = settings.model) },

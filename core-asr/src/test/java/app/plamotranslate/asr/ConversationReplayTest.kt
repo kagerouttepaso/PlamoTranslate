@@ -1,6 +1,10 @@
 package app.plamotranslate.asr
 
 import app.plamotranslate.llm.Language
+import app.plamotranslate.llm.QwenAudioRecognizer
+import app.plamotranslate.pipeline.diagnostics.InferenceTarget
+import app.plamotranslate.pipeline.models.SharedModelCatalog
+import kotlinx.coroutines.runBlocking
 import app.plamotranslate.pipeline.conversation.ConversationSession
 import app.plamotranslate.pipeline.conversation.PartnerMode
 import app.plamotranslate.pipeline.speech.RecognitionJob
@@ -116,6 +120,8 @@ class ConversationReplayTest {
         val asr = System.getenv("PLAMO_REPLAY_ASR")?.let(::File)
         val out = System.getenv("PLAMO_REPLAY_OUT")?.let(::File)
         assumeTrue(wav != null && asr != null && out != null && System.getenv("PLAMO_SHERPA_LIB") != null)
+        val desktop = System.getenv("PLAMO_REPLAY_DESKTOP") == "1"
+        if (desktop) System.load(File(System.getenv("PLAMO_SHERPA_LIB"), "onnxruntime.dll").absolutePath)
         val cuts = System.getenv("PLAMO_REPLAY_CUTS")?.split(',')?.filter { it.isNotBlank() }
             ?.map { (it.trim().toDouble() * SAMPLE_RATE).toLong() }?.sorted().orEmpty().toMutableList()
         val partner = System.getenv("PLAMO_REPLAY_PARTNER")?.takeIf { it != "auto" }
@@ -127,9 +133,18 @@ class ConversationReplayTest {
         val profile = SegmentationProfile.CONVERSATION
         val recognizer: SpeechRecognizer = when (model) {
             SpeechModel.SENSE_VOICE -> SenseVoiceRecognizer.load(asr!!)
-            SpeechModel.QWEN3_ASR -> Qwen3Recognizer.load(File(asr, Qwen3Recognizer.DIR), 8)
+            SpeechModel.QWEN3_ASR -> System.getenv("MOCKINGWORD_ASR_FIXTURES")?.takeIf { desktop }?.let { directory ->
+                val native = requireNotNull(System.getenv("MOCKINGWORD_ASR_NATIVE"))
+                val gpu = System.getenv("MOCKINGWORD_ASR_VULKAN") == "1"
+                runBlocking { QwenAudioRecognizer.load(File(directory, File(SharedModelCatalog.qwenWeights.path).name),
+                    File(directory, File(SharedModelCatalog.qwenProjector.path).name), native, "", InferenceTarget(gpu, gpu)) }
+            } ?: Qwen3Recognizer.load(File(asr, Qwen3Recognizer.DIR), 8)
         }
-        val identifier = if (model == SpeechModel.QWEN3_ASR) WhisperLanguageIdentifier.load(File(asr, WhisperLanguageIdentifier.DIR), 4) else null
+        val identifier = when {
+            model != SpeechModel.QWEN3_ASR -> null
+            desktop -> JvmWhisperIdentifier(asr!!, 2)
+            else -> WhisperLanguageIdentifier.load(File(asr, WhisperLanguageIdentifier.DIR), 4)
+        }
         val vad = SileroVoiceActivity.load(File(asr, "silero_vad.onnx"), profile.phraseSilenceSeconds)
         val runner = RecognitionRunner(recognizer, identifier)
         val queue = RecognitionQueue()
@@ -149,6 +164,7 @@ class ConversationReplayTest {
             identifies = identifier != null,
             profile = profile,
             heavy = model.heavy,
+            judgesFinalTranscript = recognizer.judgesFinalTranscript,
             emit = { event ->
                 val u = (event as? SpeechEvent.CardFinished)?.utterance
                 if (u != null) {

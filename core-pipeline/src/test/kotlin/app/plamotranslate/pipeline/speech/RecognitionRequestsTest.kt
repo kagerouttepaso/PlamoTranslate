@@ -9,6 +9,22 @@ class RecognitionRequestsTest {
     private val jobs = mutableListOf<RecognitionJob>()
     private var now = 0L
 
+    @Test
+    fun `確定にはモデルの判定を使い途中は話者に従い固定入力では常に指定を守る`() {
+        val requests = RecognitionRequests(true, true, jobs::add, { now }, JobIds(), true)
+        for (priority in listOf(RecognitionPriority.PARTIAL, RecognitionPriority.PHRASE, RecognitionPriority.FINAL)) {
+            for (specified in listOf(null, "ko")) {
+                requests.transcribe(1, floatArrayOf(), 0, priority, "試験", SpeechLanguages(specified = specified), "ja", "en") {}
+                val expected = when {
+                    specified != null -> TranscriptLanguage.Specified(specified)
+                    priority == RecognitionPriority.PARTIAL -> TranscriptLanguage.Specified("ja")
+                    else -> TranscriptLanguage.Unspecified
+                }
+                assertEquals(expected, (jobs.last() as RecognitionJob.Transcribe).language)
+            }
+        }
+    }
+
     private fun requests(heavy: Boolean) = RecognitionRequests(identifies = true, heavy = heavy, submit = { jobs += it }, clock = { now }, jobIds = JobIds())
 
     /** 途中結果を1件頼み、[millis] たってから結果を返す。 */

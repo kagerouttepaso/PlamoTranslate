@@ -94,14 +94,16 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
     val nativeDir = checkNotNull(System.getProperty("compose.application.resources.dir"))
     preloadDependencies(nativeDir)
     val settings = DesktopSettings(directory)
-    val loader = DesktopEngineLoader(nativeDir, !java.lang.Boolean.getBoolean("mockingword.cpuOnly"), settings)
+    val permitGpu = !java.lang.Boolean.getBoolean("mockingword.cpuOnly")
+    val loader = DesktopEngineLoader(nativeDir, permitGpu, settings)
     val models = ModelHost(
         CoroutineScope(scope.coroutineContext + Dispatchers.Default), loader, { settings.model },
         { TranslationEngine.DEFAULT_PARALLEL },
     )
     val translations = DesktopTranslations(models)
     val pdfCache = DesktopPdfCache(directory.resolve("cache/pdf-translations/v1"))
-    val asr = DesktopAsr(settings.modelDirectory)
+    val qwen = DesktopQwen(settings, nativeDir, permitGpu)
+    val asr = DesktopAsr(settings.modelDirectory, qwen)
     val audioPreferences = AudioPreferences(directory) {
         SpeechModel.entries.firstOrNull(asr::hasRequiredFiles) ?: SpeechModel.DEFAULT
     }
@@ -146,7 +148,7 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
     return DesktopComponents(
         NavigationPresenter(),
         text,
-        SettingsPresenter(scope, settings, models, audio, listOf(pdfCache), directory.resolve("logs")) { current ->
+        SettingsPresenter(scope, settings, models, audio, listOf(pdfCache), directory.resolve("logs"), qwen) { current ->
             val chooser = JFileChooser(current.parent.toFile()).apply {
                 dialogTitle = "翻訳モデルを選ぶ"
                 isAcceptAllFileFilterUsed = false

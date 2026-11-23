@@ -51,6 +51,7 @@ internal fun ModelSetupScreen(
             "$name（約${size / 1_000_000} MB）"
         }
         Text("音声認識には Silero VAD も準備します。", style = MaterialTheme.typography.bodySmall)
+        state.updateNotice(recognition)?.let { Text(it) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         val download = state.download
         if (download == null) {

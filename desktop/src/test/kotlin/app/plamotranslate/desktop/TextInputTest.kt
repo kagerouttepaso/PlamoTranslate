@@ -72,7 +72,7 @@ class TextInputTest {
         }
         return TextPresenter(backgroundScope, MutableStateFlow(ModelState.Ready(Path.of("fake"), 1, 1, false, 0)),
             { scope, options -> TranslationStream(scope, { TranslationStream.Backend(FakeTranslation, ModelOrigin("fake", 0)) }, options) },
-            { "Hello" }, { clipboard.add(it) }, DesktopTextVoice(audio, { FakeSpeech() }, StandardTestDispatcher(testScheduler)),
+            { "Hello" }, { clipboard.add(it) }, DesktopTextVoice(audio, { _, _ -> FakeSpeech() }, StandardTestDispatcher(testScheduler)),
             { DesktopRecognitionSettings() }, { targets.add(it) })
     }
 

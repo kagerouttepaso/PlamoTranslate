@@ -71,8 +71,8 @@ internal fun ModelDownloadControls(progress: ModelPreparationProgress, cancel: (
 internal fun BackendSettings(state: SettingsState, presenter: SettingsPresenter) {
     val enabled = !state.busy && state.model !is ModelState.Loading
     Row(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
-        DesktopOutline(onClick = { presenter.setCpuOnly(false) }, enabled = enabled && state.cpuOnly) { Text("Vulkan を優先") }
-        DesktopOutline(onClick = { presenter.setCpuOnly(true) }, enabled = enabled && !state.cpuOnly) { Text("CPU だけで動かす") }
+        DesktopOutline(onClick = { presenter.setCpuOnly(false) }, enabled = enabled && state.canChangeRecognition && state.cpuOnly) { Text("Vulkan を優先") }
+        DesktopOutline(onClick = { presenter.setCpuOnly(true) }, enabled = enabled && state.canChangeRecognition && !state.cpuOnly) { Text("CPU だけで動かす") }
     }
     Text("実行先の設定：${if (state.cpuOnly) "CPU" else "Vulkan 優先"}", style = MaterialTheme.typography.bodySmall)
     if (!state.cpuOnly) Text("CPU 専用で起動した後に Vulkan を有効にするには、アプリを起動し直してください。", style = MaterialTheme.typography.bodySmall)
@@ -81,13 +81,15 @@ internal fun BackendSettings(state: SettingsState, presenter: SettingsPresenter)
         DesktopOutline(onClick = { presenter.retryGpu(InferenceRole.Translation) }, enabled = enabled) { Text("翻訳の GPU をもう一度試す") }
     }
     Text("Qwen3-ASR の書き起こし（次の準備から適用）")
+    Text("直近の準備：${state.transcriptionStatus}")
+    if (!state.canChangeRecognition) Text("実行先を変えるには入力を停止し、必要な会話を保存してから履歴を消去してください。")
     Row(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
         TranscriptionPreference.entries.forEach { preference ->
-            DesktopOutline(onClick = { presenter.setTranscriptionPreference(preference) }, enabled = enabled && preference != state.transcriptionPreference) {
+            DesktopOutline(onClick = { presenter.setTranscriptionPreference(preference) }, enabled = enabled && state.canChangeRecognition && preference != state.transcriptionPreference) {
                 Text(if (preference == TranscriptionPreference.AUTO) "自動" else preference.name)
             }
         }
     }
     state.transcriptionFallback?.let { Text("書き起こしは CPU に切り替えました：$it") }
-    DesktopOutline(onClick = { presenter.retryGpu(InferenceRole.Transcription) }, enabled = enabled) { Text("書き起こしの GPU をもう一度試す") }
+    DesktopOutline(onClick = { presenter.retryGpu(InferenceRole.Transcription) }, enabled = enabled && state.canChangeRecognition && !state.cpuOnly) { Text("書き起こしの GPU をもう一度試す") }
 }
