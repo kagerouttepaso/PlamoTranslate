@@ -27,6 +27,7 @@
 #include "ggml-backend.h"
 #include "ggml-cpu.h"
 #include "llama.h"
+#include "llama_jni.h"
 
 #define TAG "PlamoTranslate"
 #define LOGI(...) plamo_log(LOG_PRIORITY_INFO, __VA_ARGS__)
@@ -255,11 +256,14 @@ void load_windows_cpu(const std::string & lib_dir) {
 // 読み込んだCPUバックエンドのファイル名（設定の画面に出す）
 std::string g_cpu_backend;
 
+}  // namespace
+
 ggml_backend_dev_t gpu_device() {
     auto device = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
     return device ? device : ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU);
 }
 
+namespace {
 void find_cpu_functions() {
     ggml_backend_dev_t cpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
     if (!cpu) {
@@ -270,6 +274,8 @@ void find_cpu_functions() {
     g_threadpool_new = (threadpool_new_fn) ggml_backend_reg_get_proc_address(reg, "ggml_threadpool_new");
     g_threadpool_free = (threadpool_free_fn) ggml_backend_reg_get_proc_address(reg, "ggml_threadpool_free");
 }
+
+}  // namespace
 
 std::string to_std_string(JNIEnv *env, jstring s) {
 #if defined(_WIN32)
@@ -290,6 +296,7 @@ std::string to_std_string(JNIEnv *env, jstring s) {
     return result;
 }
 
+namespace {
 std::vector<llama_token> tokenize(const llama_vocab *vocab, const std::string &text, bool add_special) {
     // parse_special を有効にしないと <|plamo:tag|> などが特殊トークンにならない
     int n = -llama_tokenize(vocab, text.c_str(), (int32_t) text.size(), nullptr, 0, add_special, true);

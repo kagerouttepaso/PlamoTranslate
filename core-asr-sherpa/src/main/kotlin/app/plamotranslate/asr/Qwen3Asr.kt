@@ -2,7 +2,7 @@ package app.plamotranslate.asr
 
 import app.plamotranslate.pipeline.speech.Recognition
 import app.plamotranslate.pipeline.speech.SpeechEngine
-import app.plamotranslate.pipeline.speech.LanguageSource
+import app.plamotranslate.pipeline.speech.QwenTranscript
 import app.plamotranslate.pipeline.speech.SpeechRecognizer
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineQwen3AsrModelConfig
@@ -26,14 +26,11 @@ class Qwen3Recognizer private constructor(private val recognizer: OfflineRecogni
     override fun recognizeAs(samples: FloatArray, language: String?): Recognition {
         val stream = recognizer.createStream()
         try {
-            val specified = language?.takeIf { it in NAMES }
-            specified?.let { stream.setOption("language", NAMES.getValue(it)) }
+            val specified = language?.takeIf { it in QwenTranscript.names }
+            specified?.let { stream.setOption("language", QwenTranscript.names.getValue(it)) }
             stream.acceptWaveform(samples, SpeechEngine.SAMPLE_RATE)
             recognizer.decode(stream)
-            // 終わりのトークン（<|endoftext|> など）の後ろは、モデルが作り出した続き（2026-11-15のベータで、日本語の後に英語の記事の文を出した）
-            val text = recognizer.getResult(stream).text.substringBefore("<|").trim()
-            return Recognition(if (isRoleLeak(text)) "" else text, specified,
-                source = if (specified != null) LanguageSource.SPECIFIED else LanguageSource.GUESSED)
+            return QwenTranscript.parse(recognizer.getResult(stream).text, specified)
         } finally {
             stream.release()
         }
@@ -44,20 +41,6 @@ class Qwen3Recognizer private constructor(private val recognizer: OfflineRecogni
     companion object {
         const val DIR = "qwen3-asr"
 
-        /**
-         * 話していない短い音声（息・語尾の残り）に、モデルが会話の型の役の名前（「system」）を、指定した言語で書いて返したもの
-         * （「システム」「시스템」も）。役の名前だけの結果は、何も話していないものとして空にする（2026-11-15 の会話の録音で、
-         * 0.4〜1.7秒の音声から41回出て、確定の文の頭や末尾につながっていた）。文の中の「system」は残す。
-         */
-        internal fun isRoleLeak(text: String): Boolean {
-            val words = text.lowercase().split(NON_WORD).filter { it.isNotEmpty() }
-            return words.isNotEmpty() && words.any { it in ROLE_WORDS } && words.all { it in ROLE_WORDS || it == "the" }
-        }
-
-        /** 会話の型の役の名前が、言語ごとに書かれた形。 */
-        private val ROLE_WORDS = setOf("system", "システム", "시스템")
-        private val NON_WORD = Regex("[^\\p{L}\\p{N}]+")
-
         val FILES = listOf("conv_frontend.onnx", "encoder.int8.onnx", "decoder.int8.onnx", "tokenizer/vocab.json")
 
         /**
@@ -65,16 +48,6 @@ class Qwen3Recognizer private constructor(private val recognizer: OfflineRecogni
          * 翻訳は GPU で動くので、CPU を認識に多く回す。
          */
         const val THREADS = 6
-
-        /** Qwen3-ASR が聞ける30言語のコードと、言語を指定するときの名前。PCで「Russian」「ru」のどちらも受け付けた。 */
-        val NAMES = mapOf(
-            "zh" to "Chinese", "en" to "English", "yue" to "Cantonese", "ar" to "Arabic", "de" to "German",
-            "fr" to "French", "es" to "Spanish", "pt" to "Portuguese", "id" to "Indonesian", "it" to "Italian",
-            "ko" to "Korean", "ru" to "Russian", "th" to "Thai", "vi" to "Vietnamese", "ja" to "Japanese",
-            "tr" to "Turkish", "hi" to "Hindi", "ms" to "Malay", "nl" to "Dutch", "sv" to "Swedish",
-            "da" to "Danish", "fi" to "Finnish", "pl" to "Polish", "cs" to "Czech", "tl" to "Filipino",
-            "fa" to "Persian", "el" to "Greek", "hu" to "Hungarian", "mk" to "Macedonian", "ro" to "Romanian",
-        )
 
         fun load(dir: File, threads: Int = THREADS): Qwen3Recognizer = Qwen3Recognizer(
             OfflineRecognizer(

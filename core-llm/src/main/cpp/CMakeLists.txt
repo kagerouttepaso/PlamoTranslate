@@ -46,6 +46,7 @@ set(GGML_SYSTEM_ARCH      ARM CACHE STRING "" FORCE)
 set(LLAMA_BUILD_COMMON    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS     OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS     OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_MTMD      ON  CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES  OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_APP       OFF CACHE BOOL "" FORCE)
@@ -58,7 +59,7 @@ set(GGML_OPENCL           ON  CACHE BOOL "" FORCE)
 
 add_subdirectory(${THIRD_PARTY}/llama.cpp build-llama)
 
-add_library(plamo-llm SHARED plamo_llm.cpp)
-target_link_libraries(plamo-llm PRIVATE llama ggml android log)
+add_library(plamo-llm SHARED plamo_llm.cpp qwen_audio.cpp)
+target_link_libraries(plamo-llm PRIVATE mtmd llama ggml android log)
 # 16KBページの端末でも読み込めるようにする（NDK r28以降は既定だが明示する）
 target_link_options(plamo-llm PRIVATE "-Wl,-z,max-page-size=16384")

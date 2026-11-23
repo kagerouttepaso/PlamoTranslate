@@ -40,6 +40,10 @@ internal object LlamaNative {
     ): Long
     external fun nativeFree(handle: Long)
 
+    external fun nativeLoadAudio(model: String, projector: String, gpu: Boolean, encoderThreads: Int, batchThreads: Int, generationThreads: Int): Long
+    external fun nativeTranscribe(handle: Long, samples: FloatArray, language: String): ByteArray
+    external fun nativeFreeAudio(handle: Long)
+
     /** [nativeTranslateJobs] の受け渡し口。どれも推論のスレッドから呼ばれる。 */
     interface JobCallback {
         /** 次の依頼の番号。無ければ -1。 */

@@ -79,7 +79,7 @@ fun main() {
  * 配布物（DLL を PATH に足さずに起動する）では、これをしないと読み込みに失敗する。
  */
 private fun preloadDependencies(nativeDir: String) {
-    listOf("ggml-base.dll", "ggml.dll", "llama.dll", "pdfium.dll").forEach { name ->
+    listOf("ggml-base.dll", "ggml.dll", "llama.dll", "mtmd.dll", "pdfium.dll").forEach { name ->
         val file = java.io.File(nativeDir, name)
         if (file.isFile) System.load(file.absolutePath)
     }
