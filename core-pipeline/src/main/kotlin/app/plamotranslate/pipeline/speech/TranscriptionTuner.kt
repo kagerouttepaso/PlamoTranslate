@@ -50,30 +50,38 @@ object TranscriptionTuner {
             check(samples.all { reference.matches(it.result) }) { "試走の本文または言語が正解と一致しません" }
             TranscriptionChoice(candidate, samples.map { it.nanos }.sorted()[1], reason)
         }
-        suspend fun ready(choice: TranscriptionChoice, save: Boolean): Pair<T, TranscriptionChoice> {
+        suspend fun ready(choice: TranscriptionChoice): Pair<T, TranscriptionChoice> {
             val engine = load(choice.candidate)
             try {
                 check(reference.matches(trial(engine).result)) { "ならし運転の本文または言語が正解と一致しません" }
                 currentCoroutineContext().ensureActive()
-                if (save) store.write(key, choice)
                 return engine to choice
             } catch (error: Throwable) { engine.close(); throw error }
         }
-        if (cached != null && !cached.candidate.gpu) return ready(cached, false)
-        suspend fun fastestCpu() = cpus.map { measure(it, "CPU の試走結果を採用") }.minBy { it.medianNanos }
+        fun save(prepared: Pair<T, TranscriptionChoice>): Pair<T, TranscriptionChoice> {
+            try { store.write(key, prepared.second) } catch (error: Throwable) { prepared.first.close(); throw error }
+            return prepared
+        }
+        if (cached != null && !cached.candidate.gpu) return ready(cached)
+        suspend fun fastestCpu() = cpus.map { measure(it, if (preference == TranscriptionPreference.CPU) "CPU を指定" else "CPU の試走結果を採用") }.minBy { it.medianNanos }
         val cpu = if (cached == null && (!compareGpu || preference != TranscriptionPreference.GPU)) fastestCpu() else null
         var saveCpu = automatic && !compareGpu
         if (compareGpu && beginGpu()) {
             var failure: String? = null
+            var prepared: Pair<T, TranscriptionChoice>? = null
             try {
-                if (cached != null) return ready(cached, false)
-                val measured = measure(gpu, if (automatic) "GPU の試走結果を採用" else "GPU を指定")
-                if (cpu == null || measured.medianNanos <= cpu.medianNanos * GPU_RATIO) return ready(measured, automatic)
-                saveCpu = automatic
+                val measured = cached ?: measure(gpu, if (automatic) "GPU の試走結果を採用" else "GPU を指定")
+                if (cpu == null || measured.medianNanos <= cpu.medianNanos * GPU_RATIO) prepared = ready(measured)
+                else saveCpu = automatic
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { failure = error.message ?: "GPU の準備に失敗しました" }
-            finally { endGpu(failure) }
+            finally {
+                try { endGpu(failure) } catch (error: Throwable) { prepared?.first?.close(); throw error }
+            }
+            prepared?.let { return if (automatic && cached == null) save(it) else it }
         }
-        return ready(cpu ?: fastestCpu(), saveCpu)
+        val selected = cpu ?: fastestCpu()
+        val prepared = ready(if (saveCpu && compareGpu) selected.copy(reason = "GPU は CPU より十分には速くありません") else selected)
+        return if (saveCpu) save(prepared) else prepared
     }
 }
