@@ -5,6 +5,9 @@ import app.plamotranslate.pipeline.diagnostics.GpuWork
 import app.plamotranslate.pipeline.speech.RecognitionPriority
 import app.plamotranslate.pipeline.speech.QwenTranscript
 import app.plamotranslate.pipeline.speech.Recognition
+import app.plamotranslate.pipeline.models.SharedModelCatalog
+import app.plamotranslate.pipeline.speech.TranscriptionChoice
+import app.plamotranslate.pipeline.speech.TranscriptionPreference
 import app.plamotranslate.pipeline.speech.TranscriptionTuner
 import app.plamotranslate.pipeline.speech.SpeechRecognizer
 import kotlinx.coroutines.runBlocking
@@ -88,6 +91,19 @@ class QwenAudioRecognizer private constructor(private val handle: Long, private 
     }
 
     companion object {
+        /** 両 OS の試走とならし運転で同じ音声、候補、実装を使う。 */
+        suspend fun prepare(
+            models: File, nativeDir: String, variant: String, target: InferenceTarget,
+            processors: Int, threads: Int, preference: TranscriptionPreference, environment: TranscriptionTuner.Environment,
+            store: TranscriptionTuner.Store, beginGpu: () -> Boolean, endGpu: (String?) -> Unit,
+        ): Pair<QwenAudioRecognizer, TranscriptionChoice> =
+            TranscriptionTuner.prepare(TranscriptionTuner.cpuCandidates(processors, threads), target.useGpu,
+                preference, environment, QwenTrialAudio.reference, store, beginGpu, endGpu, { candidate ->
+                    load(File(models, SharedModelCatalog.qwenWeights.path), File(models, SharedModelCatalog.qwenProjector.path),
+                        nativeDir, variant, target.copy(requestGpu = candidate.gpu),
+                        Threads(candidate.batch, candidate.batch, candidate.generation))
+                }, { it.trial(QwenTrialAudio.samples) })
+
         suspend fun load(model: File, projector: File, nativeDir: String, cpuVariant: String, target: InferenceTarget, threads: Threads = Threads()): QwenAudioRecognizer {
             val runtime = LlamaRuntime.process
             return runtime.onDevice(target.useGpu) {

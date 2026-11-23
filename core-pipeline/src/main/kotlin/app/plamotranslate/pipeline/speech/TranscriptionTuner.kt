@@ -6,7 +6,19 @@ import kotlinx.coroutines.ensureActive
 
 enum class TranscriptionPreference { AUTO, CPU, GPU }
 data class TranscriptionCandidate(val gpu: Boolean, val batch: Int, val generation: Int)
-data class TranscriptionChoice(val candidate: TranscriptionCandidate, val medianNanos: Long, val reason: String)
+data class TranscriptionChoice(val candidate: TranscriptionCandidate, val medianNanos: Long, val reason: String) {
+    fun encode() = listOf(candidate.gpu, candidate.batch, candidate.generation, medianNanos, reason).joinToString("|")
+
+    companion object {
+        fun decode(value: String?): TranscriptionChoice? {
+            val fields = value?.split('|', limit = 5) ?: return null
+            if (fields.size != 5) return null
+            val candidate = TranscriptionCandidate(fields[0].toBooleanStrictOrNull() ?: return null,
+                fields[1].toIntOrNull() ?: return null, fields[2].toIntOrNull() ?: return null)
+            return TranscriptionChoice(candidate, fields[3].toLongOrNull() ?: return null, fields[4])
+        }
+    }
+}
 
 object TranscriptionTuner {
     private const val GPU_RATIO = 0.8

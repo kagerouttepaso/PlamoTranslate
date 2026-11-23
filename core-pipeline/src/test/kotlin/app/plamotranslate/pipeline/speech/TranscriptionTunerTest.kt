@@ -54,6 +54,24 @@ class TranscriptionTunerTest {
         assertEquals(listOf(TranscriptionCandidate(false, 2, 2)), cpus)
     }
 
+    @Test fun `環境で使えるスレッド数の組だけを試し最速の組を保存する`() = runTest {
+        val candidates = TranscriptionTuner.cpuCandidates(8)
+        val split = TranscriptionCandidate(false, 8, 4)
+        assertEquals(listOf(TranscriptionCandidate(false, 4, 4), TranscriptionCandidate(false, 6, 6), split), candidates)
+        val tried = mutableListOf<TranscriptionCandidate>()
+        class Engine(val candidate: TranscriptionCandidate) : AutoCloseable { override fun close() {} }
+        suspend fun prepare() = TranscriptionTuner.prepare(candidates, false, TranscriptionPreference.AUTO,
+            environment, reference, store, { error("GPU は無効") }, {}, { Engine(it).also { tried.add(it.candidate) } },
+            { TranscriptionTuner.Sample(Recognition("Hello", "en"), if (it.candidate == split) 70 else 100) })
+        val (engine, choice) = prepare()
+        engine.close()
+        assertEquals(split, choice.candidate)
+        assertEquals(choice, TranscriptionChoice.decode(choice.encode()))
+        tried.clear()
+        prepare().first.close()
+        assertEquals(listOf(split), tried)
+    }
+
     @Test fun `保存失敗はGPU障害にせず準備済みの認識器を閉じる`() = runTest {
         onWrite = { error("保存失敗") }
         assertEquals("保存失敗", runCatching { prepare(80) }.exceptionOrNull()?.message)

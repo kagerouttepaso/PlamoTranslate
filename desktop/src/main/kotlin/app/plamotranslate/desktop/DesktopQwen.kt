@@ -53,13 +53,9 @@ internal class DesktopQwen(private val settings: DesktopSettings, private val na
                 val environment = TranscriptionTuner.Environment(weights.sha256, projector.sha256, runtime,
                     listOf("os.name", "os.version", "os.arch").joinToString { System.getProperty(it) },
                     "${System.getenv("PROCESSOR_IDENTIFIER")?.takeIf { it.isNotBlank() } ?: unknownEnvironment}:$processors", if (gpu) driver else "CPU", QwenTrialAudio.version)
-                val (engine, choice) = TranscriptionTuner.prepare(TranscriptionTuner.cpuCandidates(processors, threads), gpu,
-                    preference, environment, QwenTrialAudio.reference, settings, { settings.beginGpuLoad(role) },
-                    { settings.endGpuLoad(role, it) }, { candidate ->
-                        QwenAudioRecognizer.load(settings.modelDirectory.resolve(weights.path).toFile(),
-                            settings.modelDirectory.resolve(projector.path).toFile(), nativeDir, "", target.copy(requestGpu = candidate.gpu),
-                            QwenAudioRecognizer.Threads(candidate.batch, candidate.batch, candidate.generation))
-                    }, { it.trial(QwenTrialAudio.samples) })
+                val (engine, choice) = QwenAudioRecognizer.prepare(settings.modelDirectory.toFile(), nativeDir, "",
+                    target.copy(requestGpu = gpu), processors, threads, preference, environment, settings,
+                    { settings.beginGpuLoad(role) }, { settings.endGpuLoad(role, it) })
                 val candidate = choice.candidate
                 val reason = settings.gpuFallback(role) ?: if (!gpu && preference == TranscriptionPreference.GPU) "GPU を使用できません" else choice.reason
                 status.value = "${if (candidate.gpu) "Vulkan" else "CPU"}（${candidate.batch}/${candidate.generation} スレッド）：$reason"

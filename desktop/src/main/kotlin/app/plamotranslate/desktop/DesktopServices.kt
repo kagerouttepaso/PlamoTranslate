@@ -3,7 +3,6 @@ package app.plamotranslate.desktop
 import app.plamotranslate.pipeline.diagnostics.InferenceRole
 import app.plamotranslate.pipeline.speech.TranscriptionTuner
 import app.plamotranslate.pipeline.speech.TranscriptionChoice
-import app.plamotranslate.pipeline.speech.TranscriptionCandidate
 import app.plamotranslate.pipeline.speech.TranscriptionPreference
 import app.plamotranslate.pipeline.diagnostics.InferenceTarget
 import app.plamotranslate.llm.LlamaRuntime
@@ -107,17 +106,10 @@ internal class DesktopSettings(private val directory: Path) : TranscriptionTuner
 
     fun saveTranscriptionPreference(value: TranscriptionPreference) = update { setProperty("asr.preference", value.name) }
 
-    override fun read(key: String): TranscriptionChoice? {
-        val fields = properties.getProperty("asr.trial.$key")?.split('|', limit = 5) ?: return null
-        if (fields.size != 5) return null
-        val candidate = TranscriptionCandidate(fields[0].toBooleanStrictOrNull() ?: return null,
-            fields[1].toIntOrNull() ?: return null, fields[2].toIntOrNull() ?: return null)
-        return TranscriptionChoice(candidate, fields[3].toLongOrNull() ?: return null, fields[4])
-    }
+    override fun read(key: String) = TranscriptionChoice.decode(properties.getProperty("asr.trial.$key"))
 
     override fun write(key: String, choice: TranscriptionChoice) = update {
-        val candidate = choice.candidate
-        setProperty("asr.trial.$key", listOf(candidate.gpu, candidate.batch, candidate.generation, choice.medianNanos, choice.reason).joinToString("|"))
+        setProperty("asr.trial.$key", choice.encode())
     }
 
     @Synchronized
