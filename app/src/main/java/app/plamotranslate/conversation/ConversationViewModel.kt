@@ -179,7 +179,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
      */
     private fun attach(engine: SpeechEngine) {
         engine.languages = session.speechLanguages
-        viewModelScope.launch { engine.events.collect { onEvent(Event.Speech(it)) } }
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) { engine.events.collect { onEvent(Event.Speech(it)) } }
         viewModelScope.launch {
             engine.load.collect { load ->
                 if (load.behindSeconds != _state.value.lagSeconds) _state.update { it.copy(lagSeconds = load.behindSeconds) }

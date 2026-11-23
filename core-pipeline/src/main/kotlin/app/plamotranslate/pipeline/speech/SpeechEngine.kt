@@ -89,7 +89,7 @@ interface SpeechEngine : AutoCloseable {
      */
     var languages: SpeechLanguages
 
-    /** 出来事の届け先。購読開始からの出来事が発生順に届く。 */
+    /** 出来事の届け先。購読開始からの出来事が発生順に届き、それより前の出来事は届かない。[accept] の前に購読を始める。 */
     val events: Flow<SpeechEvent>
 
     /** 認識の混み具合。最新の状態を購読する。 */
