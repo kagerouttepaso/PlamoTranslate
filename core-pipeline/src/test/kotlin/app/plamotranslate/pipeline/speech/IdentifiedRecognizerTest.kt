@@ -34,7 +34,7 @@ class IdentifiedRecognizerTest {
     @Test
     fun 識別した言語が会話の言語なら指定して書き起こす() {
         val asr = FakeRecognizer("Alice et moi sommes allés à Paris")
-        val r = IdentifiedRecognizer(FakeIdentifier("fr"), asr).recognize(audio, SpeechLanguages(setOf("ja", "fr")))
+        val r = IdentifiedRecognizer(FakeIdentifier("fr"), asr).identifyAndRecognize(audio, SpeechLanguages(setOf("ja", "fr")))
         assertEquals("fr", asr.requested)
         assertEquals("fr", r.lang)
     }
@@ -43,14 +43,14 @@ class IdentifiedRecognizerTest {
     fun 会話の言語の外の言語は指定しない() {
         // 端末で、アラビア語を Whisper tiny がトルコ語と誤った。トルコ語を指定すると書き起こしが崩れるので、会話の言語の中で比べる
         val asr = FakeRecognizer("إطلالات مكياج عيون ذهبية")
-        IdentifiedRecognizer(FakeIdentifier("tr"), asr).recognize(audio, SpeechLanguages(setOf("ja", "ar")))
+        IdentifiedRecognizer(FakeIdentifier("tr"), asr).identifyAndRecognize(audio, SpeechLanguages(setOf("ja", "ar")))
         assertTrue(asr.requested in setOf("ja", "ar"))
     }
 
     @Test
     fun 文字の種類が同じ言語どうしは決めない() {
         val asr = FakeRecognizer("Guten Tag")
-        val r = IdentifiedRecognizer(FakeIdentifier(null), asr).recognize(audio, SpeechLanguages(setOf("en", "de")))
+        val r = IdentifiedRecognizer(FakeIdentifier(null), asr).identifyAndRecognize(audio, SpeechLanguages(setOf("en", "de")))
         assertNull(r.lang)
     }
 
@@ -75,7 +75,7 @@ class IdentifiedRecognizerTest {
     fun 識別できなければカードの言語として書き起こす() {
         // 言語を指定しないと Qwen3-ASR が中国語で書くことがあるので、カードの言語を渡す
         val asr = FakeRecognizer("ですね")
-        val r = IdentifiedRecognizer(FakeIdentifier(null), asr).recognize(audio, SpeechLanguages(setOf("ja", "ru")), fallback = "ja")
+        val r = IdentifiedRecognizer(FakeIdentifier(null), asr).identifyAndRecognize(audio, SpeechLanguages(setOf("ja", "ru")), fallback = "ja")
         assertEquals("ja", asr.requested)
         assertEquals("ja", r.lang)
     }

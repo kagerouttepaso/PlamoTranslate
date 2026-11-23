@@ -6,6 +6,7 @@ package app.plamotranslate.pipeline.speech
  * 音声は頼んだ時点の写しを持つので、結果が届くまでにためた音声が区切られても影響しない。位置は聞き始めからのサンプル数。
  */
 sealed interface RecognitionJob {
+    val startAt: Long get() = endAt - samples.size
     val id: Long
 
     /** 頼んだカード。結果が届いたときに、まだ同じカードかを見分ける。 */
@@ -23,11 +24,7 @@ sealed interface RecognitionJob {
     /** ログに出す目的（話した言葉は含めない）。 */
     val purpose: String
 
-    /**
-     * 書き起こす。[language] があれば、その言語として書き起こす（識別を省く）。無ければ、言語を識別できる認識器は
-     * 識別してから書き起こし、識別できなければ [fallback] として書き起こす。言語を自分で判定する認識器（SenseVoice）は、
-     * [language] を使わず自分の判定で書き起こす（話し手の言語は、その認識器には要らない）。
-     */
+    /** 書き起こす言語を指定するか、モデルの判定を使うか、識別して指定するかを区別する。 */
     class Transcribe(
         override val id: Long,
         override val card: Long,
@@ -35,9 +32,7 @@ sealed interface RecognitionJob {
         override val samples: FloatArray,
         override val endAt: Long,
         override val purpose: String,
-        val languages: SpeechLanguages,
-        val language: String?,
-        val fallback: String?,
+        val language: TranscriptLanguage,
     ) : RecognitionJob {
         override val lane get() = RecognitionLane.TRANSCRIBE
     }
@@ -80,7 +75,7 @@ sealed interface RecognitionJob {
 
     /**
      * 確定した発話 [utterance] の取り置いた音声を、利用者が指定した [language] として書き起こし直す（[UtteranceRetention]）。
-     * 言語を自分で判定する認識器にも言語を指定する（[SpeechRecognizer.recognizeAs]）。カードに属さず、捨てない。
+     * 言語を自分で判定する認識器にも言語を指定する（[SpeechRecognizer.recognizeAs]）。閉じたカードでも捨てない。
      */
     class Retranscribe(
         override val id: Long,
@@ -89,19 +84,14 @@ sealed interface RecognitionJob {
         override val purpose: String,
         /** 会話の言語（このジョブの入れ子の型 [Language] と別のもの）。 */
         val language: app.plamotranslate.llm.Language,
+        override val endAt: Long,
     ) : RecognitionJob {
-        override val card get() = NO_CARD
+        override val card get() = utterance
         override val lane get() = RecognitionLane.TRANSCRIBE
         override val priority get() = RecognitionPriority.RETRANSCRIBE
 
-        /** 確定に要るジョブではないので、認識の遅れには数えない。 */
-        override val endAt get() = 0L
     }
 
-    companion object {
-        /** カードに属さないジョブの [card]。 */
-        const val NO_CARD = -1L
-    }
 }
 
 /**
@@ -116,6 +106,7 @@ class JobIds {
 
 /** 認識の結果。失敗したら空の結果を返す（確定を待たせ続けないため）。 */
 sealed interface RecognitionOutput {
+    data object Cancelled : RecognitionOutput
     data class Transcribed(val recognition: Recognition) : RecognitionOutput
     /** スコア（判定できなければ null）。書き起こして判定した認識器は、その書き起こし（[recognition]、後処理の後）も返す。 */
     data class Scored(val scores: Map<String, Float>?, val recognition: Recognition? = null) : RecognitionOutput

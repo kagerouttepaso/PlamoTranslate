@@ -173,27 +173,27 @@ class AudioPresenterTest {
 
     private class FakeSpeech(private val detected: String? = null) : SpeechEngine {
         override var languages = SpeechLanguages.ANY
-        override var listener: (SpeechEvent) -> Unit = {}
-        override var loadListener: (RecognitionLoad) -> Unit = {}
+        override val events = kotlinx.coroutines.flow.MutableSharedFlow<SpeechEvent>(extraBufferCapacity = Int.MAX_VALUE)
+        override val load = kotlinx.coroutines.flow.MutableStateFlow(RecognitionLoad())
         private var card = 0L
 
         private fun recognize(final: Boolean): Recognition =
             Recognition(if (final) "A complete sentence." else "A partial sentence.", detected)
 
         override fun accept(samples: FloatArray) {
-            listener(SpeechEvent.CardOpened(card))
-            listener(SpeechEvent.CardText(card, recognize(final = false).text, detected))
+            events.tryEmit(SpeechEvent.CardOpened(card))
+            events.tryEmit(SpeechEvent.CardText(card, recognize(final = false).text, detected))
         }
 
         override fun flush() {
             cut()
-            listener(SpeechEvent.Flushed)
+            events.tryEmit(SpeechEvent.Flushed)
         }
 
         override fun cut() {
             val result = recognize(final = true)
-            listener(SpeechEvent.CardClosed(card))
-            listener(SpeechEvent.CardFinished(card, Utterance(card, result.text, result.lang, 0, 100, 0)))
+            events.tryEmit(SpeechEvent.CardClosed(card))
+            events.tryEmit(SpeechEvent.CardFinished(card, Utterance(card, result.text, result.lang, 0, 100, 0)))
         }
 
         override fun reset() { card++ }

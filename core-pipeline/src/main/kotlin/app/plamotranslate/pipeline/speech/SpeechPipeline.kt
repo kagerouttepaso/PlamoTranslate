@@ -4,6 +4,13 @@ import app.plamotranslate.llm.Language
 
 import java.util.concurrent.LinkedBlockingQueue
 import kotlin.concurrent.thread
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * 音声認識の流れ（[SpeechEngine] の実装）。止まってはいけない処理と重い処理を、別のスレッドに分ける
@@ -18,7 +25,7 @@ import kotlin.concurrent.thread
  * 確定した発話の音声の取り置きと書き起こし直し（[retranscribe]）は [UtteranceRetention] が受け持ち、セグメンターのスレッドで動く。
  * 書き起こし直しのジョブ（[RecognitionJob.Retranscribe]）の結果は、セグメンターでなく取り置きに渡す。
  *
- * 状態はセグメンターのスレッドだけが持ち、ワーカーのスレッドとは待ち行列（[lock] で守る）と受け取り口（[inbox]）でだけやり取りする。
+ * 状態はセグメンターのスレッドだけが持ち、ワーカーのスレッドとは命令と終了通知（[inbox]）でだけやり取りする。
  * [timing] はジョブごとの待ち時間と処理時間を書く口（話した言葉は含めないので、いつも書く）。
  *
  * 止め終わりの約束：[flush] を呼んだら、閉じた後でも、認識のワーカーが失敗しても、[SpeechEvent.Flushed] が1回届く。
@@ -33,9 +40,14 @@ class SpeechPipeline(
     private val timing: (String) -> Unit = {},
     /** 書き起こし直しのために保持する確定した発話の数（[UtteranceRetention]）。0 なら保持しない。 */
     retainUtterances: Int = 0,
+    private val identifier: LanguageIdentifier? = null,
 ) : SpeechEngine {
-    override var listener: (SpeechEvent) -> Unit = {}
-    override var loadListener: (RecognitionLoad) -> Unit = {}
+    private val eventStream = MutableSharedFlow<SpeechEvent>(extraBufferCapacity = Int.MAX_VALUE)
+    override val events = eventStream.asSharedFlow()
+    private val currentLoad = MutableStateFlow(RecognitionLoad())
+    override val load = currentLoad.asStateFlow()
+
+    private fun emit(event: SpeechEvent) { check(eventStream.tryEmit(event)) }
 
     private sealed interface Input {
         class Audio(val samples: FloatArray) : Input
@@ -43,20 +55,18 @@ class SpeechPipeline(
         data object Flush : Input
         data object Reset : Input
         class Retranscribe(val utterance: Long, val language: Language) : Input
-        class Result(val job: RecognitionJob, val output: RecognitionOutput) : Input
+        class Result(val lane: RecognitionLane, val end: RecognitionEnd) : Input
         data object Close : Input
     }
 
     private val inbox = LinkedBlockingQueue<Input>()
-    private val runner = RecognitionRunner(recognizer)
+    private val runner = RecognitionRunner(recognizer, identifier)
 
-    /** [queue]・[running]・[submittedAt] を守る。ワーカーのスレッドはジョブが無ければここで待つ。 */
-    private val lock = Object()
+    private class Flight(val request: RecognitionRequest, val started: Long, var cancelled: Boolean = false)
     private val queue = RecognitionQueue()
-    private val running = HashMap<RecognitionLane, RecognitionJob>()
-    private val submittedAt = HashMap<Long, Long>()
-
-    @Volatile private var stopping = false
+    private val running = mutableMapOf<RecognitionLane, Flight>()
+    private val submittedAt = mutableMapOf<Long, Long>()
+    private var generation = 0L
 
     /** [closed] と、受け取り口へ入れる順番を守る（止めるより後に閉じたら、止める命令は必ず閉じる命令より前に入る）。 */
     private val gate = Object()
@@ -67,21 +77,20 @@ class SpeechPipeline(
 
     /** セグメンターのスレッドが受け取った音声のサンプル数（認識の遅れに使う）。 */
     private var received = 0L
-    private var lastLoad = RecognitionLoad()
 
     /** ジョブの番号の採番。区切りと保持が同じものを使い、番号が重ならないようにする。 */
     private val jobIds = JobIds()
 
-    private val retention = UtteranceRetention(retainUtterances, emit = { listener(it) }, submit = ::enqueue, trace = trace, jobIds = jobIds)
+    private val retention = UtteranceRetention(retainUtterances, emit = { emit(it) }, submit = ::enqueue, trace = trace, jobIds = jobIds)
 
     private val segmenter = SpeechSegmenter(
         vad,
-        identifies = recognizer.identifies,
+        identifies = identifier != null,
         profile = profile,
         heavy = heavy,
         emit = { event ->
             if (event == SpeechEvent.Flushed) flushPending = false
-            listener(event)
+            emit(event)
             // 確定を出した後に取り置く（手放したイベント（Released）は、その確定の後に届く）
             if (event is SpeechEvent.CardFinished) event.utterance?.let(retention::finalEmitted)
         },
@@ -97,10 +106,15 @@ class SpeechPipeline(
             segmenter.languages = value
         }
 
+    private val workers = (if (identifier != null) RecognitionLane.entries else listOf(RecognitionLane.TRANSCRIBE))
+        .associateWith { lane ->
+            RecognitionWorker(lane, runner::run).also { worker ->
+                CoroutineScope(Dispatchers.Unconfined).launch {
+                    worker.results.collect { inbox.put(Input.Result(lane, it)) }
+                }
+            }
+        }
     private val control = thread(name = "PlamoAsrSegmenter") { controlLoop() }
-
-    private val lanes = (if (recognizer.identifies) RecognitionLane.entries else listOf(RecognitionLane.TRANSCRIBE))
-        .map { lane -> thread(name = "PlamoAsr-${lane.name.lowercase()}") { work(lane) } }
 
     override fun accept(samples: FloatArray) {
         if (!closed) inbox.put(Input.Audio(samples))
@@ -112,7 +126,7 @@ class SpeechPipeline(
 
     override fun flush() = synchronized(gate) {
         // 閉じた後なら、止める処理はもう無い。待っている呼び手のために、その場で止め終わりを返す
-        if (closed) listener(SpeechEvent.Flushed) else inbox.put(Input.Flush)
+        if (closed) emit(SpeechEvent.Flushed) else inbox.put(Input.Flush)
     }
 
     override fun reset() {
@@ -135,13 +149,8 @@ class SpeechPipeline(
         }
         thread(name = "PlamoAsrClose") {
             control.join()
-            stopping = true
-            synchronized(lock) {
-                queue.clear()
-                lock.notifyAll()
-            }
-            lanes.forEach { it.join() }
-            recognizer.close()
+            workers.values.forEach { it.close() }
+            try { recognizer.close() } finally { identifier?.close() }
         }
     }
 
@@ -160,25 +169,25 @@ class SpeechPipeline(
                         segmenter.flush()
                     }
                     Input.Reset -> {
-                        synchronized(lock) { queue.clear() }
+                        generation++
+                        queue.clear()
+                        submittedAt.clear()
+                        running.forEach { (lane, flight) -> workers.getValue(lane).cancel(flight.request.id) }
                         segmenter.reset()
                         // 待っていた書き起こし直しは待ち行列ごと捨てたので、取り置いた音声から出し直す
                         retention.reset()
                         // 止めている途中で始め直したら、止める処理は捨てたので、待っている呼び手に止め終わりを返す
                         if (flushPending) {
                             flushPending = false
-                            listener(SpeechEvent.Flushed)
+                            emit(SpeechEvent.Flushed)
                         }
                         received = 0
                     }
                     is Input.Retranscribe -> retention.retranscribe(input.utterance, input.language)
-                    is Input.Result -> when (val job = input.job) {
-                        is RecognitionJob.Retranscribe -> retention.onResult(job, input.output)
-                        else -> segmenter.onResult(job.id, input.output)
-                    }
+                    is Input.Result -> finish(input)
                     Input.Close -> {
                         runCatching { segmenter.close() }
-                        if (flushPending) listener(SpeechEvent.Flushed)
+                        if (flushPending) emit(SpeechEvent.Flushed)
                         return
                     }
                 }
@@ -186,6 +195,7 @@ class SpeechPipeline(
                 timing("区切りで失敗: $e")
             }
             dropStale()
+            dispatch()
             publishLoad()
         }
     }
@@ -197,9 +207,7 @@ class SpeechPipeline(
      */
     private fun dropStale() {
         while (true) {
-            val stale = synchronized(lock) {
-                queue.dropStale(segmenter.openCardId).onEach { submittedAt.remove(it.id) }
-            }
+            val stale = queue.dropStale(segmenter.openCardId).onEach { submittedAt.remove(it.id) }
             if (stale.isEmpty()) return
             stale.forEach { job ->
                 try {
@@ -211,57 +219,52 @@ class SpeechPipeline(
         }
     }
 
-    private fun enqueue(job: RecognitionJob) = synchronized(lock) {
+    private fun enqueue(job: RecognitionJob) {
+        if (job.priority == RecognitionPriority.FINAL || job.priority == RecognitionPriority.PHRASE) {
+            running[RecognitionLane.TRANSCRIBE]?.takeIf { it.request.job.priority == RecognitionPriority.PARTIAL }?.let {
+                it.cancelled = true
+                workers.getValue(RecognitionLane.TRANSCRIBE).cancel(it.request.id)
+            }
+        }
         queue.submit(job)
         submittedAt[job.id] = System.nanoTime()
-        lock.notifyAll()
     }
 
-    private fun work(lane: RecognitionLane) {
-        while (true) {
-            val job = synchronized(lock) {
-                var next = queue.take(lane)
-                while (next == null && !stopping) {
-                    lock.wait()
-                    next = queue.take(lane)
-                }
-                next?.also { running[lane] = it }
-            } ?: return
-            val began = System.nanoTime()
-            val output = try {
-                runner.run(job)
-            } catch (e: Throwable) {
-                // ネイティブの Error でもワーカーを止めない（結果が戻らないと、カードも止め終わりも出ない）
-                timing("認識に失敗（${job.purpose}）: $e")
-                RecognitionRunner.empty(job)
-            }
-            val ended = System.nanoTime()
-            val waited = synchronized(lock) {
-                running.remove(lane)
-                submittedAt.remove(job.id)
-            }
-            timing(
-                "認識 %s（%s）音声%.1f秒 待ち%dms 処理%dms".format(
-                    job.purpose, lane.name.lowercase(), job.samples.size / SpeechEngine.SAMPLE_RATE.toFloat(),
-                    waited?.let { (began - it) / 1_000_000 } ?: -1, (ended - began) / 1_000_000,
-                ),
-            )
-            inbox.put(Input.Result(job, output))
+    private fun dispatch() {
+        for ((lane, worker) in workers) {
+            if (lane in running) continue
+            val job = queue.take(lane) ?: continue
+            val request = RecognitionRequest(generation, job)
+            running[lane] = Flight(request, System.nanoTime())
+            worker.submit(request)
         }
     }
 
-    /** 認識の混み具合が変わったら知らせる（0.1秒刻み）。 */
+    private fun finish(result: Input.Result) {
+        val flight = running[result.lane]?.takeIf { it.request.id == result.end.id } ?: return
+        running.remove(result.lane)
+        if (result.end.id.generation != generation) return
+        val job = flight.request.job
+        val waited = submittedAt.remove(job.id)
+        timing("認識 %s（%s）音声%.1f秒 待ち%dms 処理%dms".format(job.purpose, result.lane.name.lowercase(),
+            job.samples.size / SpeechEngine.SAMPLE_RATE.toFloat(), waited?.let { (flight.started - it) / 1_000_000 } ?: -1,
+            (System.nanoTime() - flight.started) / 1_000_000))
+        val output = when (val end = result.end) {
+            is RecognitionEnd.Success -> if (flight.cancelled) RecognitionOutput.Cancelled else end.output
+            is RecognitionEnd.Cancelled -> RecognitionOutput.Cancelled
+            is RecognitionEnd.Failed -> {
+                timing("認識に失敗（${job.purpose}）: ${end.cause}")
+                if (flight.cancelled) RecognitionOutput.Cancelled else RecognitionRunner.empty(job)
+            }
+        }
+        if (job is RecognitionJob.Retranscribe) retention.onResult(job, output) else segmenter.onResult(job.id, output)
+    }
+
     private fun publishLoad() {
-        val (urgent, oldest) = synchronized(lock) {
-            val urgentRunning = running.values.filter { it.priority.urgent }
-            (queue.hasUrgent() || urgentRunning.isNotEmpty()) to
-                listOfNotNull(queue.oldestTranscribeEnd(), urgentRunning.minOfOrNull { it.endAt }).minOrNull()
-        }
+        val urgentRunning = running.values.filter { it.request.generation == generation }.map { it.request.job }.filter { it.priority.urgent }
+        val urgent = queue.hasUrgent() || urgentRunning.isNotEmpty()
+        val oldest = listOfNotNull(queue.oldestTranscribeEnd(), urgentRunning.minOfOrNull { it.endAt }).minOrNull()
         val behind = oldest?.let { ((received - it).coerceAtLeast(0) * 10 / SpeechEngine.SAMPLE_RATE) / 10f } ?: 0f
-        val load = RecognitionLoad(behind, urgent)
-        if (load != lastLoad) {
-            lastLoad = load
-            loadListener(load)
-        }
+        currentLoad.value = RecognitionLoad(behind, urgent)
     }
 }

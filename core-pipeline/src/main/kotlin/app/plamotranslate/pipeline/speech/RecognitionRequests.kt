@@ -16,7 +16,7 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  * 状態を持つので、[SpeechSegmenter] と同じ1本のスレッドから呼ぶ。
  */
 internal class RecognitionRequests(
-    identifies: Boolean,
+    private val identifies: Boolean,
     private val heavy: Boolean,
     private val submit: (RecognitionJob) -> Unit,
     private val clock: () -> Long,
@@ -67,10 +67,17 @@ internal class RecognitionRequests(
         language: String?,
         fallback: String?,
         paced: Boolean = false,
+        cancelled: () -> Unit = {},
         then: (Recognition) -> Unit,
     ) {
         val submittedAt = clock()
-        job({ id -> RecognitionJob.Transcribe(id, card, priority, samples, end, purpose, languages, language, fallback) }) { out ->
+        val instruction = when {
+            language != null && (identifies || languages.specified != null) -> TranscriptLanguage.Specified(language)
+            identifies -> TranscriptLanguage.Identify(languages, fallback)
+            else -> TranscriptLanguage.Unspecified
+        }
+        job({ id -> RecognitionJob.Transcribe(id, card, priority, samples, end, purpose, instruction) }) { out ->
+            if (out == RecognitionOutput.Cancelled) return@job cancelled()
             if (paced) {
                 partialInterval = maxOf(MIN_PARTIAL_INTERVAL, costSamples(submittedAt) * if (heavy) HEAVY_PARTIAL_COST_RATIO else PARTIAL_COST_RATIO)
             }

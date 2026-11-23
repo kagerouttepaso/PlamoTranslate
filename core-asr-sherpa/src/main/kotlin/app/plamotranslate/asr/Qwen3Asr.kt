@@ -2,6 +2,7 @@ package app.plamotranslate.asr
 
 import app.plamotranslate.pipeline.speech.Recognition
 import app.plamotranslate.pipeline.speech.SpeechEngine
+import app.plamotranslate.pipeline.speech.LanguageSource
 import app.plamotranslate.pipeline.speech.SpeechRecognizer
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineQwen3AsrModelConfig
@@ -25,12 +26,14 @@ class Qwen3Recognizer private constructor(private val recognizer: OfflineRecogni
     override fun recognizeAs(samples: FloatArray, language: String?): Recognition {
         val stream = recognizer.createStream()
         try {
-            NAMES[language]?.let { stream.setOption("language", it) }
+            val specified = language?.takeIf { it in NAMES }
+            specified?.let { stream.setOption("language", NAMES.getValue(it)) }
             stream.acceptWaveform(samples, SpeechEngine.SAMPLE_RATE)
             recognizer.decode(stream)
             // 終わりのトークン（<|endoftext|> など）の後ろは、モデルが作り出した続き（2026-11-15のベータで、日本語の後に英語の記事の文を出した）
             val text = recognizer.getResult(stream).text.substringBefore("<|").trim()
-            return Recognition(if (isRoleLeak(text)) "" else text, lang = null)
+            return Recognition(if (isRoleLeak(text)) "" else text, specified,
+                source = if (specified != null) LanguageSource.SPECIFIED else LanguageSource.GUESSED)
         } finally {
             stream.release()
         }

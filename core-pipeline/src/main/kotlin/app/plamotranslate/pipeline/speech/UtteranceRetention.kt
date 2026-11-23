@@ -57,7 +57,7 @@ class UtteranceRetention(
      */
     fun retranscribe(id: Long, language: Language) {
         if (id in pending) return
-        val audio = kept.firstOrNull { it.id == id }?.audio
+        val audio = kept.firstOrNull { it.id == id }
         if (audio == null) {
             emit(SpeechEvent.RetranscribeFailed(id, RetranscribeFailure.RELEASED))
             return
@@ -91,7 +91,7 @@ class UtteranceRetention(
     /** 認識の待ち行列を捨てて始め直した。待っている書き起こし直しを出し直す（音声は取り置いている）。 */
     fun reset() {
         for ((id, p) in pending.entries.toList()) {
-            val audio = kept.firstOrNull { it.id == id }?.audio
+            val audio = kept.firstOrNull { it.id == id }
             if (audio == null) {
                 pending.remove(id)
                 emit(SpeechEvent.RetranscribeFailed(id, RetranscribeFailure.RELEASED))
@@ -102,9 +102,9 @@ class UtteranceRetention(
         closing.clear()
     }
 
-    private fun submitJob(id: Long, p: Pending, audio: FloatArray) {
+    private fun submitJob(id: Long, p: Pending, audio: Kept) {
         p.jobId = jobIds.next()
-        submit(RecognitionJob.Retranscribe(p.jobId, id, audio, PURPOSE, p.language))
+        submit(RecognitionJob.Retranscribe(p.jobId, id, audio.audio, PURPOSE, p.language, audio.startMs * SpeechEngine.SAMPLE_RATE / 1000 + audio.audio.size))
     }
 
     companion object {

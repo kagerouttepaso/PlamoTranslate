@@ -134,14 +134,14 @@ class SpeechSegmenterTest {
         /** 頼まれたジョブ（頼んだ順）。 */
         val submitted = mutableListOf<RecognitionJob>()
         private val queue = RecognitionQueue()
-        private val runner = RecognitionRunner(recognizer)
+        private val runner = RecognitionRunner(recognizer, recognizer as? LanguageIdentifier)
         private class Pending(val due: Int, val lane: RecognitionLane, val id: Long, val output: RecognitionOutput)
 
         private val waiting = ArrayDeque<Pending>()
         private var chunks = 0
         val segmenter = SpeechSegmenter(
             FakeVad((profile.phraseSilenceSeconds * 10).toInt()),
-            recognizer.identifies,
+            recognizer is LanguageIdentifier,
             profile,
             heavy,
             emit = { events += it },
@@ -477,13 +477,13 @@ class SpeechSegmenterTest {
     }
 
     /**
-     * 書き起こしの重いモデル（Qwen3-ASR）の代わり。書き起こさずにスコアを出せ（[SpeechRecognizer.scores]。決めた言語をスコア1にする）、
+     * 書き起こしの重いモデル（Qwen3-ASR）の代わり。書き起こさずにスコアを出せ（[LanguageIdentifier.scores]。決めた言語をスコア1にする）、
      * 書き起こした音声の長さ・識別の回数・言語を指定した書き起こしの回数を覚える。
      */
     private inner class HeavyRecognizer(
         /** 識別の結果を変える（受け取った音声の長さと、本来の判定から決める）。 */
         private val identifyAs: (samples: Int, lang: String?) -> String? = { _, lang -> lang },
-    ) : SpeechRecognizer {
+    ) : SpeechRecognizer, LanguageIdentifier {
         private val inner = FakeRecognizer(::soundOf)
         val transcribed = mutableListOf<Int>()
         var identified = 0
@@ -496,22 +496,15 @@ class SpeechSegmenterTest {
             return inner.recognize(samples)
         }
 
-        /** 言語を指定せずに書き起こしを頼まれたときの、識別できなかったときの言語（null なら言語の無い書き起こしになる）。 */
-        val fallbacks = mutableListOf<String?>()
-
-        override fun recognize(samples: FloatArray, languages: SpeechLanguages, fallback: String?): Recognition {
-            unspecified++
-            fallbacks += fallback
-            return recognize(samples)
+        override fun recognizeAs(samples: FloatArray, language: String?): Recognition {
+            if (language == null) unspecified++
+            return recognize(samples).copy(lang = language, source = LanguageSource.SPECIFIED)
         }
 
-        override fun recognizeAs(samples: FloatArray, language: String?): Recognition = recognize(samples).copy(lang = language)
-
-        override val identifies get() = true
-        override fun scores(samples: FloatArray, languages: SpeechLanguages): Map<String, Float>? {
+        override fun scores(samples: FloatArray, candidates: Set<String>?): Map<String, Float>? {
             identified++
             identifiedWindows += samples.size
-            val lang = inner.recognize(samples).lang?.takeIf { languages.groups == null || it in languages.groups }
+            val lang = inner.recognize(samples).lang?.takeIf { candidates == null || it in candidates }
             return identifyAs(samples.size, lang)?.let { mapOf(it to 1f) }
         }
 
@@ -720,7 +713,7 @@ class SpeechSegmenterTest {
     fun 認識の待ち行列は確定に要る書き起こしを途中結果より先に出す() {
         val q = RecognitionQueue()
         fun t(id: Long, card: Long, p: RecognitionPriority) =
-            RecognitionJob.Transcribe(id, card, p, FloatArray(0), 0, "", SpeechLanguages.ANY, null, null)
+            RecognitionJob.Transcribe(id, card, p, FloatArray(0), 0, "", TranscriptLanguage.Unspecified)
         q.submit(t(0, 0, RecognitionPriority.PARTIAL))
         q.submit(t(1, 0, RecognitionPriority.PHRASE))
         q.submit(t(2, 0, RecognitionPriority.FINAL))

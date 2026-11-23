@@ -64,25 +64,17 @@ interface LanguageIdentifier : AutoCloseable {
 class IdentifiedRecognizer(
     private val identifier: LanguageIdentifier,
     private val recognizer: SpeechRecognizer,
-) : SpeechRecognizer {
-    override fun recognize(samples: FloatArray): Recognition = recognize(samples, SpeechLanguages.ANY)
-
-    override fun recognize(samples: FloatArray, languages: SpeechLanguages): Recognition = recognize(samples, languages, null)
-
+) {
     /**
      * 言語を指定せずに書き起こすとき（テキスト翻訳の音声入力など）は、識別して一番の言語を指定する。判定できなければ
      * [fallback] として書き起こす。言語を指定しないと、Qwen3-ASR が中国語で書くことがある。
      */
-    override fun recognize(samples: FloatArray, languages: SpeechLanguages, fallback: String?): Recognition {
+    fun identifyAndRecognize(samples: FloatArray, languages: SpeechLanguages, fallback: String? = null): Recognition {
         val groups = languages.groups
-        val identified = SpeakerJudge.decide(scores(samples, languages), languages.copy(primary = null), 0f)
+        val identified = SpeakerJudge.decide(identifier.groupedScores(samples, languages), languages.copy(primary = null), 0f)
         if (identified != null) return recognizeAs(samples, identified, groups, LanguageSource.JUDGED)
         return recognizeAs(samples, fallback?.takeIf { groups == null || it in groups }, groups, LanguageSource.SPECIFIED)
     }
-
-    /** 言語が分かっているとき（話し手の言語）。識別を省いて、その言語として書き起こす。 */
-    override fun recognizeAs(samples: FloatArray, language: String?): Recognition =
-        recognizeAs(samples, language, null, LanguageSource.SPECIFIED)
 
     /** [lang] として書き起こす（[source] はその言語の出どころ）。言語が無ければ指定せずに書き起こし、文字の種類から推定する。 */
     private fun recognizeAs(samples: FloatArray, lang: String?, groups: Set<String>?, source: LanguageSource): Recognition {
@@ -90,23 +82,14 @@ class IdentifiedRecognizer(
         return if (lang != null) r.copy(lang = lang, source = source) else r.copy(lang = ScriptLanguage.guess(r.text, groups), source = LanguageSource.GUESSED)
     }
 
-    override val identifies: Boolean get() = true
+}
 
-    override fun languageCode(language: Language): String = recognizer.languageCode(language)
-
-    /** 識別器のスコアを、比べるための組（中国語・広東語は1つの組）にまとめる。 */
-    override fun scores(samples: FloatArray, languages: SpeechLanguages): Map<String, Float>? {
-        val raw = identifier.scores(samples, languages.groups) ?: return null
-        val grouped = HashMap<String, Float>()
-        for ((lang, p) in raw) {
-            val group = LanguageEvidence.group(lang, separateChinese = true) ?: continue
-            grouped[group] = (grouped[group] ?: 0f) + p
-        }
-        return grouped
+internal fun LanguageIdentifier.groupedScores(samples: FloatArray, languages: SpeechLanguages): Map<String, Float>? {
+    val raw = scores(samples, languages.groups) ?: return null
+    val grouped = HashMap<String, Float>()
+    for ((lang, p) in raw) {
+        val group = LanguageEvidence.group(lang, separateChinese = true) ?: continue
+        grouped[group] = (grouped[group] ?: 0f) + p
     }
-
-    override fun close() {
-        identifier.close()
-        recognizer.close()
-    }
+    return grouped
 }

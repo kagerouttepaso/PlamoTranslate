@@ -89,17 +89,17 @@ class TextInputTest {
 
     private class FakeSpeech : SpeechEngine {
         override var languages = SpeechLanguages.ANY
-        override var listener: (SpeechEvent) -> Unit = {}
-        override var loadListener: (RecognitionLoad) -> Unit = {}
+        override val events = kotlinx.coroutines.flow.MutableSharedFlow<SpeechEvent>(extraBufferCapacity = Int.MAX_VALUE)
+        override val load = kotlinx.coroutines.flow.MutableStateFlow(RecognitionLoad())
 
         override fun accept(samples: FloatArray) {
-            listener(SpeechEvent.CardOpened(1))
-            listener(SpeechEvent.CardText(1, "w…", "en"))
+            events.tryEmit(SpeechEvent.CardOpened(1))
+            events.tryEmit(SpeechEvent.CardText(1, "w…", "en"))
         }
 
         override fun flush() {
-            listener(SpeechEvent.CardFinished(1, Utterance(1, "world", "en", 0, 0, 0)))
-            listener(SpeechEvent.Flushed)
+            events.tryEmit(SpeechEvent.CardFinished(1, Utterance(1, "world", "en", 0, 0, 0)))
+            events.tryEmit(SpeechEvent.Flushed)
         }
 
         override fun cut() = Unit

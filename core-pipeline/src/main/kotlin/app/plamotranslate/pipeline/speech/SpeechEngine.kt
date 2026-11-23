@@ -1,6 +1,8 @@
 package app.plamotranslate.pipeline.speech
 
 import app.plamotranslate.llm.Language
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * 話し終わった1つの発話（docs/設計/会話翻訳.md「音声認識」）。
@@ -87,11 +89,11 @@ interface SpeechEngine : AutoCloseable {
      */
     var languages: SpeechLanguages
 
-    /** 出来事の届け先。セグメンターのスレッドから順に呼ばれる。 */
-    var listener: (SpeechEvent) -> Unit
+    /** 出来事の届け先。購読開始からの出来事が発生順に届く。 */
+    val events: Flow<SpeechEvent>
 
-    /** 認識の混み具合。変わるたびにセグメンターのスレッドから呼ばれる。 */
-    var loadListener: (RecognitionLoad) -> Unit
+    /** 認識の混み具合。最新の状態を購読する。 */
+    val load: StateFlow<RecognitionLoad>
 
     /** 16kHz・モノラル・-1〜1のfloat。 */
     fun accept(samples: FloatArray)
@@ -168,15 +170,6 @@ data class SpeechBreak(val at: Int, val sentence: Boolean)
 interface SpeechRecognizer : AutoCloseable {
     fun recognize(samples: FloatArray): Recognition
 
-    /** 会話の言語を添えて認識する（[RecognitionRunner] が呼ぶ）。言語の識別を前に置く組み立て（[IdentifiedRecognizer]）が使う。 */
-    fun recognize(samples: FloatArray, languages: SpeechLanguages): Recognition = recognize(samples)
-
-    /**
-     * 会話の言語に加え、言語を識別できなかったときに使う言語（[fallback]。今のカードの言語）を添えて認識する。
-     * 識別できない区間は「話し手は代わっていない」とみなし、その言語として書き起こす。言語を識別しない認識器は無視する。
-     */
-    fun recognize(samples: FloatArray, languages: SpeechLanguages, fallback: String?): Recognition = recognize(samples, languages)
-
     /**
      * [language]（言語のコード）として書き起こす。null なら指定しない。言語を指定できない認識器は無視する。
      * 結果の [Recognition.source] は、指定した言語で書き起こしたら [LanguageSource.SPECIFIED]。
@@ -191,19 +184,6 @@ interface SpeechRecognizer : AutoCloseable {
         Language.ZH, Language.ZH_HANT -> "zh"
         else -> language.code
     }
-
-    /**
-     * 書き起こさずに言語のスコアを出せるか（[scores]）。出せる認識器（言語の識別を前に置く組み立て）は、セグメンターが言語の判定を
-     * 識別のワーカーに回し、重い書き起こしを省く。出せない認識器（SenseVoice）は、書き起こした結果の言語をスコア1の判定として使う
-     * （[RecognitionRunner]）。
-     */
-    val identifies: Boolean get() = false
-
-    /**
-     * 会話の言語（[SpeechLanguages.groups] の組。null ならすべて）ごとの確率（合計1。[identifies] が true の認識器）。
-     * 判定できなければ null。話し手は、このスコアから [SpeakerJudge] が決める。
-     */
-    fun scores(samples: FloatArray, languages: SpeechLanguages): Map<String, Float>? = null
 }
 
 /**

@@ -23,6 +23,7 @@ import app.plamotranslate.translation.Translations
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -99,8 +100,8 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(voice = VoiceState.Listening, error = null) }
             val heard = AtomicReference<String?>(null)
             val events = Channel<SpeechEvent>(Channel.UNLIMITED)
+            val subscription = launch(start = CoroutineStart.UNDISPATCHED) { engine.events.collect { events.send(it) } }
             try {
-                engine.listener = { events.trySend(it) }
                 engine.languages = SpeechLanguages(separateChinese = _state.value.source?.isChinese == true)
                 engine.reset()
                 val spoke = AtomicBoolean(false)
@@ -141,7 +142,7 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message ?: e.toString()) }
             } finally {
-                engine.listener = {}
+                subscription.cancel()
                 _state.update { it.copy(voice = VoiceState.Idle) }
             }
             val text = heard.get()?.trim().orEmpty()

@@ -179,9 +179,9 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
      */
     private fun attach(engine: SpeechEngine) {
         engine.languages = session.speechLanguages
-        engine.listener = { event -> post(listOf(event)) }
-        engine.loadListener = { load ->
-            viewModelScope.launch {
+        viewModelScope.launch { engine.events.collect { onEvent(Event.Speech(it)) } }
+        viewModelScope.launch {
+            engine.load.collect { load ->
                 if (load.behindSeconds != _state.value.lagSeconds) _state.update { it.copy(lagSeconds = load.behindSeconds) }
                 handle(Event.RecognitionBusy(load.urgent))
             }

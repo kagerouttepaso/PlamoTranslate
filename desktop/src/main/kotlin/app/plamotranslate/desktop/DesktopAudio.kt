@@ -5,7 +5,6 @@ import app.plamotranslate.asr.JvmSenseVoice
 import app.plamotranslate.asr.JvmWhisperIdentifier
 import app.plamotranslate.asr.SileroVoiceActivity
 import app.plamotranslate.pipeline.models.SharedModelCatalog
-import app.plamotranslate.pipeline.speech.IdentifiedRecognizer
 import app.plamotranslate.pipeline.speech.SegmentationProfile
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechModel
@@ -102,19 +101,16 @@ internal class DesktopAsr(private val models: Path) {
             val threads = settings.transcribeThreads.takeIf { it > 0 }
                 ?: (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, maxThreads)
             val recognizer = when (settings.model) {
-                SpeechModel.QWEN3_ASR -> {
-                    val qwenRecognizer = Qwen3Recognizer.load(qwen, threads)
-                    try {
-                        if (identify) IdentifiedRecognizer(JvmWhisperIdentifier(directory, settings.identifyThreads), qwenRecognizer)
-                        else qwenRecognizer
-                    } catch (error: Throwable) {
-                        qwenRecognizer.close()
-                        throw error
-                    }
-                }
+                SpeechModel.QWEN3_ASR -> Qwen3Recognizer.load(qwen, threads)
                 SpeechModel.SENSE_VOICE -> JvmSenseVoice(directory, threads, specified)
             }
-            SpeechPipeline(voice, recognizer, profile, heavy = settings.model.heavy, retainUtterances = UtteranceRetention.KEEP_UTTERANCES)
+            val identifier = try {
+                if (identify && settings.model == SpeechModel.QWEN3_ASR) JvmWhisperIdentifier(directory, settings.identifyThreads) else null
+            } catch (error: Throwable) {
+                recognizer.close()
+                throw error
+            }
+            SpeechPipeline(voice, recognizer, profile, identifier = identifier, heavy = settings.model.heavy, retainUtterances = UtteranceRetention.KEEP_UTTERANCES)
         } catch (error: Throwable) {
             voice.close()
             throw error

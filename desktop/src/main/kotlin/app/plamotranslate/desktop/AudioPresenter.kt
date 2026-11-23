@@ -20,8 +20,8 @@ import app.plamotranslate.pipeline.translation.translateOne
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -133,6 +133,7 @@ internal class AudioPresenter(
     private val selection get() = state.value.selection
     private var session = selection.session()
     private val translations = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
+    private var subscription: Job? = null
     private var engine: SpeechEngine? = null
     private val loading = Mutex()
     private var closed = false
@@ -203,6 +204,7 @@ internal class AudioPresenter(
     /** 音の出どころ・認識の設定・再生音の言語。止めているときだけ変え、認識器とセッションを作り直す。 */
     private fun configure(updated: AudioSelection) {
         if (!state.value.canConfigure || closed || updated == selection) return
+        subscription?.cancel()
         engine?.close()
         engine = null
         session = updated.session()
@@ -289,6 +291,20 @@ internal class AudioPresenter(
             val asr = withContext(io) { loadEngine(requested).also { loaded = it } }
             if (closed || current !== session) throw CancellationException("認識の設定が変わりました")
             engine = asr
+            subscription = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                launch(start = CoroutineStart.UNDISPATCHED) {
+                    asr.load.collect { load ->
+                        if (active != null && session === current) {
+                            mutableState.value = state.value.copy(lagSeconds = load.behindSeconds)
+                            handle(current, Event.RecognitionBusy(load.urgent))
+                        }
+                    }
+                }
+                asr.events.collect { event ->
+                    val retained = event is SpeechEvent.Retranscribed || event is SpeechEvent.RetranscribeFailed || event is SpeechEvent.Released
+                    if (session === current && (active != null || retained)) handle(current, Event.Speech(event, active?.selection?.spoken ?: selection.spoken))
+                }
+            }
             asr
         } catch (error: LinkageError) {
             Logs.w("Windows の音声ライブラリを読み込めませんでした", error)
@@ -307,22 +323,7 @@ internal class AudioPresenter(
                 val asr = obtainEngine()
                 run.engine = asr
                 val current = session
-                val language = run.selection.spoken
                 asr.languages = languagesFor(current, run.selection)
-                asr.listener = { event ->
-                    scope.launch {
-                        val retained = event is SpeechEvent.Retranscribed || event is SpeechEvent.RetranscribeFailed || event is SpeechEvent.Released
-                        if (engine === asr && (active === run || retained)) handle(current, Event.Speech(event, language))
-                    }
-                }
-                asr.loadListener = { load ->
-                    scope.launch {
-                        if (active === run) {
-                            if (load.behindSeconds != state.value.lagSeconds) mutableState.value = state.value.copy(lagSeconds = load.behindSeconds)
-                            handle(session, Event.RecognitionBusy(load.urgent))
-                        }
-                    }
-                }
                 asr.reset()
                 capture.capture(run.selection.source, started = {
                     scope.launch {
@@ -459,6 +460,7 @@ internal class AudioPresenter(
         active?.input?.cancel()
         active = null
         translations.cancel()
+        subscription?.cancel()
         engine?.close()
     }
 }

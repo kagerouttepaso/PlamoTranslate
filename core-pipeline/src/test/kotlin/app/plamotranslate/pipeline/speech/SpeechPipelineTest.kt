@@ -1,8 +1,10 @@
 package app.plamotranslate.pipeline.speech
 
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import org.junit.Assert.assertTrue
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.async
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.first
 import org.junit.Test
 
 /**
@@ -24,36 +26,34 @@ class SpeechPipelineTest {
         override fun close() = Unit
     }
 
-    private fun pipeline(): Pair<SpeechPipeline, CountDownLatch> {
-        val flushed = CountDownLatch(1)
+    private fun expectFlush(commands: (SpeechPipeline) -> Unit) = runBlocking {
         val p = SpeechPipeline(LoudVad(), BrokenRecognizer())
-        p.listener = { if (it == SpeechEvent.Flushed) flushed.countDown() }
-        return p to flushed
+        try {
+            withTimeout(5_000) {
+                val flushed = async(start = CoroutineStart.UNDISPATCHED) { p.events.first { it == SpeechEvent.Flushed } }
+                commands(p)
+                flushed.await()
+            }
+        } finally { p.close() }
+        Unit
     }
 
     @Test
-    fun 認識のワーカーが失敗しても止め終わりが届く() {
-        val (p, flushed) = pipeline()
+    fun 認識のワーカーが失敗しても止め終わりが届く() = expectFlush { p ->
         repeat(20) { p.accept(FloatArray(SpeechEngine.SAMPLE_RATE / 10) { 0.5f }) }
         p.flush()
-        assertTrue(flushed.await(5, TimeUnit.SECONDS))
-        p.close()
     }
 
     @Test
-    fun 閉じた後に止めても止め終わりが届く() {
-        val (p, flushed) = pipeline()
+    fun 閉じた後に止めても止め終わりが届く() = expectFlush { p ->
         p.close()
         p.flush()
-        assertTrue(flushed.await(5, TimeUnit.SECONDS))
     }
 
     @Test
-    fun 止めている途中で閉じても止め終わりが届く() {
-        val (p, flushed) = pipeline()
+    fun 止めている途中で閉じても止め終わりが届く() = expectFlush { p ->
         repeat(20) { p.accept(FloatArray(SpeechEngine.SAMPLE_RATE / 10) { 0.5f }) }
         p.flush()
         p.close()
-        assertTrue(flushed.await(5, TimeUnit.SECONDS))
     }
 }

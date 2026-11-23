@@ -3,7 +3,6 @@ package app.plamotranslate.asr
 import app.plamotranslate.llm.Language
 import app.plamotranslate.pipeline.conversation.ConversationSession
 import app.plamotranslate.pipeline.conversation.PartnerMode
-import app.plamotranslate.pipeline.speech.IdentifiedRecognizer
 import app.plamotranslate.pipeline.speech.RecognitionJob
 import app.plamotranslate.pipeline.speech.RecognitionLane
 import app.plamotranslate.pipeline.speech.RecognitionOutput
@@ -128,13 +127,11 @@ class ConversationReplayTest {
         val profile = SegmentationProfile.CONVERSATION
         val recognizer: SpeechRecognizer = when (model) {
             SpeechModel.SENSE_VOICE -> SenseVoiceRecognizer.load(asr!!)
-            SpeechModel.QWEN3_ASR -> IdentifiedRecognizer(
-                WhisperLanguageIdentifier.load(File(asr, WhisperLanguageIdentifier.DIR), 4),
-                Qwen3Recognizer.load(File(asr, Qwen3Recognizer.DIR), 8),
-            )
+            SpeechModel.QWEN3_ASR -> Qwen3Recognizer.load(File(asr, Qwen3Recognizer.DIR), 8)
         }
+        val identifier = if (model == SpeechModel.QWEN3_ASR) WhisperLanguageIdentifier.load(File(asr, WhisperLanguageIdentifier.DIR), 4) else null
         val vad = SileroVoiceActivity.load(File(asr, "silero_vad.onnx"), profile.phraseSilenceSeconds)
-        val runner = RecognitionRunner(recognizer)
+        val runner = RecognitionRunner(recognizer, identifier)
         val queue = RecognitionQueue()
         val session = ConversationSession(
             mode = partner?.let(::PartnerMode) ?: PartnerMode.AUTO,
@@ -149,7 +146,7 @@ class ConversationReplayTest {
         lateinit var segmenter: SpeechSegmenter
         segmenter = SpeechSegmenter(
             vad,
-            identifies = recognizer.identifies,
+            identifies = identifier != null,
             profile = profile,
             heavy = model.heavy,
             emit = { event ->
@@ -219,6 +216,7 @@ class ConversationReplayTest {
         }
         segmenter.close()
         recognizer.close()
+        identifier?.close()
 
         out!!.writeText(
             "# カード\n" + cards.joinToString("\n") + "\n\n# 区切りの経過\n" + log,

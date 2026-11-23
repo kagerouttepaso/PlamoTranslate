@@ -7,6 +7,7 @@ import app.plamotranslate.pipeline.speech.SpeechEvent
 import app.plamotranslate.pipeline.speech.SpeechLanguages
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -38,9 +39,11 @@ internal class DesktopTextVoice(
                 val events = Channel<SpeechEvent>(Channel.UNLIMITED)
                 val started = CompletableDeferred<Unit>()
                 val spoken = CompletableDeferred<Unit>()
-                recognizer.listener = { event ->
-                    if (event is SpeechEvent.CardOpened) spoken.complete(Unit)
-                    events.trySend(event)
+                val subscription = launch(start = CoroutineStart.UNDISPATCHED) {
+                    recognizer.events.collect { event ->
+                        if (event is SpeechEvent.CardOpened) spoken.complete(Unit)
+                        events.send(event)
+                    }
                 }
                 recognizer.languages = SpeechLanguages(separateChinese = source?.isChinese == true)
                 recognizer.reset()
@@ -81,7 +84,7 @@ internal class DesktopTextVoice(
                     stop.cancel()
                     timeout.cancel()
                     flush.cancel()
-                    events.cancel()
+                    subscription.cancel()
                 }
             }
         } finally {

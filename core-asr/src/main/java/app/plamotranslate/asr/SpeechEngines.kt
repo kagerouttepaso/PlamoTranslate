@@ -1,7 +1,6 @@
 package app.plamotranslate.asr
 
 import app.plamotranslate.log.Logs
-import app.plamotranslate.pipeline.speech.IdentifiedRecognizer
 import app.plamotranslate.pipeline.speech.SegmentationProfile
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechModel
@@ -59,11 +58,9 @@ object SpeechEngines {
         require(missing.isEmpty()) { "音声認識のモデルがありません: ${missing.joinToString()}" }
         val recognizer: SpeechRecognizer = when (model) {
             SpeechModel.SENSE_VOICE -> SenseVoiceRecognizer.load(asrDir, tuning.transcribeThreads.takeIf { it > 0 } ?: SenseVoiceRecognizer.THREADS)
-            SpeechModel.QWEN3_ASR -> IdentifiedRecognizer(
-                WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR), tuning.identifyThreads),
-                Qwen3Recognizer.load(File(asrDir, Qwen3Recognizer.DIR), tuning.transcribeThreads.takeIf { it > 0 } ?: Qwen3Recognizer.THREADS),
-            )
+            SpeechModel.QWEN3_ASR -> Qwen3Recognizer.load(File(asrDir, Qwen3Recognizer.DIR), tuning.transcribeThreads.takeIf { it > 0 } ?: Qwen3Recognizer.THREADS)
         }
+        val identifier = if (model == SpeechModel.QWEN3_ASR) WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR), tuning.identifyThreads) else null
         Logs.i("音声認識の組み立て: $model 書き起こし${tuning.transcribeThreads}（0は既定） 識別${tuning.identifyThreads} $profile VAD ${tuning.vadThreshold}/${tuning.vadMinSpeechSeconds}秒")
         return SpeechPipeline(
             SileroVoiceActivity.load(File(asrDir, VAD), profile.phraseSilenceSeconds, tuning.vadThreshold, tuning.vadMinSpeechSeconds),
@@ -75,6 +72,7 @@ object SpeechEngines {
             // ジョブごとの待ち時間と処理時間は、話した言葉を含まないので正式版でも書く（遅さの切り分けに使う）
             timing = { message -> Logs.i("会話の認識: $message") },
             retainUtterances = retainUtterances,
+            identifier = identifier,
         )
     }
 

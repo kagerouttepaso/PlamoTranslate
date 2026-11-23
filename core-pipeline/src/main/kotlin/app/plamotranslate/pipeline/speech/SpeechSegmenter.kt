@@ -51,7 +51,7 @@ import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
  */
 class SpeechSegmenter(
     private val vad: VoiceActivity,
-    /** 書き起こさずにスコアを出せる認識器か（[SpeechRecognizer.identifies]）。出せればスコアは識別のワーカーに回す。 */
+    /** 書き起こさずにスコアを出せる認識器か（[LanguageIdentifier]）。出せればスコアは識別のワーカーに回す。 */
     identifies: Boolean,
     private val profile: SegmentationProfile = SegmentationProfile.CONVERSATION,
     /** 書き起こしの重いモデルか（[SpeechModel.heavy]）。声の始まりより前を渡さず、途中結果の間隔を詰める。 */
@@ -584,7 +584,7 @@ class SpeechSegmenter(
         val fromAbs = abs(from)
         val phrase = Phrase(fromAbs, abs(buffer.size), lang)
         card.partialInFlight = true
-        transcribe(card, phrase, RecognitionPriority.PARTIAL, "途中", lang, paced = true) { r ->
+        transcribe(card, phrase, RecognitionPriority.PARTIAL, "途中", lang, paced = true, cancelled = { card.partialInFlight = false }) { r ->
             card.partialInFlight = false
             if (card !== open || card.lang != lang) return@transcribe
             noteTranscript(card, phrase, r)
@@ -638,10 +638,11 @@ class SpeechSegmenter(
         purpose: String,
         language: String?,
         paced: Boolean = false,
+        cancelled: () -> Unit = {},
         then: (Recognition) -> Unit,
     ) {
         val samples = phrase.audio ?: capture(rel(phrase.from), rel(phrase.end))
-        requests.transcribe(card.id, samples, phrase.end, priority, purpose, languages, language, fallbackLang(card), paced) { r ->
+        requests.transcribe(card.id, samples, phrase.end, priority, purpose, languages, language, fallbackLang(card), paced, cancelled) { r ->
             trace { "書き起こし（$purpose）${at(phrase.from)}〜${at(phrase.end)} 言語の指定 $language: [${r.lang}] ${r.text}" }
             then(r)
         }

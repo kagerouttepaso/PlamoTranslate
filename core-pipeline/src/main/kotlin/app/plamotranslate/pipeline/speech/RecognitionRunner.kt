@@ -1,18 +1,25 @@
 package app.plamotranslate.pipeline.speech
 
+sealed interface TranscriptLanguage {
+    data object Unspecified : TranscriptLanguage
+    data class Specified(val code: String) : TranscriptLanguage
+    data class Identify(val candidates: SpeechLanguages, val fallback: String?) : TranscriptLanguage
+}
+
 /**
  * 認識のジョブ（[RecognitionJob]）を1件処理する（認識のワーカーのスレッドが呼ぶ。試験では同じスレッドから呼ぶ）。
  * 認識のインターフェース [recognizer] を、ジョブの種類に合わせて呼び分ける。
  */
-class RecognitionRunner(private val recognizer: SpeechRecognizer) {
+class RecognitionRunner(private val recognizer: SpeechRecognizer, private val identifier: LanguageIdentifier? = null) {
+    private val identified = identifier?.let { IdentifiedRecognizer(it, recognizer) }
     /** ジョブを1件処理する（ワーカーのスレッド）。 */
     fun run(job: RecognitionJob): RecognitionOutput = when (job) {
         is RecognitionJob.Transcribe -> RecognitionOutput.Transcribed(
             // 話し手の言語が分かっていれば、識別を省いてその言語として書き起こす
-            if (job.language != null && (recognizer.identifies || job.languages.specified != null)) {
-                recognizer.recognizeAs(job.samples, job.language)
-            } else {
-                recognizer.recognize(job.samples, job.languages, job.fallback)
+            when (val language = job.language) {
+                TranscriptLanguage.Unspecified -> recognizer.recognize(job.samples)
+                is TranscriptLanguage.Specified -> recognizer.recognizeAs(job.samples, language.code)
+                is TranscriptLanguage.Identify -> checkNotNull(identified).identifyAndRecognize(job.samples, language.candidates, language.fallback)
             },
         )
         is RecognitionJob.Language -> scored(job.samples, job.languages, strict = true)
@@ -25,8 +32,8 @@ class RecognitionRunner(private val recognizer: SpeechRecognizer) {
      * [strict] なら、書き起こした結果の言語は、話し手の根拠になるもの（[LanguageEvidence.of]：文字の種類が合い、1語より多い）だけを使う。
      */
     private fun scored(samples: FloatArray, languages: SpeechLanguages, strict: Boolean): RecognitionOutput.Scored {
-        if (recognizer.identifies) return RecognitionOutput.Scored(recognizer.scores(samples, languages))
-        val r = TranscriptCleanup.clean(recognizer.recognize(samples, languages))
+        if (identifier != null) return RecognitionOutput.Scored(identifier.groupedScores(samples, languages))
+        val r = TranscriptCleanup.clean(recognizer.recognize(samples))
         val lang = if (strict) {
             LanguageEvidence.of(r, languages)
         } else {
