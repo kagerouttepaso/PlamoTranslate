@@ -185,9 +185,9 @@ class SpeechSegmenter(
         if (signal.phraseEnded) {
             // 文の終わり：区切りの無音を少しだけ残した位置を、文の終わりとして覚える
             val end = (buffer.size - phraseTailDrop).coerceAtLeast(stitchedEnd(card))
+            inGap = true
             phraseEnded(card, end)
             lastPhraseEnd = end
-            inGap = true
             gapSamples = 0
             trace { "文の終わり ${at(abs(end))}" }
         } else if (inGap) {
@@ -577,7 +577,7 @@ class SpeechSegmenter(
      * 書き起こした文につなぐ（言語が決まる前に書くと、会話に無い言語で書き起こされる）。
      */
     private fun requestPartial(card: Card) {
-        if (card.partialInFlight || card !== open) return
+        if (inGap || card.partialInFlight || card !== open) return
         val lang = card.lang ?: return
         val from = stitchedEnd(card)
         if (buffer.size - from < MIN_PARTIAL_SAMPLES) return

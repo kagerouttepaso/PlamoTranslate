@@ -291,6 +291,38 @@ class SpeechSegmenterTest {
     }
 
     @Test
+    fun 文末の後は途中認識を頼まず同じカードで話し直したら再開する() {
+        val speech = segmenter(SpeechLanguages(specified = "ja"))
+        speech.feed(Sound.JA to 1.5)
+        assertTrue(speech.submitted.any { it.priority == RecognitionPriority.PARTIAL })
+
+        speech.feed(Sound.SILENCE to profile.phraseSilenceSeconds.toDouble())
+        val afterEnd = speech.submitted.size
+        speech.feed(Sound.SILENCE to 1.0)
+        assertTrue(speech.submitted.drop(afterEnd).none { it.priority == RecognitionPriority.PARTIAL })
+
+        val beforeSpeech = speech.submitted.size
+        speech.feed(Sound.JA to 1.5)
+        assertTrue(speech.submitted.drop(beforeSpeech).any { it.priority == RecognitionPriority.PARTIAL })
+        speech.feed(Sound.SILENCE to 3.0)
+        assertEquals("あ".repeat(30), finals(speech.events).single().text)
+    }
+
+    @Test
+    fun 言語判定が文末の後に届いても途中認識を頼まない() {
+        val speech = Harness(
+            HeavyRecognizer(), profile, heavy = true, languages = SpeechLanguages(setOf("ja", "ko")),
+            languageLatencyChunks = 20,
+        )
+        repeat(21) { speech.accept(FloatArray(FRAME) { Sound.JA.value }) }
+        repeat(10) { speech.accept(FloatArray(FRAME)) }
+        speech.settle()
+        assertTrue(speech.submitted.any { it.priority == RecognitionPriority.PHRASE })
+        assertTrue(speech.submitted.none { it.priority == RecognitionPriority.PARTIAL })
+        assertEquals("ja", finals(speech.flush()).single().lang)
+    }
+
+    @Test
     fun 言いよどみの無音では区切らない() {
         // 文の区切り（0.6秒）より長く、話し終わり（3秒）より短い間
         val cards = finals(segmenter().feed(Sound.JA to 1.5, Sound.SILENCE to 1.0, Sound.JA to 1.5, Sound.SILENCE to 3.0))
