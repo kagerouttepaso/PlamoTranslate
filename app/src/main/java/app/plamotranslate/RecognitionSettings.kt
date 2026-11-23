@@ -20,8 +20,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.plamotranslate.asr.AsrTuning
-import app.plamotranslate.asr.SpeechEngines
-import app.plamotranslate.models.ModelCatalog
+import app.plamotranslate.pipeline.diagnostics.InferenceRole
+import app.plamotranslate.pipeline.speech.TranscriptionChoice
+import app.plamotranslate.pipeline.speech.TranscriptionPreference
+import app.plamotranslate.pipeline.speech.TranscriptionTuner
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import app.plamotranslate.models.BundleDownloadControl
 import app.plamotranslate.models.ModelBundle
 import app.plamotranslate.models.ModelDownloads
@@ -33,8 +39,27 @@ import app.plamotranslate.pipeline.speech.SpeechModel
  * 音声認識モデルの設定（2026-11-15、作者の要望「音声入力のモデルを、翻訳モデルのように事前の設定で切り替えたい」）。
  * 会話翻訳とテキスト翻訳の音声入力が、ここで選んだモデルで聞く。会話翻訳で選べる言語は、選んだモデルの言語になる。
  */
-class RecognitionPreferences(context: Context) {
+class RecognitionPreferences(context: Context) : TranscriptionTuner.Store {
     private val prefs = context.getSharedPreferences("recognition", Context.MODE_PRIVATE)
+
+    var transcriptionPreference: TranscriptionPreference
+        get() = TranscriptionPreference.entries.firstOrNull { it.name == prefs.getString("asr.preference", null) } ?: TranscriptionPreference.AUTO
+        set(value) = prefs.edit().putString("asr.preference", value.name).apply()
+
+    fun clearTrials() {
+        val editor = prefs.edit().remove("asr.lastTarget")
+        prefs.all.keys.filter { it.startsWith("asr.trial.") }.forEach(editor::remove)
+        editor.commit()
+    }
+
+    var lastTarget: String
+        get() = prefs.getString("asr.lastTarget", null) ?: "未準備"
+        set(value) = prefs.edit().putString("asr.lastTarget", value).apply()
+
+    override fun read(key: String) = TranscriptionChoice.decode(prefs.getString("asr.trial.$key", null))
+    override fun write(key: String, choice: TranscriptionChoice) {
+        check(prefs.edit().putString("asr.trial.$key", choice.encode()).commit()) { "試走結果を保存できませんでした" }
+    }
 
     var model: SpeechModel
         get() = prefs.getString("model", null)?.let { name -> SpeechModel.entries.firstOrNull { it.name == name } }
@@ -106,7 +131,8 @@ fun RecognitionCard() {
     val context = LocalContext.current
     val preferences = remember { RecognitionPreferences(context) }
     var model by remember { mutableStateOf(preferences.model) }
-    val asrDir = remember { ModelCatalog.asrDir(context) }
+    var preference by remember { mutableStateOf(preferences.transcriptionPreference) }
+    val fallback = remember { GpuGuard.disabledNote(context, InferenceRole.Transcription) }
     val download by ModelDownloads.items.collectAsStateWithLifecycle()
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -129,15 +155,37 @@ fun RecognitionCard() {
                 }
             }
             SpeechModel.entries.forEach { m ->
-                val missing = remember(m, download) { SpeechEngines.missingFiles(m, asrDir) }
+                val bundle = ModelBundle.of(m)
+                val missing by produceState(bundle.missing(context), m, download) {
+                    value = withContext(Dispatchers.IO) { bundle.missing(context, verify = true) }
+                }
                 Text("${m.label}：${m.note}", style = MaterialTheme.typography.bodySmall)
                 Text(
                     "聞ける言語：" + m.languages.joinToString("・") { it.label },
                     style = MaterialTheme.typography.bodySmall,
                 )
                 if (missing.isNotEmpty()) {
-                    val bundle = ModelBundle.of(m)
-                    BundleDownloadControl(bundle, "${m.label}は使う前にダウンロードします") { ModelDownloads.enqueue(context, listOf(bundle)) }
+                    BundleDownloadControl(bundle, if (m == SpeechModel.QWEN3_ASR) "Qwen3-ASR のモデルを取得・更新します" else "${m.label}は使う前にダウンロードします") { ModelDownloads.enqueue(context, listOf(bundle)) }
+                }
+            }
+            if (model == SpeechModel.QWEN3_ASR) {
+                Text("書き起こしの実行先")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for ((value, label) in listOf(TranscriptionPreference.AUTO to "自動", TranscriptionPreference.CPU to "CPU", TranscriptionPreference.GPU to "GPU")) {
+                        FilterChip(selected = preference == value, onClick = {
+                            preferences.transcriptionPreference = value
+                            preference = value
+                        }, label = { Text(label) })
+                    }
+                }
+                Text("前回の準備：${preferences.lastTarget}", style = MaterialTheme.typography.bodySmall)
+                if (fallback != null) {
+                    Text("書き起こしは CPU で動きます：$fallback")
+                    TextButton(onClick = {
+                        GpuGuard.retry(context, InferenceRole.Transcription)
+                        preferences.clearTrials()
+                        restartApp(context)
+                    }) { Text("書き起こしで GPU をもう一度試す（起動し直す）") }
                 }
             }
         }

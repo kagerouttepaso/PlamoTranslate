@@ -29,7 +29,7 @@ import java.io.File
  *
  * 環境変数で動かす（どれかが無ければ飛ばす）：
  * - PLAMO_REPLAY_WAV：会話の録音（端末の `files/asr-rec/conv_*.wav`）
- * - PLAMO_REPLAY_ASR：モデルの置き場（`silero_vad.onnx`・`qwen3-asr/`・`whisper-tiny/`・`sense-voice/`。端末の `files/models/asr/` と同じ形）
+ * - PLAMO_REPLAY_ASR：モデルの置き場（`silero_vad.onnx`・`qwen3-asr-gguf/`・`whisper-tiny/`・`sense-voice/`。端末の `files/models/asr/` と同じ形）
  * - PLAMO_REPLAY_MODEL：音声認識モデル（`QWEN3_ASR` か `SENSE_VOICE`。[SpeechModel] の名前。既定は `QWEN3_ASR`）
  * - PLAMO_REPLAY_OUT：結果を書くファイル（カードの一覧と区切りの経過）
  * - PLAMO_REPLAY_CUTS：手で区切った位置（秒、カンマ区切り。任意）
@@ -133,12 +133,13 @@ class ConversationReplayTest {
         val profile = SegmentationProfile.CONVERSATION
         val recognizer: SpeechRecognizer = when (model) {
             SpeechModel.SENSE_VOICE -> SenseVoiceRecognizer.load(asr!!)
-            SpeechModel.QWEN3_ASR -> System.getenv("MOCKINGWORD_ASR_FIXTURES")?.takeIf { desktop }?.let { directory ->
+            SpeechModel.QWEN3_ASR -> run {
+                val directory = System.getenv("MOCKINGWORD_ASR_FIXTURES") ?: File(asr, File(SharedModelCatalog.qwenWeights.path).parentFile!!.name).path
                 val native = requireNotNull(System.getenv("MOCKINGWORD_ASR_NATIVE"))
                 val gpu = System.getenv("MOCKINGWORD_ASR_VULKAN") == "1"
                 runBlocking { QwenAudioRecognizer.load(File(directory, File(SharedModelCatalog.qwenWeights.path).name),
                     File(directory, File(SharedModelCatalog.qwenProjector.path).name), native, "", InferenceTarget(gpu, gpu)) }
-            } ?: Qwen3Recognizer.load(File(asr, Qwen3Recognizer.DIR), 8)
+            }
         }
         val identifier = when {
             model != SpeechModel.QWEN3_ASR -> null

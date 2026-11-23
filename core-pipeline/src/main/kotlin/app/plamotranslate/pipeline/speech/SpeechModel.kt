@@ -31,7 +31,7 @@ enum class SpeechModel(
     /** Qwen3-ASR は30言語を聞く。そのうち PLaMo が訳せる言語（ポルトガル語・トルコ語などは PLaMo に無い）。 */
     QWEN3_ASR(
         "Qwen3-ASR 0.6B",
-        "21言語。遅い（5秒の発話に約1〜1.5秒）。言語は Whisper tiny で見分ける",
+        "21言語。話し中は Whisper tiny が言語を識別し、文が終わると書き起こしでも言語を判定する",
         listOf(
             Language.JA, Language.KO, Language.EN, Language.ZH, Language.ZH_HANT,
             Language.AR, Language.IT, Language.ID, Language.NL, Language.ES, Language.TH, Language.TL, Language.DE,

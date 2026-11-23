@@ -69,8 +69,9 @@ internal object GpuGuard {
     }
 
     /** GPUでの読み込みと初回の推論が終わったら呼ぶ（GPUで動いた、CPUでやり直した、失敗が返った、のどれでも）。 */
-    fun endGpuLoad(context: Context, role: InferenceRole) {
+    fun endGpuLoad(context: Context, role: InferenceRole, failure: String? = null) {
         val preferences = GpuPreferences(context, role)
+        if (failure != null) preferences.gpuDisabled = GpuDisabled(failure, buildKey(context), System.currentTimeMillis())
         preferences.gpuLoadingPid = 0
         preferences.gpuInterruptions = 0
     }

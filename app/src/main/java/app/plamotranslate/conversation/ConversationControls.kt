@@ -99,7 +99,6 @@ internal fun Controls(state: ConversationUiState, model: ModelState<TranslationM
             }
         }
         val status = when {
-            state.asr is AsrState.Missing -> "音声認識のモデルがありません。トップ画面に戻ると出る「モデルの準備」でダウンロードしてください"
             state.asr is AsrState.Failed -> state.asr.message
             state.asr == AsrState.Loading -> "音声認識を準備中…"
             model is ModelState.Missing -> "翻訳モデルがありません。トップ画面に戻ると出る「モデルの準備」か、設定の画面でダウンロードしてください"
@@ -111,7 +110,7 @@ internal fun Controls(state: ConversationUiState, model: ModelState<TranslationM
             else -> "「開始」を押して話してください（${state.self.label} ⇄ ${partnerLabel(state)}）"
         }
         Text(status, style = MaterialTheme.typography.labelMedium)
-        if (state.asr is AsrState.Missing || state.asr is AsrState.Failed) {
+        if (state.asr is AsrState.Failed) {
             TextButton(onClick = actions.retry) { Text("読み直す") }
         }
     }

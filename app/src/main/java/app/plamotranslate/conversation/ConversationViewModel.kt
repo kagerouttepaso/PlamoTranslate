@@ -12,12 +12,11 @@ import app.plamotranslate.ReadAloud
 import app.plamotranslate.AdvancedPreferences
 import app.plamotranslate.RecognitionPreferences
 import app.plamotranslate.TranslationPreferences
-import app.plamotranslate.asr.SpeechEngines
+import app.plamotranslate.loadSpeechEngine
 import app.plamotranslate.asr.WavFile
 import app.plamotranslate.audio.MicRecorder
 import app.plamotranslate.llm.Language
 import app.plamotranslate.log.Logs
-import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.pipeline.conversation.ConversationSession
 import app.plamotranslate.pipeline.conversation.ConversationSession.Effect
 import app.plamotranslate.pipeline.conversation.ConversationSession.Event
@@ -59,8 +58,6 @@ import kotlinx.coroutines.withContext
 sealed interface AsrState {
     data object Loading : AsrState
     data object Ready : AsrState
-    /** モデルのファイルが無い。adbで置いてもらう（docs/手順/開発環境.md）。 */
-    data class Missing(val paths: List<String>) : AsrState
     data class Failed(val message: String) : AsrState
 }
 
@@ -138,22 +135,16 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     fun loadAsr() {
-        val dir = ModelCatalog.asrDir(app)
-        val missing = SpeechEngines.missingFiles(speechModel, dir)
-        if (missing.isNotEmpty()) {
-            _state.update { it.copy(asr = AsrState.Missing(missing)) }
-            return
-        }
         _state.update { it.copy(asr = AsrState.Loading) }
         viewModelScope.launch {
             val begin = System.nanoTime()
-            val result = withContext(Dispatchers.Default) {
-                runCatching {
-                    SpeechEngines.load(speechModel, dir, recognition.profile(PROFILE), recognition.asrTuning, UtteranceRetention.KEEP_UTTERANCES)
-                }
+            val result = runCatching {
+                loadSpeechEngine(app, speechModel, recognition.profile(PROFILE), recognition.asrTuning, UtteranceRetention.KEEP_UTTERANCES)
             }
-            log("音声認識を読み込みました: $speechModel ${(System.nanoTime() - begin) / 1_000_000}ms")
-            result.onSuccess { asr = it.also(::attach) }
+            result.onSuccess {
+                log("音声認識を読み込みました: $speechModel ${(System.nanoTime() - begin) / 1_000_000}ms")
+                asr = it.also(::attach)
+            }
             _state.update {
                 it.copy(asr = result.fold({ AsrState.Ready }, { e -> AsrState.Failed(e.message ?: e.toString()) }))
             }

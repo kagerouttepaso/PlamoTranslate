@@ -98,7 +98,7 @@ object SharedModelCatalog {
     /**
      * 音声認識 Qwen3-ASR 0.6B int8 と、言語の識別 Whisper tiny int8。sherpa-onnx の配布物
      * （GitHubのリリース `asr-models` の tar と同じファイル）を Hugging Face のコミットで固定して取る。
-     * 置き場と並びは `Qwen3Recognizer`（core-asr-sherpa）と `WhisperLanguageIdentifier`（core-asr）に従う。
+     * 旧 Qwen の一覧は PC で利用者が旧モデルを整理するときに使う。
      */
     private const val QWEN3 = "$HF/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a"
     private const val WHISPER = "$HF/csukuangfj/sherpa-onnx-whisper-tiny/resolve/65176e2deb88badc814a94058666cadccc29b61c"
@@ -122,9 +122,9 @@ object SharedModelCatalog {
     val qwenProjector = gguf("mmproj-Qwen3-ASR-0.6B-Q8_0.gguf", 214_392_544, "3b5e371a03e7d14bc1b5a66f38ff3c5eec3a99b3f96deb72b3814da9adafb16d")
     val qwenGguf = listOf(qwenWeights, qwenProjector)
 
-    fun recognition(model: SpeechModel, gguf: Boolean = false): List<ModelFile> = when (model) {
+    fun recognition(model: SpeechModel): List<ModelFile> = when (model) {
         SpeechModel.SENSE_VOICE -> senseVoice
-        SpeechModel.QWEN3_ASR -> if (gguf) qwenGguf else qwen3Asr
+        SpeechModel.QWEN3_ASR -> qwenGguf
     }
 
     private fun asrFile(label: String, url: String, path: String, size: Long, sha256: String) =

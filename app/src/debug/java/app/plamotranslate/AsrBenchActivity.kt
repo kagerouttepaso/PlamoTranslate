@@ -5,7 +5,6 @@ import android.os.Bundle
 import android.os.Debug
 import android.widget.ScrollView
 import android.widget.TextView
-import app.plamotranslate.asr.Qwen3Recognizer
 import app.plamotranslate.asr.SenseVoiceRecognizer
 import app.plamotranslate.asr.WavFile
 import app.plamotranslate.asr.WhisperLanguageIdentifier
@@ -24,7 +23,7 @@ import kotlinx.coroutines.withContext
  *
  * 外部ファイル置き場の `bench/asr/` の WAV（16kHz・モノラル）を、SenseVoice・Whisper tiny の言語の識別・Qwen3-ASR
  * （言語の指定なし／識別した言語を指定）で1つずつ処理し、時間と結果を logcat と `bench/asr-result.tsv` に書く。
- * Qwen3-ASR は `models/asr/qwen3-asr/`、Whisper tiny は `models/asr/whisper-tiny/` に置く。
+ * Qwen3-ASR は `models/asr/qwen3-asr-gguf/`、Whisper tiny は `models/asr/whisper-tiny/` に置く。
  *
  * adb shell am start -S -n app.plamotranslate/.AsrBenchActivity
  */
@@ -42,7 +41,7 @@ class AsrBenchActivity : Activity() {
         }
     }
 
-    private fun run(): String {
+    private suspend fun run(): String {
         val out = StringBuilder()
         fun line(s: String) {
             out.appendLine(s)
@@ -57,7 +56,7 @@ class AsrBenchActivity : Activity() {
         val (sv, svMs) = timed { SenseVoiceRecognizer.load(asrDir) }
         val (lid, lidMs) = timed { WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR)) }
         val pss1 = Debug.getPss()
-        val (qwen, qwenMs) = timed { Qwen3Recognizer.load(File(asrDir, Qwen3Recognizer.DIR), threads = 4) }
+        val (qwen, qwenMs) = timed { AndroidQwen.load(this, 4) }
         val pss2 = Debug.getPss()
         line("読み込み: SenseVoice ${svMs}ms, Whisper識別 ${lidMs}ms, Qwen3 ${qwenMs}ms")
         line("PSS: 始め ${pss0 / 1024}MB, SenseVoice+Whisper後 ${pss1 / 1024}MB, Qwen3後 ${pss2 / 1024}MB")
@@ -78,7 +77,7 @@ class AsrBenchActivity : Activity() {
 
         // スレッド数の違い（時間だけ）
         for (threads in listOf(3, 6)) {
-            val q = Qwen3Recognizer.load(File(asrDir, Qwen3Recognizer.DIR), threads)
+            val q = AndroidQwen.load(this, threads)
             q.recognize(audio.values.first())
             val times = audio.map { (name, samples) -> "$name ${timed { q.recognize(samples) }.second}ms" }
             line("Qwen3 ${threads}スレッド: ${times.joinToString(", ")}")

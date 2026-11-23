@@ -46,7 +46,7 @@ class DesktopModelDownloadsTest {
         val directory = temporary.root.toPath()
         val files = DesktopSpeechModels.requiredFiles(SpeechModel.QWEN3_ASR)
         assertTrue(files.containsAll(catalog.qwenGguf))
-        assertTrue(catalog.recognition(SpeechModel.QWEN3_ASR).none { it in catalog.qwenGguf })
+        assertEquals(catalog.qwenGguf, catalog.recognition(SpeechModel.QWEN3_ASR))
         catalog.qwen3Asr.forEach { file ->
             val target = directory.resolve(file.path)
             Files.createDirectories(target.parent)

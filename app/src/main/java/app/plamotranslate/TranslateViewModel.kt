@@ -7,7 +7,6 @@ import android.app.Application
 import androidx.annotation.RequiresPermission
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import app.plamotranslate.asr.SpeechEngines
 import app.plamotranslate.pipeline.speech.SegmentationProfile
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechEvent
@@ -15,7 +14,6 @@ import app.plamotranslate.pipeline.speech.SpeechLanguages
 import app.plamotranslate.audio.MicRecorder
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.isChinese
-import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
 import app.plamotranslate.pipeline.translation.translateOne
@@ -156,17 +154,10 @@ class TranslateViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun loadAsr(): SpeechEngine? {
-        val dir = ModelCatalog.asrDir(app)
-        // 音声認識モデルは設定の画面で選んだもの（会話翻訳と同じ）。開くたびに読むので、切り替えは次に聞くときに効く
-        val speechModel = RecognitionPreferences(app).model
-        if (SpeechEngines.missingFiles(speechModel, dir).isNotEmpty()) {
-            _state.update { it.copy(error = "音声認識のモデルがありません。トップ画面の「モデルの準備」でダウンロードしてください") }
-            return null
-        }
         _state.update { it.copy(voice = VoiceState.Loading, error = null) }
         val tuning = RecognitionPreferences(app)
-        val result = withContext(Dispatchers.Default) {
-            runCatching { SpeechEngines.load(speechModel, dir, tuning.profile(SegmentationProfile.CONVERSATION), tuning.asrTuning) }
+        val result = runCatching {
+            loadSpeechEngine(app, tuning.model, tuning.profile(SegmentationProfile.CONVERSATION), tuning.asrTuning)
         }
         _state.update { it.copy(voice = VoiceState.Idle) }
         return result.fold(

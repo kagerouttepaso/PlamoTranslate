@@ -8,7 +8,7 @@ import java.nio.file.Path
 
 internal object DesktopSpeechModels {
     fun requiredFiles(model: SpeechModel): List<ModelFile> =
-        listOf(SharedModelCatalog.sileroVad) + SharedModelCatalog.recognition(model, gguf = true)
+        listOf(SharedModelCatalog.sileroVad) + SharedModelCatalog.recognition(model)
 
     fun downloadFiles(model: SpeechModel): List<ModelFile> =
         if (model.identifiesLanguage) requiredFiles(model) else SharedModelCatalog.whisperTiny + requiredFiles(model)

@@ -252,7 +252,7 @@ private fun SettingSwitch(title: String, note: String, checked: Boolean, enabled
 }
 
 /** トップ画面を開き直してからプロセスを終える。バックエンドのライブラリは起動ごとに1回だけ読み込むため。 */
-private fun restartApp(context: android.content.Context) {
+internal fun restartApp(context: android.content.Context) {
     // 意図して終えたことをOSの記録に残す。GPUの読み込み中でもGPUで落ちたとみなさず、不具合としても記録しない
     app.plamotranslate.diagnostics.ProcessMarks.markIntendedExit(context)
     val intent = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return
