@@ -1,5 +1,6 @@
 package app.plamotranslate
 
+import app.plamotranslate.pipeline.diagnostics.InferenceRole
 import android.content.Context
 import android.os.Build
 import app.plamotranslate.diagnostics.ProcessExits
@@ -29,10 +30,10 @@ import java.util.Locale
 internal object GpuGuard {
     /**
      * 読み込みの前に呼ぶ。GPUを使ってよいか。前回GPUの読み込み中に終わっていれば、ここで決めて記録する。
-     * GPUを使わない設定・端末でも呼ぶ（前回のマーカーをこの起動で片付けるため）。
+     * 役割のGPU準備を直列化した区間で、今回のマーカーを書く前に呼ぶ。
      */
-    fun allowGpu(context: Context): Boolean {
-        val preferences = TranslationPreferences(context)
+    fun allowGpu(context: Context, role: InferenceRole): Boolean {
+        val preferences = GpuPreferences(context, role)
         val build = buildKey(context)
         val pendingPid = preferences.gpuLoadingPid
         val exit = if (pendingPid != 0) ProcessExits.history(context, pendingPid, 1).firstOrNull()?.toProcessExit() else null
@@ -63,27 +64,27 @@ internal object GpuGuard {
     }
 
     /** GPUで読み込む直前に呼ぶ。プロセスごと終わっても残るよう、すぐに書く。 */
-    fun beginGpuLoad(context: Context) {
-        TranslationPreferences(context).gpuLoadingPid = android.os.Process.myPid()
+    fun beginGpuLoad(context: Context, role: InferenceRole) {
+        GpuPreferences(context, role).gpuLoadingPid = android.os.Process.myPid()
     }
 
     /** GPUでの読み込みと初回の推論が終わったら呼ぶ（GPUで動いた、CPUでやり直した、失敗が返った、のどれでも）。 */
-    fun endGpuLoad(context: Context) {
-        val preferences = TranslationPreferences(context)
+    fun endGpuLoad(context: Context, role: InferenceRole) {
+        val preferences = GpuPreferences(context, role)
         preferences.gpuLoadingPid = 0
         preferences.gpuInterruptions = 0
     }
 
     /** 設定の画面の「GPUをもう一度試す」。次の起動でGPUを使う。 */
-    fun retry(context: Context) {
-        val preferences = TranslationPreferences(context)
+    fun retry(context: Context, role: InferenceRole) {
+        val preferences = GpuPreferences(context, role)
         preferences.gpuDisabled = null
         preferences.gpuLoadingPid = 0
         preferences.gpuInterruptions = 0
     }
 
     /** GPUを外したときの説明（設定の画面に出す）。外していなければ null。 */
-    fun disabledNote(context: Context): String? = TranslationPreferences(context).gpuDisabled?.let {
+    fun disabledNote(context: Context, role: InferenceRole): String? = GpuPreferences(context, role).gpuDisabled?.let {
         val at = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.JAPAN).format(Date(it.at))
         "${it.reason}、$at"
     }

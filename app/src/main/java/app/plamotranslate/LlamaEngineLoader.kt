@@ -1,5 +1,8 @@
 package app.plamotranslate
 
+import app.plamotranslate.pipeline.diagnostics.InferenceRole
+import app.plamotranslate.llm.LlamaRuntime
+import app.plamotranslate.pipeline.diagnostics.InferencePolicy
 import android.content.Context
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.TranslationEngine
@@ -9,6 +12,7 @@ import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.models.file
 import app.plamotranslate.pipeline.translation.EngineLoader
 import app.plamotranslate.pipeline.translation.SingleRequest
+import kotlinx.coroutines.CancellationException
 import java.io.File
 
 /**
@@ -24,17 +28,19 @@ internal class LlamaEngineLoader(private val context: () -> Context) : EngineLoa
         val clCache = File(app.cacheDir, "cl-cache").apply { mkdirs() }
         android.system.Os.setenv("GGML_OPENCL_KERNEL_CACHE_DIR", clCache.path, true)
         val preferences = TranslationPreferences(app)
-        // 前回GPUでの読み込み中にアプリが終わっていたら、ここでCPUに切り替える（GpuGuard）
-        val gpu = preferGpu(preferences.cpuOnly) && GpuGuard.allowGpu(app)
-        // 読み込みと初回の推論（warmUp）の間にGPUのカーネルを組み立てる。ここで落ちたら、次の起動でCPUにする
-        if (gpu) GpuGuard.beginGpuLoad(app)
-        try {
-            return TranslationEngine.load(model.file.file(app), app.applicationInfo.nativeLibraryDir, gpu, cpu = preferences.cpuOptions).also {
-                it.parallel = parallel
-                warmUp(it)
+        val candidate = InferencePolicy.target(hasAdreno(), preferences.cpuOnly, true)
+        return LlamaRuntime.process.prepare(candidate.useGpu) {
+            val role = InferenceRole.Translation
+            val target = candidate.copy(requestGpu = candidate.useGpu && GpuGuard.allowGpu(app, role))
+            if (target.useGpu) GpuGuard.beginGpuLoad(app, role)
+            try {
+                TranslationEngine.load(model.file.file(app), app.applicationInfo.nativeLibraryDir, target, cpu = preferences.cpuOptions).also {
+                    it.parallel = parallel
+                    warmUp(it)
+                }
+            } finally {
+                if (target.useGpu) GpuGuard.endGpuLoad(app, role)
             }
-        } finally {
-            if (gpu) GpuGuard.endGpuLoad(app)
         }
     }
 
@@ -53,8 +59,7 @@ internal class LlamaEngineLoader(private val context: () -> Context) : EngineLoa
      * 次の起動で [GpuGuard] がCPUに切り替える。
      * 設定の「性能」で「CPUだけで動かす」を選ぶと、Snapdragonの端末でもCPUで動く（CPUの速さを確かめるため）。
      */
-    private fun preferGpu(cpuOnly: Boolean): Boolean {
-        if (cpuOnly) return false
+    private fun hasAdreno(): Boolean {
         val soc = android.os.Build.SOC_MANUFACTURER
         return soc.equals("QTI", ignoreCase = true) || soc.contains("Qualcomm", ignoreCase = true) ||
             android.os.Build.HARDWARE.equals("qcom", ignoreCase = true)
@@ -65,7 +70,13 @@ internal class LlamaEngineLoader(private val context: () -> Context) : EngineLoa
      * 読み込み直後に短い文を1回訳しておき、作者の最初の翻訳を待たせない。
      */
     private suspend fun warmUp(engine: TranslationEngine) {
-        runCatching { engine.run(1, SingleRequest(TranslationRequest("안녕하세요", Language.KO, Language.JA)), maxTokens = 8) }
-            .onFailure { Logs.w("起動診断: 準備用の推論が失敗しました", it) }
+        try {
+            engine.run(1, SingleRequest(TranslationRequest("안녕하세요", Language.KO, Language.JA)), maxTokens = 8)
+        } catch (cancelled: CancellationException) {
+            engine.close()
+            throw cancelled
+        } catch (error: Exception) {
+            Logs.w("起動診断: 準備用の推論が失敗しました", error)
+        }
     }
 }

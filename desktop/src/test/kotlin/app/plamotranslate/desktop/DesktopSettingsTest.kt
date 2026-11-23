@@ -1,5 +1,6 @@
 package app.plamotranslate.desktop
 
+import app.plamotranslate.pipeline.diagnostics.InferenceRole
 import app.plamotranslate.llm.TranslationEngine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -12,6 +13,23 @@ import java.nio.file.Files
 
 class DesktopSettingsTest {
     @get:Rule val folder = TemporaryFolder()
+
+    @Test
+    fun `旧退避を翻訳だけへ移し再試行で別役割とCPU限定を変えない`() {
+        val directory = folder.root.toPath()
+        val file = directory.resolve("settings.properties")
+        Files.writeString(file, "gpuFallback=driver\ncpuOnly=true\n")
+        val settings = DesktopSettings(directory).apply { read() }
+        assertFalse(Files.readString(file).contains("gpuFallback="))
+        assertNull(settings.gpuFallback(InferenceRole.Transcription))
+        assertTrue(settings.beginGpuLoad(InferenceRole.Transcription))
+        settings.endGpuLoad(InferenceRole.Transcription, "ASR")
+        settings.retryGpu(InferenceRole.Translation)
+        val restarted = DesktopSettings(directory).apply { read() }
+        assertNull(restarted.gpuFallback(InferenceRole.Translation))
+        assertEquals("ASR", restarted.gpuFallback(InferenceRole.Transcription))
+        assertTrue(restarted.cpuOnly)
+    }
 
     @Test
     fun `詳しいログは既定でオフになり選択を保存できる`() {
@@ -31,17 +49,17 @@ class DesktopSettingsTest {
         val directory = folder.root.toPath()
         val file = directory.resolve("settings.properties")
         Files.writeString(file, "gpuLoadingPid=0\n")
-        assertTrue(DesktopSettings(directory).apply { read() }.beginGpuLoad())
-        Files.writeString(file, Files.readString(file).replace(Regex("gpuLoadingPid=\\d+"), "gpuLoadingPid=0"))
+        assertTrue(DesktopSettings(directory).apply { read() }.beginGpuLoad(InferenceRole.Translation))
+        Files.writeString(file, Files.readString(file).replace(Regex("loadingPid=\\d+"), "loadingPid=0"))
 
         val restarted = DesktopSettings(directory).apply { read() }
-        assertFalse(restarted.beginGpuLoad())
-        assertTrue(restarted.gpuFallback.orEmpty().contains("2回"))
-        assertFalse(DesktopSettings(directory).apply { read() }.beginGpuLoad())
-        restarted.retryGpu()
-        assertTrue(restarted.beginGpuLoad())
-        restarted.endGpuLoad()
-        assertNull(DesktopSettings(directory).apply { read() }.gpuFallback)
+        assertFalse(restarted.beginGpuLoad(InferenceRole.Translation))
+        assertTrue(restarted.gpuFallback(InferenceRole.Translation).orEmpty().contains("2回"))
+        assertFalse(DesktopSettings(directory).apply { read() }.beginGpuLoad(InferenceRole.Translation))
+        restarted.retryGpu(InferenceRole.Translation)
+        assertTrue(restarted.beginGpuLoad(InferenceRole.Translation))
+        restarted.endGpuLoad(InferenceRole.Translation)
+        assertNull(DesktopSettings(directory).apply { read() }.gpuFallback(InferenceRole.Translation))
     }
 
     @Test
@@ -89,7 +107,7 @@ class DesktopSettingsTest {
         assertEquals(ThemeMode.SYSTEM, settings.appearance)
         settings.saveTheme(ThemeMode.LIGHT)
         settings.saveCpuOptions(settings.cpuOptions.copy(spinWait = false, threadPool = false, mmap = false))
-        settings.endGpuLoad("GPU 準備失敗")
+        settings.endGpuLoad(InferenceRole.Translation, "GPU 準備失敗")
         val reopened = DesktopSettings(directory).apply { read() }
         assertFalse(reopened.cpuOptions.mmap)
         assertFalse(reopened.cpuOptions.threadPool)
@@ -97,6 +115,6 @@ class DesktopSettingsTest {
         reopened.resetPerformance()
         assertEquals(app.plamotranslate.llm.CpuOptions(), reopened.cpuOptions)
         assertEquals(ThemeMode.LIGHT, reopened.appearance)
-        assertEquals("GPU 準備失敗", reopened.gpuFallback)
+        assertEquals("GPU 準備失敗", reopened.gpuFallback(InferenceRole.Translation))
     }
 }

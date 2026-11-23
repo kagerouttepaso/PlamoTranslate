@@ -1,5 +1,9 @@
 package app.plamotranslate.desktop
 
+import app.plamotranslate.pipeline.diagnostics.InferenceRole
+import app.plamotranslate.pipeline.diagnostics.InferenceTarget
+import app.plamotranslate.llm.LlamaRuntime
+import app.plamotranslate.pipeline.diagnostics.InferencePolicy
 import app.plamotranslate.llm.CpuOptions
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.ParallelTranslationBenchmark
@@ -47,7 +51,7 @@ internal class DesktopSettings(private val directory: Path) {
         threadPool = properties.getProperty("threadPool")?.toBooleanStrictOrNull() ?: true,
         mmap = properties.getProperty("mmap")?.toBooleanStrictOrNull() ?: true)
     val cpuOnly: Boolean get() = properties.getProperty("cpuOnly").toBoolean()
-    val gpuFallback: String? get() = properties.getProperty("gpuFallback")
+    fun gpuFallback(role: InferenceRole): String? = properties.getProperty("gpu.${role.key}.fallback")
     val detailedLogs: Boolean get() = properties.getProperty("detailedLogs").toBoolean()
 
     @Synchronized
@@ -58,6 +62,10 @@ internal class DesktopSettings(private val directory: Path) {
         val savedPath = read.getProperty("model")
         if (savedPath.isNullOrBlank()) read.remove("model") else Path.of(savedPath)
         properties = read
+        val legacy = mapOf("gpuFallback" to "fallback", "gpuLoadingPid" to "loadingPid", "gpuInterruptions" to "interruptions")
+        if (legacy.keys.any(read::containsKey)) update {
+            legacy.forEach { (old, field) -> remove(old)?.let { putIfAbsent("gpu.${InferenceRole.Translation.key}.$field", it) } }
+        }
     }
 
     fun save(path: Path) = update { setProperty("model", path.toString()) }
@@ -82,42 +90,41 @@ internal class DesktopSettings(private val directory: Path) {
 
     fun saveDetailedLogs(enabled: Boolean) = update { setProperty("detailedLogs", enabled.toString()) }
 
-    fun retryGpu() = update {
-        remove("cpuOnly")
-        remove("gpuFallback")
-        remove("gpuLoadingPid")
-        remove("gpuInterruptions")
+    fun retryGpu(role: InferenceRole) = update {
+        remove("gpu.${role.key}.fallback")
+        remove("gpu.${role.key}.loadingPid")
+        remove("gpu.${role.key}.interruptions")
     }
 
     @Synchronized
-    fun beginGpuLoad(): Boolean {
+    fun beginGpuLoad(role: InferenceRole): Boolean {
         val pid = ProcessHandle.current().pid()
-        val previous = properties.getProperty("gpuLoadingPid")?.toLongOrNull()
+        val previous = properties.getProperty("gpu.${role.key}.loadingPid")?.toLongOrNull()
         if (previous != null && previous != pid && ProcessHandle.of(previous).map { it.isAlive }.orElse(false)) return false
-        val interruptions = properties.getProperty("gpuInterruptions")?.toIntOrNull() ?: 0
-        val decision = GpuStartupPolicy.decide(gpuFallback != null, previous != null, interruptions,
+        val interruptions = properties.getProperty("gpu.${role.key}.interruptions")?.toIntOrNull() ?: 0
+        val decision = GpuStartupPolicy.decide(gpuFallback(role) != null, previous != null, interruptions,
             abnormal = false, intended = false, exitLabel = "終了理由の記録なし")
         if (decision == GpuStartupPolicy.Decision.KeepCpu) return false
         update {
             when (decision) {
                 is GpuStartupPolicy.Decision.Disable -> {
-                    setProperty("gpuFallback", decision.reason)
-                    remove("gpuLoadingPid")
-                    remove("gpuInterruptions")
+                    setProperty("gpu.${role.key}.fallback", decision.reason)
+                    remove("gpu.${role.key}.loadingPid")
+                    remove("gpu.${role.key}.interruptions")
                 }
                 else -> {
-                    setProperty("gpuLoadingPid", pid.toString())
-                    if (decision is GpuStartupPolicy.Decision.Retry) setProperty("gpuInterruptions", decision.interruptions.toString())
+                    setProperty("gpu.${role.key}.loadingPid", pid.toString())
+                    if (decision is GpuStartupPolicy.Decision.Retry) setProperty("gpu.${role.key}.interruptions", decision.interruptions.toString())
                 }
             }
         }
         return decision !is GpuStartupPolicy.Decision.Disable
     }
 
-    fun endGpuLoad(failure: String? = null) = update {
-        remove("gpuLoadingPid")
-        remove("gpuInterruptions")
-        if (failure != null) setProperty("gpuFallback", failure)
+    fun endGpuLoad(role: InferenceRole, failure: String? = null) = update {
+        remove("gpu.${role.key}.loadingPid")
+        remove("gpu.${role.key}.interruptions")
+        if (failure != null) setProperty("gpu.${role.key}.fallback", failure)
     }
 
     fun manualParallel(model: Path, gpu: Boolean): Int? = parallelValue(parallelKey("manual", model, gpu))
@@ -173,34 +180,38 @@ internal class DesktopEngineLoader(
         DesktopModelCatalog.entries.firstOrNull { it.path(settings.modelDirectory) == model }?.let { entry ->
             check(DesktopModelDownloads.verify(model, entry.file)) { "モデルを照合できません。設定からモデルを選び直してください。" }
         }
-        val gpu = preferGpu && !settings.cpuOnly && settings.beginGpuLoad()
-        try {
-            val engine = loadEngine(model, gpu, parallel)
-            if (gpu && engine.usesGpu) {
-                try {
-                    warmUp(engine)
-                } catch (error: Exception) {
-                    engine.close()
-                    if (error is kotlinx.coroutines.CancellationException) throw error
-                    Logs.w("GPUでの準備用の推論に失敗しました。CPUで動かします。", error)
-                    settings.endGpuLoad("GPUでの準備用の推論に失敗しました")
-                    return@withContext loadEngine(model, false, parallel)
+        val candidate = InferencePolicy.target(preferGpu, settings.cpuOnly, true)
+        LlamaRuntime.process.prepare(candidate.useGpu) {
+            val target = candidate.copy(requestGpu = candidate.useGpu && settings.beginGpuLoad(InferenceRole.Translation))
+            val gpu = target.useGpu
+            try {
+                val engine = loadEngine(model, target, parallel)
+                if (gpu && engine.usesGpu) {
+                    try {
+                        warmUp(engine)
+                    } catch (error: Exception) {
+                        engine.close()
+                        if (error is kotlinx.coroutines.CancellationException) throw error
+                        Logs.w("GPUでの準備用の推論に失敗しました。CPUで動かします。", error)
+                        settings.endGpuLoad(InferenceRole.Translation, "GPUでの準備用の推論に失敗しました")
+                        return@prepare loadEngine(model, target.copy(requestGpu = false), parallel)
+                    }
                 }
+                if (gpu) settings.endGpuLoad(InferenceRole.Translation)
+                engine
+            } catch (error: LinkageError) {
+                if (gpu) settings.endGpuLoad(InferenceRole.Translation)
+                Logs.e("Windows の翻訳ライブラリを読み込めませんでした", error)
+                throw IllegalStateException("翻訳ライブラリを読み込めません。DLL の配置を確認して再起動してください。", error)
+            } catch (error: Exception) {
+                if (gpu) settings.endGpuLoad(InferenceRole.Translation)
+                throw error
             }
-            if (gpu) settings.endGpuLoad()
-            engine
-        } catch (error: LinkageError) {
-            if (gpu) settings.endGpuLoad()
-            Logs.e("Windows の翻訳ライブラリを読み込めませんでした", error)
-            throw IllegalStateException("翻訳ライブラリを読み込めません。DLL の配置を確認して再起動してください。", error)
-        } catch (error: Exception) {
-            if (gpu) settings.endGpuLoad()
-            throw error
         }
     }
 
-    private suspend fun loadEngine(model: Path, gpu: Boolean, parallel: Int): TranslationEngine =
-        TranslationEngine.load(model.toFile(), nativeDir, gpu, cpu = settings.cpuOptions).also {
+    private suspend fun loadEngine(model: Path, target: InferenceTarget, parallel: Int): TranslationEngine =
+        TranslationEngine.load(model.toFile(), nativeDir, target, cpu = settings.cpuOptions).also {
             it.parallel = parallel
         }
 

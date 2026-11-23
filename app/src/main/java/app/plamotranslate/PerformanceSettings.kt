@@ -1,5 +1,6 @@
 package app.plamotranslate
 
+import app.plamotranslate.pipeline.diagnostics.InferenceRole
 import app.plamotranslate.pipeline.translation.ModelState
 import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.pipeline.translation.ParallelTuner
@@ -59,7 +60,7 @@ fun PerformanceCard(model: ModelState<TranslationModel>) {
     var parallel by remember { mutableStateOf(preferences.parallel) }
     var tuning by remember { mutableStateOf<String?>(null) }
     val busy = model is ModelState.Loading || measuring
-    val gpuDisabled = remember { GpuGuard.disabledNote(context) }
+    val gpuDisabled = remember { GpuGuard.disabledNote(context, InferenceRole.Translation) }
 
     fun apply(next: CpuOptions = options, nextCpuOnly: Boolean = cpuOnly) {
         options = next
@@ -129,7 +130,7 @@ fun PerformanceCard(model: ModelState<TranslationModel>) {
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedButton(enabled = !busy, onClick = {
-                    GpuGuard.retry(context)
+                    GpuGuard.retry(context, InferenceRole.Translation)
                     restartApp(context)
                 }) { Text("GPUをもう一度試す（起動し直す）") }
             }

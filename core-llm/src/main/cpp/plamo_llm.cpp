@@ -20,7 +20,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
-#include <mutex>
 #include <set>
 #include <string>
 #include <vector>
@@ -223,19 +222,13 @@ void log_callback(ggml_log_level level, const char *text, void *) {
     }
 }
 
-std::once_flag g_backend_once;
-
 // CPUバックエンド（libggml-cpu-*.so）は実行時に読み込むので、スレッドプールの関数も読み込んだ後に探す
 using threadpool_new_fn = decltype(ggml_threadpool_new) *;
 using threadpool_free_fn = decltype(ggml_threadpool_free) *;
 threadpool_new_fn g_threadpool_new = nullptr;
 threadpool_free_fn g_threadpool_free = nullptr;
 
-// GPU（OpenCL）のデバイスが使えるようになったか。読み込めない端末では false
-bool g_has_gpu = false;
 #if defined(_WIN32)
-std::once_flag g_vulkan_once;
-
 void load_windows_cpu(const std::string & lib_dir) {
     namespace fs = std::filesystem;
     const auto directory = fs::u8path(lib_dir);
@@ -261,6 +254,11 @@ void load_windows_cpu(const std::string & lib_dir) {
 
 // 読み込んだCPUバックエンドのファイル名（設定の画面に出す）
 std::string g_cpu_backend;
+
+ggml_backend_dev_t gpu_device() {
+    auto device = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
+    return device ? device : ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU);
+}
 
 void find_cpu_functions() {
     ggml_backend_dev_t cpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
@@ -346,79 +344,61 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
     return JNI_VERSION_1_6;
 }
 
-// アプリのネイティブライブラリの置き場（nativeLibraryDir）から、バックエンドのライブラリを読み込む。
-// load_gpu が false なら、GPU（OpenCL）の部分は読み込まずCPUだけにする。最初の1回だけ有効。
-// 戻り値は、GPUのデバイスが使えるようになったか。
-extern "C" JNIEXPORT jboolean JNICALL
-Java_app_plamotranslate_llm_LlamaNative_nativeInit(JNIEnv *env, jobject, jstring jlib_dir, jboolean load_gpu,
-                                                   jstring jcpu_variant) {
+extern "C" JNIEXPORT void JNICALL
+Java_app_plamotranslate_llm_LlamaNative_nativeInitCpu(JNIEnv *env, jobject, jstring jlib_dir, jstring jcpu_variant) {
     const std::string lib_dir = to_std_string(env, jlib_dir);
+    llama_log_set(log_callback, nullptr);
+    startup_stage("バックエンド初期化 開始");
 #if defined(__ANDROID__)
-    // 空なら自動。ファイル名（libggml-cpu-*.so）を指定すると、その版だけを候補にする（設定の「性能」の「CPU向けの処理の版」）
     const std::string cpu_variant = to_std_string(env, jcpu_variant);
-#endif
-    std::call_once(g_backend_once, [&] {
-        llama_log_set(log_callback, nullptr);
-        startup_stage("バックエンド初期化 開始");
-#if defined(__ANDROID__)
-        if (load_gpu) {
-            // OpenCLの無い端末では libggml-opencl.so の読み込みだけが失敗し、CPUの部分は読み込まれる
-            ggml_backend_load_all_from_path(lib_dir.c_str());
-        } else {
-            // CPUの部分だけ読み込む。世代ごとの版のうち、端末で動く中で一番スコアの高いもの（ggml_backend_score）を選ぶ。
-            // ggml_backend_load_all_from_path と同じ選び方を、GPUを除いて行う
-            std::string best;
-            int best_score = 0;
-            if (DIR *dir = opendir(lib_dir.c_str())) {
-                while (dirent *e = readdir(dir)) {
-                    const std::string name = e->d_name;
-                    if (name.rfind("libggml-cpu", 0) != 0) continue;
-                    if (!cpu_variant.empty() && name != cpu_variant) continue;
-                    const std::string full = lib_dir + "/" + name;
-                    void *handle = dlopen(full.c_str(), RTLD_NOW | RTLD_LOCAL);
-                    if (!handle) continue;
-                    using score_fn = int (*)();
-                    auto score = (score_fn) dlsym(handle, "ggml_backend_score");
-                    const int s = score ? score() : 0;
-                    dlclose(handle);
-                    if (s > best_score) {
-                        best_score = s;
-                        best = full;
-                    }
-                }
-                closedir(dir);
-            }
-            if (!best.empty() && ggml_backend_load(best.c_str())) {
-                LOGI("CPUのバックエンド: %s（スコア%d）", best.c_str(), best_score);
-                g_cpu_backend = best.substr(best.find_last_of('/') + 1);
-            } else {
-                LOGE("CPUのバックエンドを読み込めませんでした: %s", lib_dir.c_str());
+    std::string best;
+    int best_score = 0;
+    if (DIR *dir = opendir(lib_dir.c_str())) {
+        while (dirent *e = readdir(dir)) {
+            const std::string name = e->d_name;
+            if (name.rfind("libggml-cpu", 0) != 0) continue;
+            if (!cpu_variant.empty() && name != cpu_variant) continue;
+            const std::string full = lib_dir + "/" + name;
+            void *handle = dlopen(full.c_str(), RTLD_NOW | RTLD_LOCAL);
+            if (!handle) continue;
+            using score_fn = int (*)();
+            auto score = (score_fn) dlsym(handle, "ggml_backend_score");
+            const int s = score ? score() : 0;
+            dlclose(handle);
+            if (s > best_score) {
+                best_score = s;
+                best = full;
             }
         }
+        closedir(dir);
+    }
+    if (!best.empty() && ggml_backend_load(best.c_str())) {
+        LOGI("CPUのバックエンド: %s（スコア%d）", best.c_str(), best_score);
+        g_cpu_backend = best.substr(best.find_last_of('/') + 1);
+    } else {
+        LOGE("CPUのバックエンドを読み込めませんでした: %s", lib_dir.c_str());
+    }
 #elif defined(_WIN32)
-        load_windows_cpu(lib_dir);
-#else
-        ggml_backend_load_all_from_path(lib_dir.c_str());
+    load_windows_cpu(lib_dir);
 #endif
-        llama_backend_init();
-        find_cpu_functions();
+    if (!ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU)) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"), "CPUのバックエンドを登録できませんでした");
+        return;
+    }
+    llama_backend_init();
+    find_cpu_functions();
+    startup_stage("バックエンド初期化 完了");
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_app_plamotranslate_llm_LlamaNative_nativeRegisterGpu(JNIEnv *env, jobject, jstring jlib_dir) {
+    const std::string lib_dir = to_std_string(env, jlib_dir);
 #if defined(__ANDROID__)
-        g_has_gpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) != nullptr;
-#elif !defined(_WIN32)
-        g_has_gpu = llama_supports_gpu_offload();
+    ggml_backend_load((lib_dir + "/libggml-opencl.so").c_str());
+#elif defined(_WIN32)
+    ggml_backend_load((std::filesystem::u8path(lib_dir) / "ggml-vulkan.dll").u8string().c_str());
 #endif
-        LOGI("計算のバックエンド: デバイス%zu個、GPU%s", ggml_backend_dev_count(), g_has_gpu ? "あり" : "なし");
-        startup_stage("バックエンド初期化 完了");
-    });
-#if defined(_WIN32)
-    if (!load_gpu) return JNI_FALSE;
-    std::call_once(g_vulkan_once, [&] {
-        ggml_backend_load((std::filesystem::u8path(lib_dir) / "ggml-vulkan.dll").u8string().c_str());
-        g_has_gpu = llama_supports_gpu_offload();
-        LOGI("Vulkan: GPU%s", g_has_gpu ? "あり" : "なし");
-    });
-#endif
-    return g_has_gpu ? JNI_TRUE : JNI_FALSE;
+    return gpu_device() ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -439,8 +419,8 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
     // 0ならCPUだけ、99なら全層をGPU（OpenCL、Adreno）に載せる
     mparams.n_gpu_layers = n_gpu_layers;
     // CPUだけのときは、GPUのデバイスを一切使わない（計算の一部をGPUへ回す既定の動きも止める）
-    static ggml_backend_dev_t no_devices[] = {nullptr};
-    if (n_gpu_layers == 0) mparams.devices = no_devices;
+    ggml_backend_dev_t devices[] = {n_gpu_layers == 0 ? nullptr : gpu_device(), nullptr};
+    mparams.devices = devices;
     llama_model *model = llama_model_load_from_file(path.c_str(), mparams);
     if (!model) {
         LOGE("モデルを読めませんでした: %s", path.c_str());
@@ -458,7 +438,10 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
     cparams.n_threads = n_threads;
     cparams.n_threads_batch = n_threads;
     cparams.no_perf = true;
-    if (n_gpu_layers == 0) cparams.op_offload = false;
+    if (n_gpu_layers == 0) {
+        cparams.op_offload = false;
+        cparams.offload_kqv = false;
+    }
     llama_context *ctx = llama_init_from_model(model, cparams);
     if (!ctx) {
         LOGE("コンテキストを作れませんでした");

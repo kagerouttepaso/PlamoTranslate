@@ -1,5 +1,6 @@
 package app.plamotranslate.desktop
 
+import app.plamotranslate.pipeline.diagnostics.InferenceRole
 import app.plamotranslate.llm.CpuOptions
 import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.log.Logs
@@ -245,7 +246,7 @@ internal class SettingsPresenter(
         }
     }
 
-    fun retryGpu() = changeBackend(settings::retryGpu)
+    fun retryGpu() = changeBackend { settings.retryGpu(InferenceRole.Translation) }
 
     fun setDetailedLogs(enabled: Boolean) {
         if (state.value.busy || state.value.detailedLogs == enabled) return
@@ -342,7 +343,7 @@ internal class SettingsPresenter(
             cpuOnly = settings.cpuOnly,
             theme = settings.appearance,
             cpuOptions = settings.cpuOptions,
-            gpuFallback = settings.gpuFallback,
+            gpuFallback = settings.gpuFallback(InferenceRole.Translation),
             detailedLogs = settings.detailedLogs,
         )
     }

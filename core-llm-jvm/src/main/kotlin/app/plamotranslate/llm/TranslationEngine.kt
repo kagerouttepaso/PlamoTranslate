@@ -2,7 +2,12 @@ package app.plamotranslate.llm
 
 import app.plamotranslate.pipeline.translation.JobEngine
 import app.plamotranslate.pipeline.translation.JobSource
-import kotlinx.coroutines.CoroutineDispatcher
+import app.plamotranslate.pipeline.translation.TranslationTurn
+import app.plamotranslate.pipeline.diagnostics.InferenceTarget
+import kotlinx.coroutines.ExecutorCoroutineDispatcher
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -41,9 +46,12 @@ data class CpuOptions(
  */
 class TranslationEngine private constructor(
     private val handle: Long,
+    private val dispatcher: ExecutorCoroutineDispatcher,
     /** GPU（OpenCL）で動いているか。false ならCPUだけ。 */
     val usesGpu: Boolean,
 ) : JobEngine {
+    private val modelLock = Mutex()
+    private val runtime get() = LlamaRuntime.process
 
     /**
      * 同時に訳す文の数（1〜[MAX_PARALLEL]。1なら1件ずつ）。設定の画面の「同時に訳す数」をアプリが入れる。読み直さずに変えられる。
@@ -62,44 +70,60 @@ class TranslationEngine private constructor(
      * （2026-11-12に1文用の入口と生成の処理を取り除いた。翻訳の契約を1本にするため）。
      */
     override suspend fun run(slots: Int, source: JobSource, maxTokens: Int): Int =
-        withContext(dispatcher) {
-            if (closed) throw TranslationException("翻訳モデルを切り替えたため、この翻訳は中止しました")
-            val scope = currentCoroutineContext()
-            val prompts = HashMap<Int, String>()
-            val result = LlamaNative.nativeTranslateJobs(handle, slots, maxTokens, object : LlamaNative.JobCallback {
-                override fun nextJob(): Int {
-                    val (id, request) = source.next() ?: return -1
-                    prompts[id] = Pfml3PromptBuilder.build(request)
-                    return id
-                }
-
-                override fun prompt(id: Int): String = prompts.remove(id).orEmpty()
-
-                override fun onToken(id: Int, utf8: ByteArray): Int = when {
-                    !scope.isActive -> 2
-                    source.onText(id, String(utf8, Charsets.UTF_8)) -> 1
-                    else -> 0
-                }
-
-                override fun onFinished(id: Int) = source.onFinished(id)
-                override fun onTooLong(id: Int) = source.onTooLong(id)
-            })
-            scope.ensureActive()
-            if (result < 0) throw TranslationException(errorMessage(result))
-            result
+        runtime.translationBatches(usesGpu, slots.coerceIn(1, MAX_PARALLEL)) { turn ->
+            modelLock.withLock {
+                checkOpen()
+                withContext(dispatcher) { translateBatch(slots, source, maxTokens, turn) }
+            }
         }
 
-    /** 推論のスレッドでだけ読み書きする。閉じた後の翻訳を止めるためのフラグ。 */
+    private suspend fun translateBatch(slots: Int, source: JobSource, maxTokens: Int, turn: TranslationTurn): Int {
+        val scope = currentCoroutineContext()
+        val prompts = HashMap<Int, String>()
+        val callback = object : LlamaNative.JobCallback {
+            override fun nextJob(): Int {
+                if (!scope.isActive) return -1
+                val (id, request) = turn.next(source::next) ?: return -1
+                prompts[id] = Pfml3PromptBuilder.build(request)
+                return id
+            }
+
+            override fun prompt(id: Int): String = prompts.remove(id).orEmpty()
+
+            override fun onToken(id: Int, utf8: ByteArray): Int = when {
+                !scope.isActive -> 2
+                source.onText(id, String(utf8, Charsets.UTF_8)) -> 1
+                else -> 0
+            }
+
+            override fun onFinished(id: Int) = source.onFinished(id)
+            override fun onTooLong(id: Int) = source.onTooLong(id)
+        }
+        val result = runtime.native { LlamaNative.nativeTranslateJobs(handle, slots, maxTokens, callback) }
+        scope.ensureActive()
+        if (result < 0) throw TranslationException(errorMessage(result))
+        return result
+    }
+
+    /** モデルのロックを取って読み書きする。閉じた後の翻訳を止めるためのフラグ。 */
     private var closed = false
 
     /**
      * モデルを解放する。推論のスレッドで順番に行うので、走っている翻訳が終わってから解放される。
      * 解放した後に届いた翻訳の依頼は [TranslationException] で失敗する（翻訳モデルの切り替え、2026-11-06）。
      */
-    suspend fun close() = withContext(dispatcher) {
-        if (!closed) {
-            closed = true
-            LlamaNative.nativeFree(handle)
+    suspend fun close() = withContext(NonCancellable) {
+        runtime.onDevice(usesGpu) {
+            modelLock.withLock {
+                if (!closed) {
+                    closed = true
+                    try {
+                        withContext(dispatcher) { runtime.native { LlamaNative.nativeFree(handle) } }
+                    } finally {
+                        dispatcher.close()
+                    }
+                }
+            }
         }
     }
 
@@ -108,7 +132,14 @@ class TranslationEngine private constructor(
      * 翻訳のスレッド数を変えるのに使い、デバッグ版では画面翻訳の adb からの計測（`ScreenTranslateService`）も使う。
      */
     suspend fun configure(boost: Boolean, threads: Int = 0) =
-        withContext(dispatcher) { LlamaNative.nativeConfigure(handle, boost, threads) }
+        modelLock.withLock {
+            checkOpen()
+            withContext(dispatcher) { runtime.native { LlamaNative.nativeConfigure(handle, boost, threads) } }
+        }
+
+    private fun checkOpen() {
+        if (closed) throw TranslationException("翻訳モデルを切り替えたため、この翻訳は中止しました")
+    }
 
     companion object {
         /**
@@ -140,47 +171,50 @@ class TranslationEngine private constructor(
         const val DEFAULT_THREADS = 6
 
         /**
-         * 推論は常に同じ1本のスレッドで行う。性能ヒントの対象スレッドを固定するため、
-         * スレッドが入れ替わりうる Dispatchers.IO.limitedParallelism(1) は使わない。
-         */
-        private val dispatcher: CoroutineDispatcher =
-            Executors.newSingleThreadExecutor { r -> Thread(r, "PlamoInference") }.asCoroutineDispatcher()
-
-        /**
          * モデルを読み込む。数秒かかるので起動時に1回だけ呼ぶ。
          *
          * [nativeLibDir] はバックエンドのライブラリ（libggml-opencl.so、libggml-cpu-*.so）の置き場
-         * （`applicationInfo.nativeLibraryDir`）。[preferGpu] が true なら、GPU（OpenCL）が使えれば全層を載せる。
+         * （`applicationInfo.nativeLibraryDir`）。[target] が GPU を選んだ場合、GPU（OpenCL）が使えれば全層を載せる。
          * GPUが無い・GPUでの読み込みに失敗したときは、CPUだけで読み込み直す（2026-11-06、APKを配布するため）。
          */
         suspend fun load(
             model: File,
             nativeLibDir: String,
-            preferGpu: Boolean,
+            target: InferenceTarget,
             nCtx: Int = DEFAULT_CONTEXT,
             cpu: CpuOptions = CpuOptions(),
-        ): TranslationEngine = withContext(dispatcher) {
+        ): TranslationEngine {
             if (!model.canRead()) throw TranslationException("モデルが読めません: ${model.path}")
-            app.plamotranslate.log.Logs.i("起動診断: model=${model.name} bytes=${model.length()} preferGpu=$preferGpu n_ctx=$nCtx")
-            val hasGpu = LlamaNative.nativeInit(nativeLibDir, preferGpu, cpu.variant)
-            var gpu = preferGpu && hasGpu
-            val threads = if (cpu.threads > 0) cpu.threads else defaultThreads()
-            fun nativeLoad(layers: Int) = LlamaNative.nativeLoad(
-                model.path, nCtx, threads, layers,
-                if (cpu.spinWait) DEFAULT_POLL else 0, cpu.threadPool, cpu.mmap, cpu.boost, MAX_PARALLEL,
-            )
-            var handle = nativeLoad(if (gpu) DEFAULT_GPU_LAYERS else 0)
-            if (handle == 0L && gpu) {
-                // GPUのドライバーが合わないなど。CPUでやり直す
-                gpu = false
-                handle = nativeLoad(0)
+            val dispatcher = Executors.newSingleThreadExecutor { task -> Thread(task, "PlamoInference") }.asCoroutineDispatcher()
+            val runtime = LlamaRuntime.process
+            var loaded: TranslationEngine? = null
+            try {
+                return withContext(dispatcher) {
+                    runtime.onDevice(target.useGpu) {
+                        var gpu = runtime.initialize(nativeLibDir, cpu.variant, target)
+                        val threads = if (cpu.threads > 0) cpu.threads else defaultThreads()
+                        fun nativeLoad(layers: Int) = runtime.native { LlamaNative.nativeLoad(
+                            model.path, nCtx, threads, layers,
+                            if (cpu.spinWait) DEFAULT_POLL else 0, cpu.threadPool, cpu.mmap, cpu.boost, MAX_PARALLEL,
+                        ) }
+                        var handle = nativeLoad(if (gpu) DEFAULT_GPU_LAYERS else 0)
+                        if (handle == 0L && gpu) {
+                            // GPUのドライバーが合わないなど。CPUでやり直す
+                            gpu = false
+                            handle = nativeLoad(0)
+                        }
+                        if (handle == 0L) throw TranslationException("モデルの読み込みに失敗しました: ${model.name}")
+                        TranslationEngine(handle, dispatcher, gpu).also { loaded = it }
+                    }
+                }
+            } catch (failure: Throwable) {
+                withContext(NonCancellable) { loaded?.close() ?: dispatcher.close() }
+                throw failure
             }
-            if (handle == 0L) throw TranslationException("モデルの読み込みに失敗しました: ${model.name}")
-            TranslationEngine(handle, gpu)
         }
 
         private val windowsThreads by lazy {
-            threadsForWindows(LlamaNative.nativeWindowsCoreClasses() ?: intArrayOf())
+            threadsForWindows(LlamaRuntime.process.native { LlamaNative.nativeWindowsCoreClasses() } ?: intArrayOf())
         }
 
         /** CPUのスレッド数の既定。Windows は物理コアの構成、Android はコアの最高周波数から決める。 */
@@ -231,8 +265,8 @@ class TranslationEngine private constructor(
         fun cpuVariants(nativeLibDir: String): List<String> =
             File(nativeLibDir).list()?.filter { it.startsWith("libggml-cpu") }?.sorted().orEmpty()
 
-        /** 読み込んだCPUバックエンドの版。まだ読み込んでいない、またはGPUの端末で自動選択したときは空。 */
-        fun cpuBackend(): String = LlamaNative.nativeCpuBackend()
+        /** 読み込んだCPUバックエンドの版。まだ読み込んでいない、または版名を返さないバックエンドでは空。 */
+        fun cpuBackend(): String = LlamaRuntime.process.native { LlamaNative.nativeCpuBackend() }
 
         private fun errorMessage(code: Int) = when (code) {
             -1 -> "文をトークンに分けられませんでした"

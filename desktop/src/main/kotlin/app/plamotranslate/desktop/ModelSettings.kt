@@ -72,6 +72,7 @@ internal fun BackendSettings(state: SettingsState, presenter: SettingsPresenter)
         DesktopOutline(onClick = { presenter.setCpuOnly(true) }, enabled = enabled && !state.cpuOnly) { Text("CPU だけで動かす") }
     }
     Text("実行先の設定：${if (state.cpuOnly) "CPU" else "Vulkan 優先"}", style = MaterialTheme.typography.bodySmall)
+    if (!state.cpuOnly) Text("CPU 専用で起動した後に Vulkan を有効にするには、アプリを起動し直してください。", style = MaterialTheme.typography.bodySmall)
     state.gpuFallback?.let {
         Text("CPU に切り替えました：$it")
         DesktopOutline(onClick = presenter::retryGpu, enabled = enabled) { Text("GPU をもう一度試す") }

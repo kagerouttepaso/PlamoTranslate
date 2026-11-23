@@ -5,11 +5,9 @@ import android.os.Bundle
 import android.widget.TextView
 import app.plamotranslate.llm.JapaneseForm
 import app.plamotranslate.llm.Language
-import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.llm.TranslationRequest
 import app.plamotranslate.log.Logs
 import app.plamotranslate.models.TranslationModel
-import app.plamotranslate.models.file
 import app.plamotranslate.pipeline.translation.SingleRequest
 import app.plamotranslate.pipeline.translation.TranslationStream
 import java.io.File
@@ -53,14 +51,11 @@ class TranslateBenchActivity : Activity() {
         require(input.exists()) { "原文の一覧がありません: ${input.path}" }
         val rows = input.readLines(Charsets.UTF_8).filter { it.isNotBlank() && !it.startsWith("#") }.map { it.split('\t') }
         // アプリのエンジンと同時に読み込まないよう、アプリ側のエンジンは使わずに単独で読み込む
-        val clCache = File(cacheDir, "cl-cache").apply { mkdirs() }
-        android.system.Os.setenv("GGML_OPENCL_KERNEL_CACHE_DIR", clCache.path, true)
         val loadStart = System.nanoTime()
-        val engine = TranslationEngine.load(model.file.file(this), applicationInfo.nativeLibraryDir, preferGpu = true)
+        val engine = LlamaEngineLoader { this }.load(model, parallel = 1)
         val loadMs = (System.nanoTime() - loadStart) / 1_000_000
-        engine.run(1, SingleRequest(TranslationRequest("안녕하세요", Language.KO, Language.JA)), maxTokens = 8)
         val out = StringBuilder("model\tsrc\ttgt\tms\ttokens\ttok_per_s\tsource\ttranslation\n")
-        log("${model.label}: 読込 ${loadMs}ms（${if (engine.usesGpu) "GPU" else "CPU"}）")
+        log("${model.label}: 読込・初回準備 ${loadMs}ms（${if (engine.usesGpu) "GPU" else "CPU"}）")
         var totalMs = 0L
         var totalTokens = 0
         for (row in rows) {
@@ -82,7 +77,7 @@ class TranslateBenchActivity : Activity() {
             out.append("${model.label}\t${row[0]}\t${row[1]}\t$ms\t$tokens\t${"%.1f".format(tps)}\t${row[2]}\t$translation\n")
         }
         engine.close()
-        val summary = "${model.label}: 読込 ${loadMs}ms、${rows.size}文で翻訳 合計${totalMs}ms・${totalTokens}トークン" +
+        val summary = "${model.label}: 読込・初回準備 ${loadMs}ms、${rows.size}文で翻訳 合計${totalMs}ms・${totalTokens}トークン" +
             "（${"%.0f".format(totalTokens * 1000.0 / totalMs.coerceAtLeast(1))}トークン/秒）"
         log(summary)
         File(dir, "$set-${model.name}${if (context != null) "-ctx" else ""}.tsv").writeText(out.toString(), Charsets.UTF_8)

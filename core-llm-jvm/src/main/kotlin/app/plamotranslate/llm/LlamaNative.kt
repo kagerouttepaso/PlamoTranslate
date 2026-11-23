@@ -3,7 +3,7 @@ package app.plamotranslate.llm
 import app.plamotranslate.log.LogLevel
 import app.plamotranslate.log.Logs
 
-/** llama.cppのJNI入口。呼び出しは [TranslationEngine] が1本のスレッドに直列化する。 */
+/** llama.cppのJNI入口。登録と実行の排他は [LlamaRuntime] が管理する。 */
 internal object LlamaNative {
     init {
         System.loadLibrary("plamo-llm")
@@ -24,11 +24,8 @@ internal object LlamaNative {
         Logs.write(level, utf8.toString(Charsets.UTF_8).trimEnd(), null)
     }
 
-    /**
-     * バックエンドのライブラリを [nativeLibDir] から読み込む。[loadGpu] が false ならCPUバックエンドだけ。
-     * 最初の1回だけ有効で、GPUのデバイスが使えるようになったかを返す。[nativeLoad] より前に呼ぶ。
-     */
-    external fun nativeInit(nativeLibDir: String, loadGpu: Boolean, cpuVariant: String): Boolean
+    external fun nativeInitCpu(nativeLibDir: String, cpuVariant: String)
+    external fun nativeRegisterGpu(nativeLibDir: String): Boolean
 
     /** 読み込んだCPUバックエンドのファイル名（libggml-cpu-*.so）。GPUの端末で自動選択したときは空。 */
     external fun nativeCpuBackend(): String
