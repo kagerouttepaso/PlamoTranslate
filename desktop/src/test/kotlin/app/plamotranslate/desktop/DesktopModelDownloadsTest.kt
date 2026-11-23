@@ -47,13 +47,15 @@ class DesktopModelDownloadsTest {
         val files = DesktopSpeechModels.requiredFiles(SpeechModel.QWEN3_ASR)
         assertTrue(files.containsAll(catalog.qwenGguf))
         assertEquals(catalog.qwenGguf, catalog.recognition(SpeechModel.QWEN3_ASR))
-        catalog.qwen3Asr.forEach { file ->
-            val target = directory.resolve(file.path)
-            Files.createDirectories(target.parent)
-            Files.write(target, byteArrayOf(1))
-        }
+        val oldEncoder = directory.resolve("asr/qwen3-asr/encoder.int8.onnx")
+        Files.createDirectories(oldEncoder.parent)
+        Files.write(oldEncoder, byteArrayOf(1))
         assertTrue(LegacySpeechFiles(directory).inspect().isEmpty())
-        val old = SettingsState(defaultPath = directory, catalogStatus = catalog.qwen3Asr.associateWith { it.size })
+        assertTrue(DesktopSpeechModels.files.none { it.path.startsWith("asr/qwen3-asr/") })
+        val downloads = DesktopModelDownloads(directory)
+        val old = SettingsState(defaultPath = directory, catalogStatus = files.associateWith {
+            downloads.bytesAvailable(it)
+        })
         assertFalse(old.hasRecognition(SpeechModel.QWEN3_ASR))
         assertFalse(old.copy(catalogStatus = mapOf(catalog.qwenWeights to catalog.qwenWeights.size)).hasRecognition(SpeechModel.QWEN3_ASR))
         assertTrue(old.copy(catalogStatus = files.associateWith { it.size }).hasRecognition(SpeechModel.QWEN3_ASR))

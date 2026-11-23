@@ -15,8 +15,8 @@ flowchart LR
     subgraph 共通["共通（Kotlin/JVM）"]
         CP[core-pipeline]
         CL[core-log]
-        LLMK["core-llm の Kotlin 側<br/>JobEngine の実装"]
-        SHERPA["core-asr-sherpa<br/>Silero VAD・Qwen3-ASR"]
+        LLMK["core-llm-jvm<br/>翻訳・Qwen3-ASR"]
+        SHERPA["core-asr-sherpa<br/>Silero VAD・Windows 用の認識器"]
     end
     subgraph Android
         APP[app]
@@ -44,7 +44,7 @@ flowchart LR
 - **`desktop`（新）**：Compose Multiplatform Desktop のアプリ。画面と ViewModel は、Android の `AndroidViewModel` に依存するので、初めは PC 用に別に持つ。共通にしたくなった画面だけ、状態とコールバックを受ける Composable を共有のモジュールへ出す。
 - **翻訳エンジン**：`core-llm` の `plamo_llm.cpp` と Kotlin の `JobEngine` の実装を、Android と PC で同じものにする。Android 固有の部分（logcat、`APerformanceHint`、OpenCL の設定、`/proc`）は、ビルドの条件で分ける。Kotlin 側を Kotlin/JVM のモジュールに出すかは、手順1で JNI の読み込み方の違いを見て決める。
 - **`desktop-native`（新）**：PC 用の C++ をまとめる。llama.cpp は今の固定版を使い、GPU は Vulkan で始める（CUDA は配る大きさが数百MB増えるので、Vulkan で速さが足りないときだけ比べる）。
-- **音声認識**：中核のインターフェース（`VoiceActivity`・`SpeechRecognizer`）を実装する Silero VAD と Qwen3-ASR は、`core-asr-sherpa`（Kotlin/JVM）で共有する。Windows は PC のリプレイと同じ sherpa-onnx の Kotlin API と Windows x64 JNI を使う。Android の組み立て、SenseVoice、Whisper tiny は `core-asr` に置く。
+- **音声認識**：Silero VAD は `core-asr-sherpa`、Qwen3-ASR は `core-llm-jvm` の実装を両 OS で使う。Windows は PC のリプレイと同じ sherpa-onnx の Kotlin API と Windows x64 JNI を使う。Android の組み立て、SenseVoice、Whisper tiny は `core-asr` に置く。
 - **データの置き場**：モデルと設定は `%LOCALAPPDATA%` の下に置く。
 
 ## GUIの構成
@@ -107,7 +107,7 @@ flowchart TB
 | 画面 | Compose Multiplatform Desktop | Android の画面の書き方と部品を流用できる |
 | 翻訳 | llama.cpp（今の固定版）＋Vulkan、無ければCPU | どのGPUでも動き、配る大きさが小さい。CUDA は必要になったら比べる |
 | 音声の取り込み | 小さな C++ JNI で WASAPI を直接使う。再生音はプロセスループバックで自分の音を除く | Java Sound は再生音を取れない。自分の読み上げを拾わない仕組みが OS にある |
-| 音声認識 | sherpa-onnx 2.0.1 の JVM 版、Silero VAD＋Qwen3-ASR から | Android と同じモデル。SenseVoice は Windows で落ちる既知の問題（`docs/バックログ.md`）を解いてから |
+| 音声認識 | Silero VAD・SenseVoice・Whisper tiny は sherpa-onnx、Qwen3-ASR は llama.cpp の mtmd | Android と同じモデルで書き起こす |
 | 読み上げ | Supertonic 3（sherpa-onnx）＋Java Sound。中国語は Windows の音声 | Android と同じモデル。速さを測ってから入れる |
 | PDF | PDFium（C の API を JNI で呼ぶ）で描画と文字の位置を取る | 速さが要件の上位にある。PDFium はブラウザの PDF 表示と同じ描画の部品で、PDFBox（Java）より描画が速い。BSD・Apache 系で GPL ではない |
 | 配布 | Compose の `packageMsi` で MSI を作り、GitHub のリリースに置く | 更新は、新しいリリースを知らせて取りに行かせる形から始める |

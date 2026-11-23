@@ -50,7 +50,7 @@ internal data class SettingsState(
     val transcriptionFallback: String? = null,
     val transcriptionStatus: String = "未準備",
     val canChangeRecognition: Boolean = false,
-    val legacyFiles: List<ModelFile>? = null,
+    val legacyFiles: List<LegacySpeechFile>? = null,
     val transcriptionPreference: TranscriptionPreference = TranscriptionPreference.AUTO,
     val detailedLogs: Boolean = false,
 ) {
@@ -190,7 +190,7 @@ internal class SettingsPresenter(
         if (state.value.busy) return
         mutableState.update { it.copy(busy = true) }
         scope.launch {
-            var found = emptyList<ModelFile>()
+            var found = emptyList<LegacySpeechFile>()
             if (updateSettings("旧ファイルを確認できませんでした。") { found = LegacySpeechFiles(settings.modelDirectory).inspect() }) {
                 mutableState.update { it.copy(legacyFiles = found) }
             }

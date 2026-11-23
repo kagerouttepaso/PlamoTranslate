@@ -95,22 +95,7 @@ object SharedModelCatalog {
         ),
     )
 
-    /**
-     * 音声認識 Qwen3-ASR 0.6B int8 と、言語の識別 Whisper tiny int8。sherpa-onnx の配布物
-     * （GitHubのリリース `asr-models` の tar と同じファイル）を Hugging Face のコミットで固定して取る。
-     * 旧 Qwen の一覧は PC で利用者が旧モデルを整理するときに使う。
-     */
-    private const val QWEN3 = "$HF/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a"
     private const val WHISPER = "$HF/csukuangfj/sherpa-onnx-whisper-tiny/resolve/65176e2deb88badc814a94058666cadccc29b61c"
-    val qwen3Asr = listOf(
-        asrFile("Qwen3-ASR conv_frontend", "$QWEN3/conv_frontend.onnx", "qwen3-asr/conv_frontend.onnx", 44_148_281, "d22dc4423e0940e49884e903d2ea2f7e5567c14fc1aed97e4e26d6b8f208ef9e"),
-        asrFile("Qwen3-ASR encoder", "$QWEN3/encoder.int8.onnx", "qwen3-asr/encoder.int8.onnx", 182_491_662, "60748d3e6744a57c9c91e1b17424a6c2990567e8adceb0783940c03ed98fa9d9"),
-        asrFile("Qwen3-ASR decoder", "$QWEN3/decoder.int8.onnx", "qwen3-asr/decoder.int8.onnx", 755_914_231, "4f6885be5959ae26af3089d38ee7972c5fafbeeb1cf8d5e76eab6d8b61ca5771"),
-        asrFile("Qwen3-ASR 文字の表", "$QWEN3/tokenizer/vocab.json", "qwen3-asr/tokenizer/vocab.json", 2_776_833, "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"),
-        asrFile("Qwen3-ASR 文字のつなぎ", "$QWEN3/tokenizer/merges.txt", "qwen3-asr/tokenizer/merges.txt", 1_671_853, "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"),
-        asrFile("Qwen3-ASR 文字の設定", "$QWEN3/tokenizer/tokenizer_config.json", "qwen3-asr/tokenizer/tokenizer_config.json", 12_487, "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c"),
-    )
-
     val whisperTiny = listOf(
         asrFile("言語の識別（Whisper tiny）encoder", "$WHISPER/tiny-encoder.int8.onnx", "whisper-tiny/tiny-encoder.int8.onnx", 12_937_772, "d24fb083ae3b1041fc24e97971d60e280c9342201fbb67b0ab428a8b4a51a434"),
         asrFile("言語の識別（Whisper tiny）decoder", "$WHISPER/tiny-decoder.int8.onnx", "whisper-tiny/tiny-decoder.int8.onnx", 89_855_401, "d2fece8dd42771f1df975c6c0445770d0c292bf7547c2cae04a6c0cc57540925"),

@@ -16,6 +16,6 @@ internal object VerifiedSpeechFiles {
         val stamp = Stamp(attributes.size(), attributes.lastModifiedTime(), attributes.fileKey(), model.sha256)
         if (stamp.size != model.size) return false
         if (verified[path] == stamp) return true
-        return DesktopModelDownloads.verifyBytes(path, model) {}.also { if (it) verified[path] = stamp }
+        return DesktopModelDownloads.verifyBytes(path, model.size, model.sha256) {}.also { if (it) verified[path] = stamp }
     }
 }

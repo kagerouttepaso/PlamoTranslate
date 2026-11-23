@@ -110,11 +110,11 @@ internal class DesktopModelDownloads(private val directory: Path, private val sp
 
         suspend fun verify(path: Path, model: ModelFile): Boolean {
             val context = currentCoroutineContext()
-            return verifyBytes(path, model) { context.ensureActive() }
+            return verifyBytes(path, model.size, model.sha256) { context.ensureActive() }
         }
 
-        fun verifyBytes(path: Path, model: ModelFile, checkpoint: () -> Unit): Boolean {
-            if (sizeOf(path) != model.size) return false
+        fun verifyBytes(path: Path, size: Long, sha256: String, checkpoint: () -> Unit): Boolean {
+            if (sizeOf(path) != size) return false
             val digest = MessageDigest.getInstance("SHA-256")
             Files.newInputStream(path).use { input ->
                 val buffer = ByteArray(128 * 1024)
@@ -125,7 +125,7 @@ internal class DesktopModelDownloads(private val directory: Path, private val sp
                     digest.update(buffer, 0, count)
                 }
             }
-            return HexFormat.of().formatHex(digest.digest()) == model.sha256
+            return HexFormat.of().formatHex(digest.digest()) == sha256
         }
     }
 }

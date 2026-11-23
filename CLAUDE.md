@@ -76,7 +76,7 @@
 | `core-llm` | llama.cppのJNIラッパーと、中核のエンジンのインターフェース（`JobEngine`）の実装 |
 | `core-ocr` | 文字認識のインターフェースと実装（ML Kit、漫画用OCR）、行の選択とブロックの組み立て |
 | `core-asr` | Android の音声認識の組み立て、SenseVoice の書き起こし、Whisper tiny の言語の識別 |
-| `core-asr-sherpa` | Silero VAD と Qwen3-ASR の実装（Kotlin/JVM、Android と Windows で共有） |
+| `core-asr-sherpa` | Silero VAD の共通実装と Windows 用の SenseVoice・Whisper tiny（Kotlin/JVM） |
 | `core-tts` | 読み上げのインターフェースと実装（sherpa-onnxでSupertonic 3、Androidの読み上げエンジン） |
 | `core-log` | ロガー（`Logs`、Kotlin/JVM）。どのモジュールのログもここを通し、出力先（logcat とプロセスごとのファイル）は `app` が渡す。原文・訳などの利用者の文は、「詳しい記録を残す」がオンのとき（デバッグ版の既定はオン、正式版は詳細設定で選ぶ）だけ書く |
 | `third_party/` | git submodule：llama.cpp、OpenCL-Headers、OpenCL-ICD-Loader。`sherpa-onnx/` はAAR（Gitに入れず、`tools/get-sherpa-onnx.ps1` で取得） |
