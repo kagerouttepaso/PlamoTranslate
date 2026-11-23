@@ -11,6 +11,29 @@ typealias ModelFile = app.plamotranslate.pipeline.models.ModelFile
 
 internal fun ModelFile.file(context: Context): File = File(ModelCatalog.modelsDir(context), path)
 
+/** 手動配置した GGUF も、認識器に渡す前にダウンローダーと同じ SHA-256 で確かめる。 */
+internal fun ModelFile.present(context: Context, verify: Boolean): Boolean {
+    val file = file(context)
+    if (!file.isFile || file.length() != size) return false
+    if (this !in SharedModelCatalog.qwenGguf) return true
+    val attributes = try {
+        java.nio.file.Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java)
+    } catch (_: java.io.IOException) {
+        return false
+    }
+    val stamp = "${attributes.fileKey()}/${attributes.lastModifiedTime()}/$sha256"
+    val receipts = context.getSharedPreferences("verified_models", Context.MODE_PRIVATE)
+    return when (receipts.getString(path, null)) {
+        stamp -> true
+        "invalid/$stamp" -> false
+        else -> if (!verify) true else {
+            val valid = ModelDownloads.sha256(file).equals(sha256, ignoreCase = true)
+            receipts.edit().putString(path, if (valid) stamp else "invalid/$stamp").apply()
+            valid
+        }
+    }
+}
+
 enum class TranslationModel(private val model: SharedTranslationModel) {
     SMALL(SharedTranslationModel.SMALL),
     LARGE(SharedTranslationModel.LARGE),
@@ -69,7 +92,7 @@ enum class ModelBundle(
      * まだ置かれていないファイル。大きさだけで見る（毎回ハッシュを計算すると起動が遅くなる）。
      * ダウンロードしたものは置く前にハッシュを照合している。
      */
-    fun missing(context: Context): List<ModelFile> = files.filter { it.file(context).length() != it.size }
+    fun missing(context: Context, verify: Boolean = false): List<ModelFile> = files.filterNot { it.present(context, verify) }
 
     fun isPresent(context: Context): Boolean = missing(context).isEmpty()
 

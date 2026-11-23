@@ -106,8 +106,12 @@ object ModelDownloads {
     }
 
     private suspend fun fetchBundle(app: Context, bundle: ModelBundle) {
-        val missing = bundle.missing(app)
+        val missing = bundle.missing(app, verify = true)
         val total = missing.sumOf { it.size }
+        val directory = ModelCatalog.modelsDir(app)
+        directory.mkdirs()
+        val needed = missing.sumOf { model -> (model.size - File(model.file(app).path + ".part").length().coerceAtMost(model.size)).coerceAtLeast(0) }
+        if (needed > directory.usableSpace) throw IOException("モデルを保存する空き容量が足りません")
         var doneBefore = 0L
         for (model in missing) {
             set(bundle, DownloadStatus.Running(model, doneBefore, total))
@@ -143,8 +147,7 @@ object ModelDownloads {
             part.delete()
             throw IOException("${model.label} が壊れていました（ハッシュが一致しません）。もう一度ダウンロードしてください")
         }
-        if (target.exists()) target.delete()
-        if (!part.renameTo(target)) throw IOException("${model.label} を置けませんでした: ${target.path}")
+        java.nio.file.Files.move(part.toPath(), target.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
         Logs.i("モデルを置きました: ${target.path}")
     }
 
@@ -193,7 +196,7 @@ object ModelDownloads {
         }
     }
 
-    private fun sha256(file: File): String {
+    internal fun sha256(file: File): String {
         val md = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val buf = ByteArray(1 shl 16)

@@ -58,15 +58,15 @@ fun BundleDownloadControl(bundle: ModelBundle, note: String, onDownload: () -> U
     val context = LocalContext.current
     val items by ModelDownloads.items.collectAsStateWithLifecycle()
     val status = items.lastOrNull { it.bundle == bundle }?.status
-    val present = remember(items) { bundle.isPresent(context) }
+    val missing = bundle.missing(context)
     when {
         status is DownloadStatus.Waiting || status is DownloadStatus.Running -> {
             DownloadQueueList(listOf(DownloadItem(bundle, status)))
             Text("ダウンロード中はアプリを開いたままにしてください", style = MaterialTheme.typography.labelSmall)
             OutlinedButton(onClick = ModelDownloads::cancel) { Text("中止") }
         }
-        !present -> {
-            Text("$note（約${bundle.size / 1_000_000}MB。Wi-Fiでの実行をおすすめします）", style = MaterialTheme.typography.bodySmall)
+        missing.isNotEmpty() -> {
+            Text("$note（約${(missing.sumOf { it.size } + 1_048_575) / 1_048_576} MiB。Wi-Fiでの実行をおすすめします）", style = MaterialTheme.typography.bodySmall)
             OutlinedButton(onClick = onDownload) { Text("${bundle.title}をダウンロード") }
             if (status is DownloadStatus.Failed) {
                 Text(status.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
