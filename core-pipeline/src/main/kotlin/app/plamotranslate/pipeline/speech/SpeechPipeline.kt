@@ -1,5 +1,6 @@
 package app.plamotranslate.pipeline.speech
 
+import app.plamotranslate.pipeline.compute.StopMode
 import app.plamotranslate.llm.Language
 
 import java.util.concurrent.LinkedBlockingQueue
@@ -62,7 +63,9 @@ class SpeechPipeline(
     private val inbox = LinkedBlockingQueue<Input>()
     private val runner = RecognitionRunner(recognizer, identifier)
 
-    private class Flight(val request: RecognitionRequest, val started: Long, var cancelled: Boolean = false)
+    private class Flight(val request: RecognitionRequest, val started: Long, var stoppedBy: RecognitionJob? = null, var stopTime: Long = 0) {
+        val cancelled get() = stoppedBy != null
+    }
     private val queue = RecognitionQueue()
     private val running = mutableMapOf<RecognitionLane, Flight>()
     private val submittedAt = mutableMapOf<Long, Long>()
@@ -221,10 +224,14 @@ class SpeechPipeline(
     }
 
     private fun enqueue(job: RecognitionJob) {
-        if (job.priority == RecognitionPriority.FINAL || job.priority == RecognitionPriority.PHRASE) {
-            running[RecognitionLane.TRANSCRIBE]?.takeIf { it.request.job.priority == RecognitionPriority.PARTIAL }?.let {
-                it.cancelled = true
-                workers.getValue(RecognitionLane.TRANSCRIBE).cancel(it.request.id)
+        // 同じワーカーで待つ依頼は、まだプロセスの貸出待ちに現れない。
+        val flight = running[job.lane]
+        if (flight != null) {
+            val active = flight.request.job.priority.work
+            if (!flight.cancelled && active.stop == StopMode.Cancel && job.priority.work.priority < active.priority) {
+                flight.stoppedBy = job
+                flight.stopTime = System.nanoTime()
+                workers.getValue(job.lane).cancel(flight.request.id)
             }
         }
         queue.submit(job)
@@ -250,6 +257,9 @@ class SpeechPipeline(
         timing("認識 %s（%s）音声%.1f秒 待ち%dms 処理%dms".format(job.purpose, result.lane.name.lowercase(),
             job.samples.size / SpeechEngine.SAMPLE_RATE.toFloat(), waited?.let { (flight.started - it) / 1_000_000 } ?: -1,
             (System.nanoTime() - flight.started) / 1_000_000))
+        flight.stoppedBy?.let { higher ->
+            timing("認識 横取り ${higher.priority}#${higher.id} → ${job.priority}#${job.id} 返却まで=${(System.nanoTime() - flight.stopTime) / 1_000_000}ms")
+        }
         val output = when (val end = result.end) {
             is RecognitionEnd.Success -> if (flight.cancelled) RecognitionOutput.Cancelled else end.output
             is RecognitionEnd.Cancelled -> RecognitionOutput.Cancelled
