@@ -1,6 +1,5 @@
 package app.plamotranslate.desktop
 
-import app.plamotranslate.llm.LlamaRuntime
 import app.plamotranslate.llm.QwenAudioRecognizer
 import app.plamotranslate.llm.QwenTrialAudio
 import app.plamotranslate.pipeline.diagnostics.InferencePolicy
@@ -49,18 +48,16 @@ internal class DesktopQwen(private val settings: DesktopSettings, private val na
         val preference = settings.transcriptionPreference
         val gpu = target.useGpu && File(nativeDir, "ggml-vulkan.dll").isFile && preference != TranscriptionPreference.CPU
         try {
-            LlamaRuntime.process.prepare(gpu) {
-                val environment = TranscriptionTuner.Environment(weights.sha256, projector.sha256, runtime,
-                    listOf("os.name", "os.version", "os.arch").joinToString { System.getProperty(it) },
-                    "${System.getenv("PROCESSOR_IDENTIFIER")?.takeIf { it.isNotBlank() } ?: unknownEnvironment}:$processors", if (gpu) driver else "CPU", QwenTrialAudio.version)
-                val (engine, choice) = QwenAudioRecognizer.prepare(settings.modelDirectory.toFile(), nativeDir, "",
-                    target.copy(requestGpu = gpu), processors, threads, preference, environment, settings,
-                    { settings.beginGpuLoad(role) }, { settings.endGpuLoad(role, it) })
-                val candidate = choice.candidate
-                val reason = settings.gpuFallback(role) ?: if (!gpu && preference == TranscriptionPreference.GPU) "GPU を使用できません" else choice.reason
-                status.value = "${if (candidate.gpu) "Vulkan" else "CPU"}（${candidate.batch}/${candidate.generation} スレッド）：$reason"
-                engine
-            }
+            val environment = TranscriptionTuner.Environment(weights.sha256, projector.sha256, runtime,
+                listOf("os.name", "os.version", "os.arch").joinToString { System.getProperty(it) },
+                "${System.getenv("PROCESSOR_IDENTIFIER")?.takeIf { it.isNotBlank() } ?: unknownEnvironment}:$processors", if (gpu) driver else "CPU", QwenTrialAudio.version)
+            val (engine, choice) = QwenAudioRecognizer.prepare(settings.modelDirectory.toFile(), nativeDir, "",
+                target.copy(requestGpu = gpu), processors, threads, preference, environment, settings,
+                { settings.beginGpuLoad(role) }, { settings.endGpuLoad(role, it) })
+            val candidate = choice.candidate
+            val reason = settings.gpuFallback(role) ?: if (!gpu && preference == TranscriptionPreference.GPU) "GPU を使用できません" else choice.reason
+            status.value = "${if (candidate.gpu) "Vulkan" else "CPU"}（${candidate.batch}/${candidate.generation} スレッド）：$reason"
+            engine
         } catch (error: Throwable) {
             status.value = if (error is CancellationException) "未準備" else "準備失敗：${error.message}"
             throw error

@@ -98,7 +98,8 @@ class QwenAudioRecognizer private constructor(private val handle: Long, private 
             store: TranscriptionTuner.Store, beginGpu: () -> Boolean, endGpu: (String?) -> Unit,
         ): Pair<QwenAudioRecognizer, TranscriptionChoice> =
             TranscriptionTuner.prepare(TranscriptionTuner.cpuCandidates(processors, threads), target.useGpu,
-                preference, environment, QwenTrialAudio.reference, store, beginGpu, endGpu, { candidate ->
+                preference, environment, QwenTrialAudio.reference, store,
+                { action -> LlamaRuntime.process.prepare(true, action) }, beginGpu, endGpu, { candidate ->
                     load(File(models, SharedModelCatalog.qwenWeights.path), File(models, SharedModelCatalog.qwenProjector.path),
                         nativeDir, variant, target.copy(requestGpu = candidate.gpu),
                         Threads(candidate.batch, candidate.batch, candidate.generation))

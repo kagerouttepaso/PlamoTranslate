@@ -30,7 +30,7 @@ import java.util.Locale
 internal object GpuGuard {
     /**
      * 読み込みの前に呼ぶ。GPUを使ってよいか。前回GPUの読み込み中に終わっていれば、ここで決めて記録する。
-     * 役割のGPU準備を直列化した区間で、今回のマーカーを書く前に呼ぶ。
+     * 同じ役割の準備が重ならない状態で、今回のマーカーを書く前に呼ぶ。
      */
     fun allowGpu(context: Context, role: InferenceRole): Boolean {
         val preferences = GpuPreferences(context, role)

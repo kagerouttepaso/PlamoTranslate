@@ -10,7 +10,6 @@ import app.plamotranslate.models.present
 import app.plamotranslate.pipeline.speech.SegmentationProfile
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechModel
-import app.plamotranslate.llm.LlamaRuntime
 import app.plamotranslate.llm.QwenAudioRecognizer
 import app.plamotranslate.llm.QwenTrialAudio
 import app.plamotranslate.log.Logs
@@ -37,31 +36,29 @@ internal object AndroidQwen {
         val role = InferenceRole.Transcription
         val processors = Runtime.getRuntime().availableProcessors()
         val start = SystemClock.elapsedRealtime()
-        LlamaRuntime.process.prepare(target.useGpu && preference != TranscriptionPreference.CPU) {
-            val gpu = target.useGpu && preference != TranscriptionPreference.CPU && GpuGuard.allowGpu(app, role)
-            val installed = app.packageManager.getPackageInfo(app.packageName, 0)
-            val driver = if (gpu) File("/vendor/lib64/libOpenCL.so").let {
-                "OpenCL/${Build.VERSION.INCREMENTAL}/${it.length()}/${it.lastModified()}"
-            } else "CPU"
-            val environment = TranscriptionTuner.Environment(
-                SharedModelCatalog.qwenWeights.sha256, SharedModelCatalog.qwenProjector.sha256,
-                "${installed.longVersionCode}/${installed.lastUpdateTime}/$variant", Build.FINGERPRINT,
-                "${Build.SOC_MODEL}/${Build.SUPPORTED_ABIS.joinToString()}/$processors", driver, QwenTrialAudio.version,
-            )
-            val (engine, choice) = QwenAudioRecognizer.prepare(ModelCatalog.modelsDir(app), app.applicationInfo.nativeLibraryDir,
-                variant, target.copy(requestGpu = gpu), processors, threads, preference, environment, recognition,
-                {
-                    GpuGuard.beginGpuLoad(app, role)
-                    Logs.i("書き起こしの OpenCL の準備を開始")
-                    true
-                }, { failure -> GpuGuard.endGpuLoad(app, role, failure) })
-            val c = choice.candidate
-            val reason = GpuGuard.disabledNote(app, role)
-                ?: if (!gpu && preference == TranscriptionPreference.GPU) "GPU を使用できません" else choice.reason
-            recognition.lastTarget = "${if (c.gpu) "OpenCL" else "CPU"}（${c.batch}/${c.batch}/${c.generation} スレッド、試走 ${choice.medianNanos / 1_000_000} ms）：$reason"
-            Logs.i("書き起こしの準備 ${SystemClock.elapsedRealtime() - start} ms：${recognition.lastTarget}")
-            engine
-        }
+        val gpu = target.useGpu && preference != TranscriptionPreference.CPU && GpuGuard.allowGpu(app, role)
+        val installed = app.packageManager.getPackageInfo(app.packageName, 0)
+        val driver = if (gpu) File("/vendor/lib64/libOpenCL.so").let {
+            "OpenCL/${Build.VERSION.INCREMENTAL}/${it.length()}/${it.lastModified()}"
+        } else "CPU"
+        val environment = TranscriptionTuner.Environment(
+            SharedModelCatalog.qwenWeights.sha256, SharedModelCatalog.qwenProjector.sha256,
+            "${installed.longVersionCode}/${installed.lastUpdateTime}/$variant", Build.FINGERPRINT,
+            "${Build.SOC_MODEL}/${Build.SUPPORTED_ABIS.joinToString()}/$processors", driver, QwenTrialAudio.version,
+        )
+        val (engine, choice) = QwenAudioRecognizer.prepare(ModelCatalog.modelsDir(app), app.applicationInfo.nativeLibraryDir,
+            variant, target.copy(requestGpu = gpu), processors, threads, preference, environment, recognition,
+            {
+                GpuGuard.beginGpuLoad(app, role)
+                Logs.i("書き起こしの OpenCL の準備を開始")
+                true
+            }, { failure -> GpuGuard.endGpuLoad(app, role, failure) })
+        val c = choice.candidate
+        val reason = GpuGuard.disabledNote(app, role)
+            ?: if (!gpu && preference == TranscriptionPreference.GPU) "GPU を使用できません" else choice.reason
+        recognition.lastTarget = "${if (c.gpu) "OpenCL" else "CPU"}（${c.batch}/${c.batch}/${c.generation} スレッド、試走 ${choice.medianNanos / 1_000_000} ms）：$reason"
+        Logs.i("書き起こしの準備 ${SystemClock.elapsedRealtime() - start} ms：${recognition.lastTarget}")
+        engine
     }
 }
 

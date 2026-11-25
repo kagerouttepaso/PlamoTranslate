@@ -102,6 +102,7 @@ class LlamaRuntimeTest {
         val other = launch(start = CoroutineStart.UNDISPATCHED) {
             runtime.prepare(true) { order += "別役割の準備" }
         }
+        runtime.prepare(false) { order += "CPU準備" }
         val engine = object : JobEngine {
             override val parallel = 1
             override suspend fun run(slots: Int, source: JobSource, maxTokens: Int): Int = runtime.translationBatches(true, slots) { turn ->
@@ -118,10 +119,10 @@ class LlamaRuntimeTest {
         val tuning = launch(start = CoroutineStart.UNDISPATCHED) {
             ParallelTranslationBenchmark.measure(engine, ParallelTuner.next(emptyMap())!!)
         }
-        assertEquals(listOf("翻訳準備"), order)
+        assertEquals(listOf("翻訳準備", "CPU準備"), order)
         release.complete(Unit)
         listOf(preparing, other, tuning).forEach { it.join() }
-        assertEquals(listOf("翻訳準備", "初回推論完了"), order.take(2))
+        assertEquals(listOf("翻訳準備", "CPU準備", "初回推論完了"), order.take(3))
         assertEquals(2, order.count { it == "計測" })
         assertTrue("別役割の準備" in order)
     }

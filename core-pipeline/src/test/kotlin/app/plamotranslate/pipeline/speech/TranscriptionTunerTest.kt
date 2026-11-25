@@ -1,6 +1,8 @@
 package app.plamotranslate.pipeline.speech
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
@@ -30,14 +32,20 @@ class TranscriptionTunerTest {
     private val engines = mutableListOf<Engine>()
     private val cpuTimes = mutableMapOf<TranscriptionCandidate, Long>()
     private var fallback: String? = null
+    private val gpuPreparation = Mutex()
+    private var gpuEntries = 0
     private var gpuEnds = 0
     private suspend fun prepare(duration: Long, valid: Boolean = true,
         preference: TranscriptionPreference = TranscriptionPreference.AUTO, allowedGpu: Boolean = true): TranscriptionChoice {
         val (engine, choice) = TranscriptionTuner.prepare(cpus, allowedGpu && fallback == null, preference, environment, reference, store,
-            { true }, { fallback = it; gpuEnds++; onGpuEnd() }, { candidate ->
+            { action -> gpuPreparation.withLock { gpuEntries++; action() } },
+            { assertTrue(gpuPreparation.isLocked); true },
+            { assertTrue(gpuPreparation.isLocked); fallback = it; gpuEnds++; onGpuEnd() }, { candidate ->
+                assertEquals(candidate.gpu, gpuPreparation.isLocked)
                 assertTrue(engines.count { !it.closed } <= 1)
                 Engine(candidate).also { engines.add(it) }
             }, { engine ->
+                assertEquals(engine.candidate.gpu, gpuPreparation.isLocked)
                 check(!engine.closed)
                 onTrial(engine.candidate)
                 engine.trials++
@@ -60,7 +68,9 @@ class TranscriptionTunerTest {
         environment = environment.copy(projector = "別")
         assertFalse(prepare(81).candidate.gpu)
         assertEquals(listOf(4, 4, 1, 4, 4), engines.map { it.trials })
+        assertEquals(3, gpuEntries)
         assertFalse(prepare(1).candidate.gpu)
+        assertEquals(3, gpuEntries)
         assertEquals(1, engines.last().trials)
         assertNull(fallback)
     }
@@ -80,6 +90,7 @@ class TranscriptionTunerTest {
 
     @Test fun `GPU指定でも正解不一致は退避しCPUの準備をやり直す`() = runTest {
         assertFalse(prepare(1, false, TranscriptionPreference.GPU).candidate.gpu)
+        assertFalse(gpuPreparation.isLocked)
         assertNotNull(fallback)
         assertEquals(listOf(1, 4), engines.map { it.trials })
         assertFalse(prepare(1, true, TranscriptionPreference.GPU).candidate.gpu)
@@ -109,6 +120,7 @@ class TranscriptionTunerTest {
         assertEquals(cpus.single(), prepare(1, preference = preference).candidate)
         assertEquals(candidates + cpus, engines.drop(4).map { it.candidate })
         assertTrue(engines.drop(4).all { it.trials == 4 })
+        assertEquals(0, gpuEntries)
         assertEquals(0, gpuEnds)
     }
 
@@ -121,11 +133,13 @@ class TranscriptionTunerTest {
         assertEquals(fastest, prepare(1, preference = TranscriptionPreference.CPU).candidate)
         assertEquals(cpus + fastest + fastest, engines.map { it.candidate })
         assertEquals(listOf(4, 4, 4, 1, 1), engines.map { it.trials })
+        assertEquals(0, gpuEntries)
         assertEquals(0, gpuEnds)
     }
 
     @Test fun `自動ではGPUの正解不一致で計測済みCPUを返し退避を選択として保存しない`() = runTest {
         assertFalse(prepare(1, valid = false).candidate.gpu)
+        assertFalse(gpuPreparation.isLocked)
         assertNotNull(fallback)
         assertEquals(listOf(4, 4), engines.map { it.trials })
         assertTrue(choices.isEmpty())
@@ -134,6 +148,7 @@ class TranscriptionTunerTest {
     @Test fun `計測中の取消では暫定首位と計測中の認識器を閉じGPU障害を記録しない`() = runTest {
         onTrial = { if (it.gpu) throw CancellationException("取消") }
         assertTrue(runCatching { prepare(80) }.exceptionOrNull() is CancellationException)
+        assertFalse(gpuPreparation.isLocked)
         assertEquals(1, gpuEnds)
         assertNull(fallback)
         assertEquals(2, engines.size)

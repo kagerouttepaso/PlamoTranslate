@@ -49,7 +49,8 @@ object TranscriptionTuner {
     }
 
     suspend fun <T : AutoCloseable> prepare(cpus: List<TranscriptionCandidate>, allowedGpu: Boolean, preference: TranscriptionPreference,
-        environment: Environment, reference: Reference, store: Store, beginGpu: () -> Boolean, endGpu: (String?) -> Unit,
+        environment: Environment, reference: Reference, store: Store,
+        withGpuPreparation: suspend (suspend () -> Unit) -> Unit, beginGpu: () -> Boolean, endGpu: (String?) -> Unit,
         load: suspend (TranscriptionCandidate) -> T, trial: suspend (T) -> Sample): Pair<T, TranscriptionChoice> {
         val gpu = cpus.first().copy(gpu = true)
         val key = environment.cacheKey(cpus, allowedGpu && preference != TranscriptionPreference.CPU)
@@ -111,21 +112,24 @@ object TranscriptionTuner {
         }
 
         suspend fun tryGpu(attempt: suspend () -> Pair<T, TranscriptionChoice>): Pair<T, TranscriptionChoice>? {
-            if (!allowedGpu || !beginGpu()) return null
-            var failure: String? = null
+            if (!allowedGpu) return null
             var prepared: Pair<T, TranscriptionChoice>? = null
-            try {
-                prepared = attempt()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                failure = error.message ?: "GPU の準備に失敗しました"
-            } finally {
+            withGpuPreparation {
+                if (!beginGpu()) return@withGpuPreparation
+                var failure: String? = null
                 try {
-                    endGpu(failure)
-                } catch (error: Throwable) {
-                    prepared?.first?.close()
-                    throw error
+                    prepared = attempt()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    failure = error.message ?: "GPU の準備に失敗しました"
+                } finally {
+                    try {
+                        endGpu(failure)
+                    } catch (error: Throwable) {
+                        prepared?.first?.close()
+                        throw error
+                    }
                 }
             }
             return prepared
