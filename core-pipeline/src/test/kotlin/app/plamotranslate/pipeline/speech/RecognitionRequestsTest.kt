@@ -1,6 +1,10 @@
 package app.plamotranslate.pipeline.speech
 
 import app.plamotranslate.pipeline.speech.SpeechEngine.Companion.SAMPLE_RATE
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -23,6 +27,60 @@ class RecognitionRequestsTest {
                 assertEquals(expected, (jobs.last() as RecognitionJob.Transcribe).language)
             }
         }
+    }
+
+    private class RecordingRecognizer(val judged: Recognition, val onFirst: () -> Unit = {}) : SpeechRecognizer {
+        val calls = mutableListOf<String?>()
+        override fun recognize(samples: FloatArray) = error("言語指定を含む呼び出しを記録する")
+        override fun recognizeAs(samples: FloatArray, language: String?): Recognition {
+            calls += language
+            if (language == null) {
+                onFirst()
+                return judged
+            }
+            return Recognition("そうです。", language, source = LanguageSource.SPECIFIED)
+        }
+        override fun close() {}
+    }
+
+    private suspend fun finalTranscript(groups: Set<String>?, recognizer: RecordingRecognizer): Recognition {
+        val requests = RecognitionRequests(true, true, jobs::add, { now }, JobIds(), true)
+        lateinit var result: Recognition
+        requests.transcribe(1, floatArrayOf(0.1f), 1, RecognitionPriority.FINAL, "確定",
+            SpeechLanguages(groups), language = null, fallback = "ja") { result = it }
+        val job = jobs.last()
+        requests.onResult(job.id, RecognitionRunner(recognizer).run(job))
+        return result
+    }
+
+    @Test
+    fun `会話の候補内と候補指定なしでは最初の本文と言語を使う`() = runBlocking {
+        for ((groups, lang) in listOf(setOf("ja", "en") to "en", setOf("ja", "zh") to "zh",
+            setOf("ja", "zh") to "yue", null to "zh")) {
+            val recognizer = RecordingRecognizer(Recognition("123", lang))
+            assertEquals(recognizer.judged, finalTranscript(groups, recognizer))
+            assertEquals(listOf(null), recognizer.calls)
+        }
+    }
+
+    @Test
+    fun `日英の会話で中国語を返したらカードの言語で書き直した本文を使う`() = runBlocking {
+        val recognizer = RecordingRecognizer(Recognition("是吧？", "zh"))
+        assertEquals(Recognition("そうです。", "ja", source = LanguageSource.SPECIFIED),
+            finalTranscript(setOf("ja", "en"), recognizer))
+        assertEquals(listOf(null, "ja"), recognizer.calls)
+    }
+
+    @Test
+    fun `最初の書き起こし中に取り消されたら書き直さない`() = runBlocking {
+        lateinit var recognizer: RecordingRecognizer
+        val job = launch {
+            recognizer = RecordingRecognizer(Recognition("是吧？", "zh")) { cancel() }
+            finalTranscript(setOf("ja", "en"), recognizer)
+        }
+        job.join()
+        assertTrue(job.isCancelled)
+        assertEquals(listOf(null), recognizer.calls)
     }
 
     private fun requests(heavy: Boolean) = RecognitionRequests(identifies = true, heavy = heavy, submit = { jobs += it }, clock = { now }, jobIds = JobIds())

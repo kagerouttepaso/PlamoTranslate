@@ -74,7 +74,10 @@ internal class RecognitionRequests(
         val submittedAt = clock()
         val instruction = when {
             languages.specified != null -> TranscriptLanguage.Specified(languages.specified)
-            judgesFinalTranscript && priority.urgent -> TranscriptLanguage.Unspecified
+            judgesFinalTranscript && priority.urgent -> {
+                if (languages.groups != null && fallback != null) TranscriptLanguage.Conversation(languages.groups, fallback)
+                else TranscriptLanguage.Unspecified
+            }
             language != null && (identifies || judgesFinalTranscript) -> TranscriptLanguage.Specified(language)
             identifies -> TranscriptLanguage.Identify(languages, fallback)
             else -> TranscriptLanguage.Unspecified

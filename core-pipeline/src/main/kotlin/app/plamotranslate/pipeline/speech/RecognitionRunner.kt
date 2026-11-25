@@ -1,8 +1,13 @@
 package app.plamotranslate.pipeline.speech
 
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+
 sealed interface TranscriptLanguage {
     data object Unspecified : TranscriptLanguage
     data class Specified(val code: String) : TranscriptLanguage
+    /** モデルが会話の言語を返したら採用し、それ以外なら [fallback] を指定して書き直す。 */
+    data class Conversation(val groups: Set<String>, val fallback: String) : TranscriptLanguage
     data class Identify(val candidates: SpeechLanguages, val fallback: String?) : TranscriptLanguage
 }
 
@@ -19,6 +24,14 @@ class RecognitionRunner(private val recognizer: SpeechRecognizer, private val id
             when (val language = job.language) {
                 TranscriptLanguage.Unspecified -> recognizer.transcribe(job.samples, null, job.priority)
                 is TranscriptLanguage.Specified -> recognizer.transcribe(job.samples, language.code, job.priority)
+                is TranscriptLanguage.Conversation -> {
+                    val result = recognizer.transcribe(job.samples, null, job.priority)
+                    if (LanguageEvidence.group(result.lang, separateChinese = true) in language.groups) result
+                    else {
+                        currentCoroutineContext().ensureActive()
+                        recognizer.transcribe(job.samples, language.fallback, job.priority)
+                    }
+                }
                 is TranscriptLanguage.Identify -> checkNotNull(identified).identifyAndRecognize(job.samples, language.candidates, language.fallback, job.priority)
             },
         )
