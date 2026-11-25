@@ -45,17 +45,24 @@ class SupertonicSpeaker(
     private var loadedThreads = 0
     private var tts: OfflineTts? = null
 
+    private suspend fun <T> borrow(action: suspend (Int) -> T): T = compute.measured("Supertonic", "3-int8/sherpa-2.0.1", dir, { n ->
+        val model = engine(n)
+        val config = GenerationConfig(sid = 0, speed = 1f, numSteps = DEFAULT_STEPS, extra = mapOf("lang" to "en"))
+        val discard = object : (FloatArray) -> Int { override fun invoke(samples: FloatArray) = 1 }
+        kotlin.system.measureNanoTime { model.generateWithConfigAndCallback("Good morning.", config, discard) }
+    }, action)
+
     override fun supports(lang: String): Boolean = lang.substringBefore('-') in LANGUAGES
 
     /** 声の数。読み込んでいなければ読み込む。 */
     suspend fun voices(): Int = withContext(dispatcher) {
-        compute.borrow(0) { engine(it).numSpeakers() }
+        borrow { engine(it).numSpeakers() }
     }
 
     override suspend fun speak(text: String, lang: String) = withContext(dispatcher) {
         var rate = 0
         var speakers = 0
-        compute.borrow(0) { n ->
+        borrow { n ->
             val engine = engine(n)
             rate = engine.sampleRate()
             speakers = engine.numSpeakers()
@@ -127,7 +134,7 @@ class SupertonicSpeaker(
                 try {
                     for (sentence in sentences(text)) {
                         if (!job.isActive) break
-                        compute.borrow(0) { n -> engine(n).generateWithConfigAndCallback(sentence, config, callback) }
+                        borrow { n -> engine(n).generateWithConfigAndCallback(sentence, config, callback) }
                     }
                 } finally {
                     chunks.close()

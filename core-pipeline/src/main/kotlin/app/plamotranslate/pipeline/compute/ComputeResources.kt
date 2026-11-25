@@ -1,10 +1,12 @@
 package app.plamotranslate.pipeline.compute
 
-/** 処理の間だけ資源を借りる。処理には貸出スレッド数と、同じ資源を待つ依頼の有無を渡す。 */
+/** 初回の計測と、選んだ数での貸出を扱う。区切りで譲る処理は、返却後に同じ依頼の続きから再開する。 */
 interface ComputeResources {
+    suspend fun selectThreads(benchmark: ThreadBenchmark, requested: Int, gpu: Boolean = false, capacity: Int = Int.MAX_VALUE): Int
+
     suspend fun <T> borrow(
         gpu: Boolean,
-        threads: Int,
+        threads: Int = 0,
         work: ComputeWork = ComputeWork.Regular,
         action: suspend (Int, () -> Boolean) -> T,
     ): T

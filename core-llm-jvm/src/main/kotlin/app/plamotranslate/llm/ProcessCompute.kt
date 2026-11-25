@@ -1,5 +1,6 @@
 package app.plamotranslate.llm
 
+import app.plamotranslate.pipeline.compute.ThreadBenchmark
 import app.plamotranslate.log.Logs
 import app.plamotranslate.pipeline.compute.ComputeResources
 import app.plamotranslate.pipeline.compute.ComputeScheduler
@@ -36,7 +37,27 @@ object ProcessCompute : ComputeResources {
         })
     }
 
+    private class TopologyChanged : Exception()
+
+    override suspend fun selectThreads(benchmark: ThreadBenchmark, requested: Int, gpu: Boolean, capacity: Int): Int {
+        while (true) {
+            val topology = topology()
+            val candidates = topology.candidates(requested).map { minOf(it, capacity) }.distinct()
+            if (candidates.size == 1) return candidates.single()
+            try {
+                return benchmark.select(topology.key, candidates, { topology().key == topology.key }) { trials, n ->
+                    borrow(gpu, n, ComputeWork(name = "${benchmark.component} 試走", exclusiveCpu = true)) { available, _ ->
+                        if (n > available || topology().key != topology.key) throw TopologyChanged()
+                        trials.measure(n, { benchmark.sample(n) }) { Logs.i("${benchmark.component} CPU=${topology.key} $it") }
+                    }
+                }.preferred()
+            } catch (_: TopologyChanged) {
+                // 異なる CPU の組で測った時間を混ぜず、新しい候補から選ぶ。
+            }
+        }
+    }
+
     override suspend fun <T> borrow(gpu: Boolean, threads: Int, work: ComputeWork,
         action: suspend (Int, () -> Boolean) -> T): T =
-        scheduler.borrow(topology(), gpu, threads, work, action)
+        scheduler.borrow(topology(), gpu, work.benchmark?.let { selectThreads(it, threads, gpu) } ?: threads, work, action)
 }

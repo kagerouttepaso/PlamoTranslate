@@ -130,6 +130,18 @@ class TranscriptionTunerTest {
         assertEquals(0, gpuEnds)
     }
 
+    @Test fun `CPUはばらつき内の最小数を選びGPUは最速CPUと比べる`() = runTest {
+        cpus = candidates(6)
+        val times = listOf(100L, 88L, 104L, 120L).iterator()
+        onTrial = { candidate ->
+            if (candidate == cpus.first()) cpuTimes[candidate] = times.next()
+        }
+        // GPU の81は最小数の104には2割勝つが、最速の100には2割勝たない。
+        val choice = prepare(81)
+        assertEquals(cpus.first(), choice.candidate)
+        assertEquals(104L, choice.medianNanos)
+    }
+
     @Test fun `段の数が同じでも許された番号が変われば再計測する`() = runTest {
         for (first in listOf(0, 4, 4)) {
             environment = environment.copy(cpu = CpuTopology(mapOf(first to null, first + 1 to null)).key)

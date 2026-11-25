@@ -1,10 +1,9 @@
-package app.plamotranslate.llm
+package app.plamotranslate.pipeline.speech
 
-import app.plamotranslate.pipeline.speech.TranscriptionTuner
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-object QwenTrialAudio {
+object SpeechTrialAudio {
     val reference = TranscriptionTuner.Reference("The door is open.", "en")
     const val version = "door-en-1"
     val samples by lazy {

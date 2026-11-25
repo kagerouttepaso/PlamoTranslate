@@ -15,7 +15,9 @@ import kotlinx.coroutines.sync.withLock
 import java.io.File
 
 interface OcrCompute {
-    suspend fun <T> borrow(threads: Int, action: suspend (Int) -> T): T
+    suspend fun <T> measured(component: String, version: String, directory: java.io.File,
+        sample: suspend (Int) -> Long, action: suspend (Int) -> T): T
+    suspend fun <T> exclusive(action: suspend () -> T): T
 }
 
 /**
@@ -67,20 +69,31 @@ class MultiScriptOcr(private val paddleDir: File? = null, private val compute: O
     /** [light] なら重い認識器（[LineReader.heavy]）を使わない。 */
     private suspend fun read(bitmap: Bitmap, use: Set<Source>, light: Boolean = false): List<OcrLine> = coroutineScope {
         val readings = readers.filter { r -> r.sources.any { it in use } && !(light && r.heavy) }
-            .map { r -> async(Dispatchers.Default) { compute.borrow(Int.MAX_VALUE) { r.read(bitmap, use) } } }
+            .map { r -> async(Dispatchers.Default) { compute.exclusive { r.read(bitmap, use) } } }
             .awaitAll().toMutableList()
         if (!light && paddleDir != null) {
             paddleLock.withLock {
                 if (paddle?.sources?.any { it in use } == true) withContext(Dispatchers.Default) {
-                    compute.borrow(0) { n ->
+                    fun engine(n: Int): PaddleReader? {
                         if (paddleThreads != n) {
                             val next = PaddleReader.load(paddleDir, n)
                             paddle?.close()
                             paddle = next
                             paddleThreads = n
                         }
-                        paddle?.let { readings.add(it.read(bitmap, use)) }
+                        return paddle
                     }
+                    compute.measured("PP-OCR", "manga-de0e793d/korean-354549cf/ort-1.31.1/$use", paddleDir, { n ->
+                        val reader = checkNotNull(engine(n))
+                        val fixture = Bitmap.createBitmap(320, 96, Bitmap.Config.ARGB_8888)
+                        try {
+                            fixture.eraseColor(android.graphics.Color.WHITE)
+                            android.graphics.Canvas(fixture).drawText("翻訳 Test", 12f, 64f, android.graphics.Paint().apply { textSize = 42f })
+                            kotlin.system.measureNanoTime { reader.read(fixture, use) }
+                        } finally {
+                            fixture.recycle()
+                        }
+                    }) { n -> engine(n)?.let { readings.add(it.read(bitmap, use)) } }
                 }
             }
         }

@@ -15,6 +15,8 @@ data class ComputeWork(
     val stop: StopMode = StopMode.Finish,
     val resize: ResizeCost = ResizeCost.Reload,
     val name: String = priority.name,
+    val benchmark: ThreadBenchmark? = null,
+    val exclusiveCpu: Boolean = false,
 ) {
     companion object {
         val Regular = ComputeWork()
@@ -30,6 +32,7 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
         var stoppedBy: Ticket? = null
         var stopTime = 0L
         var yielded = false
+        val exclusive get() = work.exclusiveCpu || requested == Int.MAX_VALUE
         val label get() = "${work.name}#$id"
     }
 
@@ -45,25 +48,25 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
                 val next = waiting.filter { it.gpu == gpu }
                     .minWithOrNull(compareBy<Ticket> { it.work.priority }.thenBy { it.id }) ?: break
                 val running = active.filter { it.gpu == gpu }
-                val free = if (gpu) 0 else latest.budget - running.sumOf { it.granted }
+                val free = if (gpu || running.any { it.exclusive }) 0 else latest.budget - running.sumOf { it.granted }
                 val target = minOf(next.requested, latest.budget)
                 val count = when {
                     gpu -> next.requested
                     next.work.resize == ResizeCost.Cheap -> minOf(target, free)
                     else -> target
                 }
-                if (if (gpu) running.isNotEmpty() else count <= 0 || count > free || running.any { it.requested == Int.MAX_VALUE }) {
+                val blocked = if (gpu) running.isNotEmpty() else
+                    count !in 1..free || next.exclusive && running.isNotEmpty()
+                if (blocked) {
                     if (!gpu) {
-                        var needed = (if (next.work.resize == ResizeCost.Cheap) 1 else target) - free
-                        needed -= running.filter { it.stoppedBy != null }.sumOf { it.granted }
-                        for (victim in running.sortedByDescending { it.work.priority }) {
-                            if (needed <= 0) break
-                            if (victim.work.priority <= next.work.priority || victim.work.stop == StopMode.Finish || victim.stoppedBy != null) continue
-                            victim.stoppedBy = next
-                            victim.stopTime = System.nanoTime()
-                            needed -= victim.granted
-                            if (victim.work.stop == StopMode.Cancel) add { victim.job.cancel() }
+                        val minimum = when {
+                            next.exclusive -> latest.budget
+                            next.work.resize == ResizeCost.Cheap -> 1
+                            else -> target
                         }
+                        addAll(preempt(next, running, minimum - free))
+                    } else if (next.work.priority < running.single().work.priority && running.single().work.stop == StopMode.Boundary) {
+                        requestStop(running.single(), next)
                     }
                     break
                 }
@@ -77,25 +80,45 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
         }
     }
 
+    private fun requestStop(victim: Ticket, next: Ticket) {
+        if (victim.stoppedBy != null) return
+        victim.stoppedBy = next
+        victim.stopTime = System.nanoTime()
+    }
+
+    private fun preempt(next: Ticket, running: List<Ticket>, deficit: Int): List<() -> Unit> = buildList {
+        var needed = deficit - running.filter { it.stoppedBy != null }.sumOf { it.granted }
+        for (victim in running.sortedByDescending { it.work.priority }) {
+            if (needed <= 0) break
+            if (victim.work.priority <= next.work.priority || victim.work.stop == StopMode.Finish || victim.stoppedBy != null) continue
+            requestStop(victim, next)
+            needed -= victim.granted
+            if (victim.work.stop == StopMode.Cancel) add { victim.job.cancel() }
+        }
+    }
+
     suspend fun <T> borrow(topology: CpuTopology, gpu: Boolean, requested: Int, work: ComputeWork = ComputeWork.Regular,
         action: suspend (Int, () -> Boolean) -> T): T = coroutineScope {
-        require(requested >= 0)
+        require(requested > 0)
         val job = coroutineContext.job
         var start = System.nanoTime()
         val ticket = synchronized(waiting) {
             latest = topology
-            Ticket(++sequence, gpu, work, if (requested == 0) topology.budget else requested, job).also { waiting.add(it) }
+            Ticket(++sequence, gpu, work, requested, job).also { waiting.add(it) }
         }
         try {
             while (true) {
                 synchronized(waiting) { schedule() }.forEach { it() }
                 ticket.ready.await()
                 ensureActive()
-                log("計算資源 ${ticket.label} 組=${work.priority} 停止=${work.stop} GPU=$gpu CPU段=${ticket.topology.tiers} 予算=${ticket.topology.budget} 貸出=${ticket.granted} 待ち=${(System.nanoTime()-start)/1_000_000}ms")
+                log("計算資源 ${ticket.label} 組=${work.priority} 停止=${work.stop} GPU=$gpu CPU単独=${!gpu && ticket.exclusive} CPU段=${ticket.topology.tiers} 予算=${ticket.topology.budget} 貸出=${ticket.granted} 待ち=${(System.nanoTime() - start) / 1_000_000}ms")
                 val result = action(ticket.granted) {
                     synchronized(waiting) {
                         if (work.stop == StopMode.Boundary) {
-                            ticket.yielded = ticket.stoppedBy != null || gpu && waiting.any { it.gpu && it.work.priority < work.priority }
+                            if (ticket.stoppedBy !in waiting && waiting.none { it.gpu == gpu && it.work.priority < work.priority }) {
+                                ticket.stoppedBy = null
+                            }
+                            ticket.yielded = ticket.stoppedBy != null
                             ticket.yielded
                         } else waiting.any { it.gpu == gpu }
                     }
@@ -122,7 +145,7 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
     private fun release(ticket: Ticket) {
         active.remove(ticket)
         ticket.stoppedBy?.let {
-            log("計算資源 横取り ${it.label} → ${ticket.label} 返却まで=${(System.nanoTime()-ticket.stopTime)/1_000_000}ms")
+            log("計算資源 横取り ${it.label} → ${ticket.label} 返却まで=${(System.nanoTime() - ticket.stopTime) / 1_000_000}ms")
             ticket.stoppedBy = null
         }
     }

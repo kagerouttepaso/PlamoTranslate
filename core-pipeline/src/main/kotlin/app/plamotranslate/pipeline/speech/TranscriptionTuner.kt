@@ -1,5 +1,6 @@
 package app.plamotranslate.pipeline.speech
 
+import app.plamotranslate.pipeline.compute.ThreadBenchmark
 import app.plamotranslate.pipeline.compute.ThreadTrials
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -27,7 +28,7 @@ object TranscriptionTuner {
     data class Environment(val weights: String, val projector: String, val runtime: String, val platform: String,
         val cpu: String, val device: String, val fixture: String) {
         fun cacheKey(candidates: List<TranscriptionCandidate>, gpu: Boolean): String =
-            listOf(weights, projector, runtime, platform, cpu, device, fixture, candidates, gpu, "2:$GPU_RATIO")
+            listOf(weights, projector, runtime, platform, cpu, device, fixture, candidates, gpu, "3:$GPU_RATIO")
                 .joinToString { "${it.toString().length}:$it" }
     }
 
@@ -46,7 +47,8 @@ object TranscriptionTuner {
     suspend fun <T : AutoCloseable> prepare(cpus: List<TranscriptionCandidate>, allowedGpu: Boolean, preference: TranscriptionPreference,
         environment: Environment, reference: Reference, store: Store,
         withGpuPreparation: suspend (suspend () -> Unit) -> Unit, beginGpu: () -> Boolean, endGpu: (String?) -> Unit,
-        load: suspend (TranscriptionCandidate) -> T, trial: suspend (T) -> Sample, log: (String) -> Unit = {}): Pair<T, TranscriptionChoice> {
+        load: suspend (TranscriptionCandidate) -> T, trial: suspend (T) -> Sample, log: (String) -> Unit = {},
+        directory: java.io.File? = null, valid: () -> Boolean = { true }): Pair<T, TranscriptionChoice> {
         val gpu = cpus.first().copy(gpu = true)
         val key = environment.cacheKey(cpus, allowedGpu && preference != TranscriptionPreference.CPU)
         val cpuReason = "CPU の試走結果を採用"
@@ -71,13 +73,13 @@ object TranscriptionTuner {
             cached ?: TranscriptionChoice(candidate, sample.nanos, "GPU を指定")
         }
 
-        val trials = ThreadTrials()
+        var trials = ThreadTrials()
         suspend fun measure(candidate: TranscriptionCandidate, reason: String) = evaluate(candidate) { engine ->
-            trials.measure({
+            trials.measure(candidate.batch, {
                 val sample = trial(engine)
                 check(reference.matches(sample.result)) { "試走の本文または言語が正解と一致しません" }
                 sample.nanos
-            }) { warmup, median -> log("書き起こし $candidate ならし=${warmup}ns 中央値=${median}ns") }
+            }) { log("書き起こし $candidate $it") }
                 ?.let { TranscriptionChoice(candidate, it, reason) }
         }
 
@@ -89,16 +91,35 @@ object TranscriptionTuner {
         }
 
         suspend fun fastestCpu(reason: String = cpuReason): TranscriptionChoice {
-            var best: TranscriptionChoice? = null
-            for (candidate in cpus) {
-                val (engine, choice) = measure(candidate, reason)
-                if (choice != null && (best == null || choice.medianNanos < best.medianNanos)) {
-                    best = select(engine to choice)
-                } else {
-                    engine.close()
-                }
+            var current: T? = null
+            var retained: TranscriptionCandidate? = null
+            val benchmark = ThreadBenchmark("Qwen3-ASR", key, directory) {
+                val sample = trial(checkNotNull(current))
+                check(reference.matches(sample.result)) { "試走の本文または言語が正解と一致しません" }
+                sample.nanos
             }
-            return checkNotNull(best)
+            val curve = benchmark.select(environment.cpu, cpus.map { it.batch }, valid) { measurements, count ->
+                val candidate = cpus.first { it.batch == count }
+                val (engine, median) = evaluate(candidate) {
+                    current = it
+                    measurements.measure(count, { benchmark.sample(count) }) { message -> log("Qwen3-ASR CPU $message") }
+                }
+                current = null
+                if (median != null && measurements.preferred() == count) {
+                    retained = candidate
+                    select(engine to TranscriptionChoice(candidate, median, reason))
+                } else engine.close()
+            }
+            trials = ThreadTrials.decode(curve.encode())
+            val count = curve.preferred()
+            val candidate = cpus.first { it.batch == count }
+            val choice = TranscriptionChoice(candidate, curve.median(count), reason)
+            if (retained != candidate) {
+                selectedEngine?.close()
+                selectedEngine = null
+                select(ready(candidate, choice))
+            }
+            return choice
         }
 
         fun save(choice: TranscriptionChoice) = choice.also { store.write(key, it) }
@@ -141,8 +162,9 @@ object TranscriptionTuner {
                 if (cached.candidate == gpu) return tryGpu { ready(gpu, cached) }?.let(::select) ?: fastestCpu()
             }
             val cpu = fastestCpu()
+            val fastestCpuTime = trials.fastestMedian
             val (engine, choice) = tryGpu { measure(gpu, "GPU の試走結果を採用") } ?: return cpu
-            if (choice != null && choice.medianNanos <= cpu.medianNanos * GPU_RATIO) return save(select(engine to choice))
+            if (choice != null && choice.medianNanos <= fastestCpuTime * GPU_RATIO) return save(select(engine to choice))
             engine.close()
             return save(cpu.copy(reason = "GPU は CPU より十分には速くありません"))
         }

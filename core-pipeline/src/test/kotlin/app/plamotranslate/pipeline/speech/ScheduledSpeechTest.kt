@@ -1,5 +1,6 @@
 package app.plamotranslate.pipeline.speech
 
+import app.plamotranslate.pipeline.compute.ThreadBenchmark
 import app.plamotranslate.pipeline.compute.ComputeResources
 import app.plamotranslate.pipeline.compute.ComputeWork
 import kotlinx.coroutines.test.runTest
@@ -11,6 +12,7 @@ class ScheduledSpeechTest {
         var budget = 4
         val observedWork = mutableListOf<ComputeWork>()
         val compute = object : ComputeResources {
+            override suspend fun selectThreads(benchmark: ThreadBenchmark, requested: Int, gpu: Boolean, capacity: Int) = requested
             override suspend fun <T> borrow(gpu: Boolean, threads: Int, work: ComputeWork,
                 action: suspend (Int, () -> Boolean) -> T): T {
                 assertFalse(gpu)

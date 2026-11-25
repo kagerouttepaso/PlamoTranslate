@@ -13,7 +13,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
-import app.plamotranslate.pipeline.compute.ThreadTrials
+import app.plamotranslate.pipeline.compute.ComputeWork
+import app.plamotranslate.pipeline.compute.ThreadBenchmark
 import app.plamotranslate.pipeline.translation.SingleRequest
 import app.plamotranslate.log.Logs
 import java.io.File
@@ -79,14 +80,11 @@ class TranslationEngine private constructor(
             checkOpen()
             withContext(dispatcher) {
                 var tokens = 0
-                do {
-                    val turn = ProcessCompute.borrow(usesGpu, selectedThreads, app.plamotranslate.pipeline.compute.ComputeWork.Translation) { count, waiting ->
-                        runtime.native { LlamaNative.nativeConfigure(handle, boost, count) }
-                        TranslationTurn(slots.coerceIn(1, MAX_PARALLEL), waiting).also {
-                            tokens += translateBatch(slots.coerceIn(1, MAX_PARALLEL), source, maxTokens, it)
-                        }
-                    }
-                } while (turn.yielded)
+                val parallel = slots.coerceIn(1, MAX_PARALLEL)
+                ProcessCompute.borrow(usesGpu, selectedThreads, ComputeWork.Translation) { count, waiting ->
+                    runtime.native { LlamaNative.nativeConfigure(handle, boost, count) }
+                    tokens += translateBatch(parallel, source, maxTokens, TranslationTurn(parallel, waiting))
+                }
                 tokens
             }
         }
@@ -147,28 +145,13 @@ class TranslationEngine private constructor(
             if (threads > 0) selectedThreads = threads
         }
 
-    private suspend fun tune(candidates: List<Int>): Int {
+    private suspend fun trial(count: Int): Long {
         val request = TranslationRequest("明日の朝は駅の北口で待ち合わせましょう。", Language.JA, Language.EN)
-        val trials = ThreadTrials()
-        var best = candidates.first()
-        var fastest = Long.MAX_VALUE
-        for (count in candidates) {
-            val median = ProcessCompute.borrow(usesGpu, count) { n, _ ->
-                if (n != count) return@borrow null
-                runtime.native { LlamaNative.nativeConfigure(handle, boost, n) }
-                trials.measure({
-                    val start = System.nanoTime()
-                    val tokens = translateBatch(1, SingleRequest(request), 8, TranslationTurn(1) { false })
-                    check(tokens > 0)
-                    (System.nanoTime() - start) / tokens
-                }) { warmup, measured -> Logs.i("翻訳 $count スレッド ならし=$warmup 中央値=$measured ns/token") }
-            }
-            if (median != null && median < fastest) {
-                fastest = median
-                best = count
-            }
-        }
-        return best
+        runtime.native { LlamaNative.nativeConfigure(handle, boost, count) }
+        val start = System.nanoTime()
+        val tokens = translateBatch(1, SingleRequest(request), 8, TranslationTurn(1) { false })
+        check(tokens > 0)
+        return (System.nanoTime() - start) / tokens
     }
 
     private fun checkOpen() {
@@ -236,22 +219,9 @@ class TranslationEngine private constructor(
                     val engine = TranslationEngine(handle, dispatcher, gpu, poolCapacity, cpu.boost)
                     loaded = engine
                     val topology = ProcessCompute.topology()
-                    val candidates = topology.candidates(cpu.threads).map { minOf(it, poolCapacity) }.distinct()
-                    engine.selectedThreads = candidates.first()
-                    if (candidates.size > 1) {
-                        val key = listOf(model.absolutePath, model.length(), model.lastModified(), topology.key, candidates, gpu, cpu, nCtx, "v1").joinToString("|")
-                        val name = java.util.UUID.nameUUIDFromBytes(key.toByteArray()).toString()
-                        val cache = cacheDir?.resolve(name)
-                        val saved = runCatching { cache?.readText()?.toIntOrNull() }.getOrNull()
-                        engine.selectedThreads = saved?.takeIf { it in candidates } ?: engine.tune(candidates).also { n ->
-                            runCatching {
-                                if (ProcessCompute.topology().key == topology.key) {
-                                    cache?.parentFile?.mkdirs()
-                                    cache?.writeText(n.toString())
-                                }
-                            }
-                        }
-                    }
+                    val version = listOf(model.absolutePath, model.length(), model.lastModified(), gpu, cpu, nCtx).joinToString("|")
+                    engine.selectedThreads = ProcessCompute.selectThreads(
+                        ThreadBenchmark("PLaMo", version, cacheDir, engine::trial), cpu.threads, gpu, poolCapacity)
                     Logs.i("翻訳のスレッド数=${engine.selectedThreads} CPU=${topology.key}")
                     engine
                 }

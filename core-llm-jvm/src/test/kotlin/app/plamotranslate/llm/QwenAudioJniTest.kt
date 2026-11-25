@@ -1,5 +1,6 @@
 package app.plamotranslate.llm
 
+import app.plamotranslate.pipeline.speech.SpeechTrialAudio
 import app.plamotranslate.pipeline.diagnostics.InferenceTarget
 import app.plamotranslate.pipeline.speech.LanguageSource
 import app.plamotranslate.pipeline.speech.RecognitionPriority
@@ -32,9 +33,9 @@ class QwenAudioJniTest {
 
     @Test fun 同梱の試走音声をCPUで書き起こして本文と言語が一致する() = runBlocking {
         load(gpu = false).use { recognizer ->
-            val result = recognizer.trial(QwenTrialAudio.samples).result
+            val result = recognizer.trial(SpeechTrialAudio.samples).result
             println("CPU 試走：$result")
-            assertTrue(result.toString(), QwenTrialAudio.reference.matches(result))
+            assertTrue(result.toString(), SpeechTrialAudio.reference.matches(result))
         }
     }
 

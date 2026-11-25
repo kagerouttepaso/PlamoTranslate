@@ -98,10 +98,10 @@ internal class DesktopAsr(private val models: Path, private val qwen: DesktopQwe
         return try {
             val recognizer = when (settings.model) {
                 SpeechModel.QWEN3_ASR -> qwen.load(settings.transcribeThreads)
-                SpeechModel.SENSE_VOICE -> ScheduledSpeech.senseVoice(ProcessCompute, settings.transcribeThreads) { JvmSenseVoice(directory, it, specified) }
+                SpeechModel.SENSE_VOICE -> ScheduledSpeech.senseVoice(ProcessCompute, settings.transcribeThreads, directory.resolve("thread-profiles")) { JvmSenseVoice(directory, it, specified) }
             }
             val identifier = try {
-                if (specified == null && identify && settings.model == SpeechModel.QWEN3_ASR) ScheduledSpeech.identifier(ProcessCompute, settings.identifyThreads) { JvmWhisperIdentifier(directory, it) } else null
+                if (specified == null && identify && settings.model == SpeechModel.QWEN3_ASR) ScheduledSpeech.identifier(ProcessCompute, settings.identifyThreads, directory.resolve("thread-profiles")) { JvmWhisperIdentifier(directory, it) } else null
             } catch (error: Throwable) {
                 recognizer.close()
                 throw error

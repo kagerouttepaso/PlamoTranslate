@@ -55,8 +55,8 @@ class AsrBenchActivity : Activity() {
         val audio = wavs.associate { it.nameWithoutExtension to WavFile.read(it) }
 
         val pss0 = Debug.getPss()
-        val (sv, svMs) = timed { ScheduledSpeech.senseVoice(ProcessCompute, 0) { SenseVoiceRecognizer.load(asrDir, it) } }
-        val (lid, lidMs) = timed { ScheduledSpeech.identifier(ProcessCompute, 0) { WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR), it) } }
+        val (sv, svMs) = timed { ScheduledSpeech.senseVoice(ProcessCompute, 0, asrDir.resolve("thread-profiles")) { SenseVoiceRecognizer.load(asrDir, it) } }
+        val (lid, lidMs) = timed { ScheduledSpeech.identifier(ProcessCompute, 0, asrDir.resolve("thread-profiles")) { WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR), it) } }
         val pss1 = Debug.getPss()
         val (qwen, qwenMs) = timed { AndroidQwen.load(this, 4) }
         val pss2 = Debug.getPss()

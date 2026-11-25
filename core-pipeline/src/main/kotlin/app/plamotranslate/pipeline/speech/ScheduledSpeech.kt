@@ -1,5 +1,6 @@
 package app.plamotranslate.pipeline.speech
 
+import app.plamotranslate.pipeline.compute.ThreadBenchmark
 import app.plamotranslate.pipeline.compute.ComputeWork
 import app.plamotranslate.pipeline.compute.ComputeResources
 import kotlinx.coroutines.runBlocking
@@ -21,8 +22,32 @@ private class SpeechSession<T : AutoCloseable>(private val compute: ComputeResou
 }
 
 object ScheduledSpeech {
-    suspend fun senseVoice(compute: ComputeResources, threads: Int, create: (Int) -> SpeechRecognizer): SpeechRecognizer {
-        val session = compute.borrow(false, threads) { n, _ -> SpeechSession(compute, threads, n, create(n), create) }
+    private suspend fun <T : AutoCloseable> prepare(compute: ComputeResources, name: String, version: String,
+        directory: java.io.File?, threads: Int, create: (Int) -> T, sample: (T) -> Unit): SpeechSession<T> {
+        var trial: T? = null
+        var trialCount = 0
+        val benchmark = ThreadBenchmark(name, "$version/${SpeechTrialAudio.version}", directory) { n ->
+            if (trialCount != n) {
+                trial?.close()
+                trial = null
+                trial = create(n)
+                trialCount = n
+            }
+            kotlin.system.measureNanoTime { sample(checkNotNull(trial)) }
+        }
+        try {
+            val selected = compute.selectThreads(benchmark, threads)
+            return compute.borrow(false, if (threads > 0) threads else selected) { n, _ ->
+                val model = trial?.takeIf { n == trialCount }?.also { trial = null } ?: create(n)
+                SpeechSession(compute, if (threads > 0) threads else selected, n, model, create)
+            }
+        } finally {
+            trial?.close()
+        }
+    }
+
+    suspend fun senseVoice(compute: ComputeResources, threads: Int, directory: java.io.File? = null, create: (Int) -> SpeechRecognizer): SpeechRecognizer {
+        val session = prepare(compute, "SenseVoice", "small-int8-2024-07-17/sherpa-2.0.1", directory, threads, create) { it.recognize(SpeechTrialAudio.samples) }
         return object : SpeechRecognizer by session.model {
             override fun recognize(samples: FloatArray) = recognizeAs(samples, null)
             override fun recognizeAs(samples: FloatArray, language: String?) = runBlocking {
@@ -34,8 +59,8 @@ object ScheduledSpeech {
         }
     }
 
-    suspend fun identifier(compute: ComputeResources, threads: Int, create: (Int) -> LanguageIdentifier): LanguageIdentifier {
-        val session = compute.borrow(false, threads) { n, _ -> SpeechSession(compute, threads, n, create(n), create) }
+    suspend fun identifier(compute: ComputeResources, threads: Int, directory: java.io.File? = null, create: (Int) -> LanguageIdentifier): LanguageIdentifier {
+        val session = prepare(compute, "Whisper", "tiny-65176e2d", directory, threads, create) { it.scores(SpeechTrialAudio.samples, null) }
         return object : LanguageIdentifier {
             override fun scores(samples: FloatArray, candidates: Set<String>?) = runBlocking {
                 scores(samples, candidates, RecognitionPriority.LANGUAGE)

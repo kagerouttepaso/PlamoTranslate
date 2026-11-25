@@ -12,7 +12,7 @@ import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.llm.ProcessCompute
 import app.plamotranslate.llm.QwenAudioRecognizer
-import app.plamotranslate.llm.QwenTrialAudio
+import app.plamotranslate.pipeline.speech.SpeechTrialAudio
 import app.plamotranslate.log.Logs
 import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.pipeline.diagnostics.InferenceRole
@@ -45,7 +45,7 @@ internal object AndroidQwen {
         val environment = TranscriptionTuner.Environment(
             SharedModelCatalog.qwenWeights.sha256, SharedModelCatalog.qwenProjector.sha256,
             "${installed.longVersionCode}/${installed.lastUpdateTime}/$variant", Build.FINGERPRINT,
-            "${Build.SOC_MODEL}/${Build.SUPPORTED_ABIS.joinToString()}/$processors", driver, QwenTrialAudio.version,
+            "${Build.SOC_MODEL}/${Build.SUPPORTED_ABIS.joinToString()}/$processors", driver, SpeechTrialAudio.version,
         )
         val (engine, choice) = QwenAudioRecognizer.prepare(ModelCatalog.modelsDir(app), app.applicationInfo.nativeLibraryDir,
             variant, target.copy(requestGpu = gpu), threads, preference, environment, recognition,

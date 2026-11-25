@@ -1,7 +1,7 @@
 package app.plamotranslate.desktop
 
 import app.plamotranslate.llm.QwenAudioRecognizer
-import app.plamotranslate.llm.QwenTrialAudio
+import app.plamotranslate.pipeline.speech.SpeechTrialAudio
 import app.plamotranslate.pipeline.diagnostics.InferencePolicy
 import app.plamotranslate.pipeline.diagnostics.InferenceRole
 import app.plamotranslate.pipeline.models.SharedModelCatalog
@@ -50,7 +50,7 @@ internal class DesktopQwen(private val settings: DesktopSettings, private val na
         try {
             val environment = TranscriptionTuner.Environment(weights.sha256, projector.sha256, runtime,
                 listOf("os.name", "os.version", "os.arch").joinToString { System.getProperty(it) },
-                "${System.getenv("PROCESSOR_IDENTIFIER")?.takeIf { it.isNotBlank() } ?: unknownEnvironment}:$processors", if (gpu) driver else "CPU", QwenTrialAudio.version)
+                "${System.getenv("PROCESSOR_IDENTIFIER")?.takeIf { it.isNotBlank() } ?: unknownEnvironment}:$processors", if (gpu) driver else "CPU", SpeechTrialAudio.version)
             val (engine, choice) = QwenAudioRecognizer.prepare(settings.modelDirectory.toFile(), nativeDir, "",
                 target.copy(requestGpu = gpu), threads, preference, environment, settings,
                 { settings.beginGpuLoad(role) }, { settings.endGpuLoad(role, it) })
