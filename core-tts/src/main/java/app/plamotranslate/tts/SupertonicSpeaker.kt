@@ -33,6 +33,8 @@ import kotlinx.coroutines.withContext
  */
 class SupertonicSpeaker(
     private val dir: File,
+    /** 音声を作る間だけ、呼び出し側に CPU の貸出を頼む。 */
+    private val withCpu: suspend (suspend (Int) -> Unit) -> Unit,
     /** 声（voice.bin の何番目の声か）。 */
     var voice: Int = 0,
     /** 読む速さ（1が標準）。 */
@@ -40,15 +42,26 @@ class SupertonicSpeaker(
     /** 音を作るステップ数（[STEPS_RANGE]）。増やすと話している最中のザラつきが減り、そのぶん遅くなる。 */
     var steps: Int = DEFAULT_STEPS,
 ) : Speaker {
+    private var loadedThreads = 0
     private var tts: OfflineTts? = null
 
     override fun supports(lang: String): Boolean = lang.substringBefore('-') in LANGUAGES
 
     /** 声の数。読み込んでいなければ読み込む。 */
-    suspend fun voices(): Int = withContext(dispatcher) { engine().numSpeakers() }
+    suspend fun voices(): Int = withContext(dispatcher) {
+        var voices = 0
+        withCpu { voices = engine(it).numSpeakers() }
+        voices
+    }
 
     override suspend fun speak(text: String, lang: String) = withContext(dispatcher) {
-        val engine = engine()
+        var rate = 0
+        var speakers = 0
+        withCpu { n ->
+            val engine = engine(n)
+            rate = engine.sampleRate()
+            speakers = engine.numSpeakers()
+        }
         val job = currentCoroutineContext().job
         val track = AudioTrack.Builder()
             .setAudioAttributes(
@@ -60,14 +73,14 @@ class SupertonicSpeaker(
             .setAudioFormat(
                 AudioFormat.Builder()
                     .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
-                    .setSampleRate(engine.sampleRate())
+                    .setSampleRate(rate)
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build(),
             )
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         val config = GenerationConfig(
-            sid = voice.coerceIn(0, maxOf(0, engine.numSpeakers() - 1)),
+            sid = voice.coerceIn(0, maxOf(0, speakers - 1)),
             speed = speed,
             numSteps = steps.coerceIn(STEPS_RANGE),
             extra = mapOf("lang" to lang.substringBefore('-')),
@@ -116,7 +129,7 @@ class SupertonicSpeaker(
                 try {
                     for (sentence in sentences(text)) {
                         if (!job.isActive) break
-                        engine.generateWithConfigAndCallback(sentence, config, callback)
+                        withCpu { n -> engine(n).generateWithConfigAndCallback(sentence, config, callback) }
                     }
                 } finally {
                     chunks.close()
@@ -128,7 +141,9 @@ class SupertonicSpeaker(
     }
 
     /** 推論のスレッドで呼ぶ。 */
-    private fun engine(): OfflineTts = tts ?: run {
+    private fun engine(threads: Int): OfflineTts {
+        tts?.takeIf { loadedThreads == threads }?.let { return it }
+        close()
         val start = System.nanoTime()
         val missing = FILES.filterNot { File(dir, it).exists() }
         if (missing.isNotEmpty()) throw SpeechException("読み上げのモデルがありません（${missing.joinToString()}）")
@@ -143,10 +158,11 @@ class SupertonicSpeaker(
                     unicodeIndexer = File(dir, "unicode_indexer.bin").path,
                     voiceStyle = File(dir, "voice.bin").path,
                 ),
-                numThreads = NUM_THREADS,
+                numThreads = threads,
             ),
         )
-        OfflineTts(assetManager = null, config = config).also {
+        return OfflineTts(assetManager = null, config = config).also {
+            loadedThreads = threads
             tts = it
             Logs.i("読み上げのモデルを読み込みました（${(System.nanoTime() - start) / 1_000_000}ms、声 ${it.numSpeakers()}）")
         }
@@ -181,8 +197,6 @@ class SupertonicSpeaker(
         /** 一度に `AudioTrack` へ書く長さ（44.1kHzで約46ミリ秒）。止めてから黙るまでの最大の遅れになる。 */
         private const val WRITE_FRAMES = 2048
 
-        /** 2から4で約1割速くなり、6にしても変わらない（2026-11-08、実機）。翻訳と同時には走らないので4。 */
-        private const val NUM_THREADS = 4
 
         /** 文の終わりの記号（日本語・中国語の句点、全角の！？、英語などの .!?）。 */
         private val SENTENCE_END = Regex("(?<=[。！？!?]|\\.(?=\\s))\\s*|\\n+")

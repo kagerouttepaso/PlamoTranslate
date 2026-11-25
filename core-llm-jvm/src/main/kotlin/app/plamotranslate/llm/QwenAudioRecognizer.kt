@@ -1,11 +1,13 @@
 package app.plamotranslate.llm
 
 import app.plamotranslate.pipeline.diagnostics.InferenceTarget
-import app.plamotranslate.pipeline.diagnostics.GpuWork
+import app.plamotranslate.pipeline.compute.ComputeWork
 import app.plamotranslate.pipeline.speech.RecognitionPriority
 import app.plamotranslate.pipeline.speech.QwenTranscript
 import app.plamotranslate.pipeline.speech.Recognition
 import app.plamotranslate.pipeline.models.SharedModelCatalog
+import app.plamotranslate.log.Logs
+import app.plamotranslate.pipeline.speech.TranscriptionCandidate
 import app.plamotranslate.pipeline.speech.TranscriptionChoice
 import app.plamotranslate.pipeline.speech.TranscriptionPreference
 import app.plamotranslate.pipeline.speech.TranscriptionTuner
@@ -22,12 +24,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.resume
 import java.io.File
 
-class QwenAudioRecognizer private constructor(private val handle: Long, private val gpu: Boolean) : SpeechRecognizer {
+class QwenAudioRecognizer private constructor(private var handle: Long, private val gpu: Boolean,
+    private var loadedThreads: Int, private val loadHandle: (Int) -> Long) : SpeechRecognizer {
     override val judgesFinalTranscript = true
-    data class Threads(val encoder: Int = 6, val batch: Int = 6, val generation: Int = 6) {
-        init { require(encoder > 0 && batch > 0 && generation > 0) }
-    }
-
     override fun recognize(samples: FloatArray): Recognition = recognizeAs(samples, null)
 
     private val execution = Mutex()
@@ -56,8 +55,14 @@ class QwenAudioRecognizer private constructor(private val handle: Long, private 
         try {
             val name = language?.let { QwenTranscript.names.getValue(it) }.orEmpty()
             execution.withLock {
-                val work = if (priority.urgent) GpuWork.FinalTranscript else GpuWork.Regular
-                val raw = if (samples.isEmpty()) "" else LlamaRuntime.process.onDevice(gpu, work) {
+                val work = if (priority.urgent) ComputeWork.FinalTranscript else ComputeWork.Regular
+                val raw = if (samples.isEmpty()) "" else ProcessCompute.borrow(gpu, loadedThreads, work) { n, _ ->
+                    if (loadedThreads != n) {
+                        val replacement = loadHandle(n)
+                        LlamaRuntime.process.native { LlamaNative.nativeFreeAudio(handle) }
+                        handle = replacement
+                        loadedThreads = n
+                    }
                     coroutineContext.ensureActive()
                     started()
                     suspendCancellableCoroutine<ByteArray> { result ->
@@ -94,24 +99,32 @@ class QwenAudioRecognizer private constructor(private val handle: Long, private 
         /** 両 OS の試走とならし運転で同じ音声、候補、実装を使う。 */
         suspend fun prepare(
             models: File, nativeDir: String, variant: String, target: InferenceTarget,
-            processors: Int, threads: Int, preference: TranscriptionPreference, environment: TranscriptionTuner.Environment,
+            threads: Int, preference: TranscriptionPreference, environment: TranscriptionTuner.Environment,
             store: TranscriptionTuner.Store, beginGpu: () -> Boolean, endGpu: (String?) -> Unit,
-        ): Pair<QwenAudioRecognizer, TranscriptionChoice> =
-            TranscriptionTuner.prepare(TranscriptionTuner.cpuCandidates(if (threads > 0) processors else minOf(processors, TranslationEngine.defaultThreads()), threads), target.useGpu,
-                preference, environment, QwenTrialAudio.reference, store,
+        ): Pair<QwenAudioRecognizer, TranscriptionChoice> {
+            val topology = ProcessCompute.topology()
+            val candidates = topology.candidates(threads).map { TranscriptionCandidate(false, it, it) }
+            val stableStore = object : TranscriptionTuner.Store by store {
+                override fun write(key: String, choice: TranscriptionChoice) {
+                    if (ProcessCompute.topology().key == topology.key) store.write(key, choice)
+                }
+            }
+            return TranscriptionTuner.prepare(candidates, target.useGpu,
+                preference, environment.copy(cpu = "${environment.cpu}/${topology.key}"), QwenTrialAudio.reference, stableStore,
                 { action -> LlamaRuntime.process.prepare(true, action) }, beginGpu, endGpu, { candidate ->
                     load(File(models, SharedModelCatalog.qwenWeights.path), File(models, SharedModelCatalog.qwenProjector.path),
                         nativeDir, variant, target.copy(requestGpu = candidate.gpu),
-                        Threads(candidate.batch, candidate.batch, candidate.generation))
-                }, { it.trial(QwenTrialAudio.samples) })
+                        candidate.batch)
+                }, { it.trial(QwenTrialAudio.samples) }, { Logs.i(it) })
+        }
 
-        suspend fun load(model: File, projector: File, nativeDir: String, cpuVariant: String, target: InferenceTarget, threads: Threads = Threads()): QwenAudioRecognizer {
+        suspend fun load(model: File, projector: File, nativeDir: String, cpuVariant: String, target: InferenceTarget, threads: Int = ProcessCompute.topology().candidates().first()): QwenAudioRecognizer {
             val runtime = LlamaRuntime.process
-            return runtime.onDevice(target.useGpu) {
+            return ProcessCompute.borrow(target.useGpu, threads) { count, _ ->
                 val gpu = runtime.initialize(nativeDir, cpuVariant, target)
                 check(!target.useGpu || gpu) { "GPU を使用できません。CPU 専用で起動した場合は再起動が必要です" }
-                val handle = runtime.native { LlamaNative.nativeLoadAudio(model.absolutePath, projector.absolutePath, gpu, threads.encoder, threads.batch, threads.generation) }
-                QwenAudioRecognizer(handle, gpu)
+                fun loadHandle(n: Int) = runtime.native { LlamaNative.nativeLoadAudio(model.absolutePath, projector.absolutePath, gpu, n, n, n) }
+                QwenAudioRecognizer(loadHandle(count), gpu, count, ::loadHandle)
             }
         }
     }

@@ -29,7 +29,7 @@ internal class LlamaEngineLoader(private val context: () -> Context) : EngineLoa
             val target = candidate.copy(requestGpu = candidate.useGpu && GpuGuard.allowGpu(app, role))
             if (target.useGpu) GpuGuard.beginGpuLoad(app, role)
             try {
-                TranslationEngine.load(model.file.file(app), app.applicationInfo.nativeLibraryDir, target, cpu = preferences.cpuOptions).also {
+                TranslationEngine.load(model.file.file(app), app.applicationInfo.nativeLibraryDir, target, cpu = preferences.cpuOptions, cacheDir = app.cacheDir.resolve("translation-threads")).also {
                     it.parallel = parallel
                     warmUp(it)
                 }

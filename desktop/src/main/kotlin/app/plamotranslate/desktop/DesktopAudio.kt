@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
+import app.plamotranslate.llm.ScheduledSpeech
 import java.io.File
 import java.nio.file.Path
 
@@ -28,7 +29,7 @@ internal fun interface AudioCapture {
 internal data class DesktopRecognitionSettings(
     val model: SpeechModel = SpeechModel.DEFAULT,
     val transcribeThreads: Int = 0,
-    val identifyThreads: Int = 2,
+    val identifyThreads: Int = 0,
     val cardLanguageSeconds: Float = SegmentationProfile.CONVERSATION.cardLanguageSeconds,
     val vadThreshold: Float = 0.5f,
     val vadMinSpeechSeconds: Float = 0.25f,
@@ -94,14 +95,12 @@ internal class DesktopAsr(private val models: Path, private val qwen: DesktopQwe
         val profile = SegmentationProfile.CONVERSATION.copy(cardLanguageSeconds = settings.cardLanguageSeconds)
         val voice = SileroVoiceActivity.load(vad, profile.phraseSilenceSeconds, settings.vadThreshold, settings.vadMinSpeechSeconds)
         return try {
-            val threads = settings.transcribeThreads.takeIf { it > 0 }
-                ?: (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4)
             val recognizer = when (settings.model) {
                 SpeechModel.QWEN3_ASR -> qwen.load(settings.transcribeThreads)
-                SpeechModel.SENSE_VOICE -> JvmSenseVoice(directory, threads, specified)
+                SpeechModel.SENSE_VOICE -> ScheduledSpeech.senseVoice(settings.transcribeThreads) { JvmSenseVoice(directory, it, specified) }
             }
             val identifier = try {
-                if (specified == null && identify && settings.model == SpeechModel.QWEN3_ASR) JvmWhisperIdentifier(directory, settings.identifyThreads) else null
+                if (specified == null && identify && settings.model == SpeechModel.QWEN3_ASR) ScheduledSpeech.identifier(settings.identifyThreads) { JvmWhisperIdentifier(directory, it) } else null
             } catch (error: Throwable) {
                 recognizer.close()
                 throw error

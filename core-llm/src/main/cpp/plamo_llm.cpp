@@ -519,11 +519,24 @@ Java_app_plamotranslate_llm_LlamaNative_nativeWindowsCoreClasses(JNIEnv *env, jo
     auto *info = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *>(buffer.data());
     if (!GetLogicalProcessorInformationEx(RelationProcessorCore, info, &size)) return nullptr;
 
-    // レコードは物理コアごとに1つ。GroupMask の論理プロセッサ数は数えない。
+    DWORD_PTR allowed, system;
+    if (!GetProcessAffinityMask(GetCurrentProcess(), &allowed, &system)) return nullptr;
+    PROCESSOR_NUMBER current{};
+    GetCurrentProcessorNumberEx(&current);
     std::vector<jint> classes;
     for (DWORD offset = 0; offset < size;) {
         const auto *core = reinterpret_cast<const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *>(buffer.data() + offset);
-        classes.push_back(core->Processor.EfficiencyClass);
+        for (WORD i = 0; i < core->Processor.GroupCount; ++i) {
+            const auto &group = core->Processor.GroupMask[i];
+            if (group.Group != current.Group) continue;
+            auto mask = group.Mask & allowed;
+            for (int bit = 0; mask; ++bit, mask >>= 1) {
+                if (mask & 1) {
+                    classes.push_back(current.Group * 64 + bit);
+                    classes.push_back(core->Processor.EfficiencyClass);
+                }
+            }
+        }
         offset += core->Size;
     }
     const auto count = static_cast<jsize>(classes.size());

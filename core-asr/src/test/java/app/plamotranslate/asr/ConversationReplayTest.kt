@@ -132,7 +132,7 @@ class ConversationReplayTest {
         val audio = WavFile.parse(wav!!.readBytes())
         val profile = SegmentationProfile.CONVERSATION
         val recognizer: SpeechRecognizer = when (model) {
-            SpeechModel.SENSE_VOICE -> SenseVoiceRecognizer.load(asr!!)
+            SpeechModel.SENSE_VOICE -> SenseVoiceRecognizer.load(asr!!, 4)
             SpeechModel.QWEN3_ASR -> run {
                 val directory = System.getenv("MOCKINGWORD_ASR_FIXTURES") ?: File(asr, File(SharedModelCatalog.qwenWeights.path).parentFile!!.name).path
                 val native = requireNotNull(System.getenv("MOCKINGWORD_ASR_NATIVE"))

@@ -87,7 +87,7 @@ class QwenAudioJniTest {
         assumeTrue(System.getenv("MOCKINGWORD_ASR_VULKAN") == "1")
         val recognizer = LlamaRuntime.process.prepare(true) { load(true) }
         try {
-            LlamaRuntime.process.onDevice(true) {
+            ProcessCompute.borrow(true, 1) { _, _ ->
                 val waiting = launch(start = CoroutineStart.UNDISPATCHED) {
                     recognizer.transcribe(pcm("en00"), null, RecognitionPriority.PARTIAL)
                 }

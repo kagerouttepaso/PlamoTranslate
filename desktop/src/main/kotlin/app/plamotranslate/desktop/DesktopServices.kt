@@ -227,7 +227,7 @@ internal class DesktopEngineLoader(
     }
 
     private suspend fun loadEngine(model: Path, target: InferenceTarget, parallel: Int): TranslationEngine =
-        TranslationEngine.load(model.toFile(), nativeDir, target, cpu = settings.cpuOptions).also {
+        TranslationEngine.load(model.toFile(), nativeDir, target, cpu = settings.cpuOptions, cacheDir = settings.modelDirectory.resolveSibling("translation-threads").toFile()).also {
             it.parallel = parallel
         }
 

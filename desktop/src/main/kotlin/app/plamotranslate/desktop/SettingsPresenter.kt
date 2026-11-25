@@ -34,7 +34,6 @@ internal data class SettingsState(
     val busy: Boolean = true,
     val error: String? = null,
     val threads: Int = 0,
-    val automaticThreads: Int? = null,
     val manualParallel: Int? = null,
     val automaticParallel: Int = TranslationEngine.DEFAULT_PARALLEL,
     val tuningStatus: String? = null,
@@ -380,7 +379,6 @@ internal class SettingsPresenter(
         val ready = model as? ModelState.Ready
         return state.copy(
             model = model,
-            automaticThreads = if (ready == null) state.automaticThreads else TranslationEngine.defaultThreads(),
             manualParallel = ready?.let { settings.manualParallel(it.model, it.gpu) },
             automaticParallel = ready?.let { settings.automaticParallel(it.model, it.gpu) } ?: TranslationEngine.DEFAULT_PARALLEL,
             cpuOnly = settings.cpuOnly,

@@ -47,7 +47,7 @@ internal object AndroidQwen {
             "${Build.SOC_MODEL}/${Build.SUPPORTED_ABIS.joinToString()}/$processors", driver, QwenTrialAudio.version,
         )
         val (engine, choice) = QwenAudioRecognizer.prepare(ModelCatalog.modelsDir(app), app.applicationInfo.nativeLibraryDir,
-            variant, target.copy(requestGpu = gpu), processors, threads, preference, environment, recognition,
+            variant, target.copy(requestGpu = gpu), threads, preference, environment, recognition,
             {
                 GpuGuard.beginGpuLoad(app, role)
                 Logs.i("書き起こしの OpenCL の準備を開始")

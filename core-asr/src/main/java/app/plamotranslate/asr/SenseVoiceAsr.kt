@@ -77,13 +77,7 @@ class SenseVoiceRecognizer private constructor(
     }
 
     companion object {
-        /**
-         * SenseVoiceは非自己回帰で軽い。翻訳はGPUで動くので、CPUは認識に4スレッド使う
-         * （docs/判断/2026-11-06_会話翻訳では翻訳をGPUに音声認識をCPUに分ける.md）。
-         */
-        const val THREADS = 4
-
-        fun load(modelDir: File, threads: Int = THREADS): SenseVoiceRecognizer = SenseVoiceRecognizer(
+        fun load(modelDir: File, threads: Int): SenseVoiceRecognizer = SenseVoiceRecognizer(
             create(modelDir, threads, AUTO),
         ) { language -> create(modelDir, threads, language) }
 

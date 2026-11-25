@@ -52,7 +52,7 @@ internal class DesktopQwen(private val settings: DesktopSettings, private val na
                 listOf("os.name", "os.version", "os.arch").joinToString { System.getProperty(it) },
                 "${System.getenv("PROCESSOR_IDENTIFIER")?.takeIf { it.isNotBlank() } ?: unknownEnvironment}:$processors", if (gpu) driver else "CPU", QwenTrialAudio.version)
             val (engine, choice) = QwenAudioRecognizer.prepare(settings.modelDirectory.toFile(), nativeDir, "",
-                target.copy(requestGpu = gpu), processors, threads, preference, environment, settings,
+                target.copy(requestGpu = gpu), threads, preference, environment, settings,
                 { settings.beginGpuLoad(role) }, { settings.endGpuLoad(role, it) })
             val candidate = choice.candidate
             val reason = settings.gpuFallback(role) ?: if (!gpu && preference == TranscriptionPreference.GPU) "GPU を使用できません" else choice.reason

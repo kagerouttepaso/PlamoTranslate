@@ -1,5 +1,6 @@
 package app.plamotranslate
 
+import app.plamotranslate.llm.ProcessCompute
 import android.content.Context
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -168,5 +169,7 @@ object ReadAloud {
     }
 
     private fun supertonic(app: Context): SupertonicSpeaker =
-        supertonic ?: SupertonicSpeaker(ModelCatalog.speechDir(app)).also { supertonic = it }
+        supertonic ?: SupertonicSpeaker(ModelCatalog.speechDir(app), withCpu = { action ->
+            ProcessCompute.borrow(false, 0) { n, _ -> action(n) }
+        }).also { supertonic = it }
 }

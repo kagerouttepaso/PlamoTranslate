@@ -82,10 +82,9 @@ private fun PerformanceSettings(state: SettingsState, presenter: SettingsPresent
     val enabled = !state.busy && state.model !is ModelState.Loading
     val ready = enabled && state.model is ModelState.Ready
     BackendSettings(state, presenter)
-    val automaticThreads = state.automaticThreads?.let { "自動（$it）" } ?: "自動"
-    val counts = (listOf(1, 2, 4, 6, 8) + listOfNotNull(state.automaticThreads, state.threads.takeIf { it > 0 })).distinct().sorted()
+    val counts = (listOf(1, 2, 4, 6, 8) + listOfNotNull(state.threads.takeIf { it > 0 })).distinct().sorted()
     FlowRow(horizontalArrangement = Arrangement.spacedBy(DesktopSize.gap)) {
-        CountMenu("スレッド数", state.threads.takeIf { it > 0 }, automaticThreads, counts, enabled) { presenter.setThreads(it ?: 0) }
+        CountMenu("スレッド数", state.threads.takeIf { it > 0 }, "自動", counts, enabled) { presenter.setThreads(it ?: 0) }
         CountMenu("同時に訳す数", state.manualParallel, "自動（${state.automaticParallel}）",
             1..TranslationEngine.MAX_PARALLEL, ready, presenter::setParallel)
     }

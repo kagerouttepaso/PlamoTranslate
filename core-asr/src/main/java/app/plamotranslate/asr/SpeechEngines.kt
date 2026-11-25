@@ -7,6 +7,7 @@ import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.pipeline.speech.SpeechPipeline
 import app.plamotranslate.pipeline.speech.SpeechRecognizer
+import app.plamotranslate.llm.ScheduledSpeech
 import java.io.File
 
 /**
@@ -15,7 +16,7 @@ import java.io.File
  * （docs/設計/会話翻訳.md「認識の段と CPU の割り当て」）。設定の詳細設定で変えて測れる。
  */
 data class AsrTuning(
-    /** 書き起こしのスレッド数。0 ならモデルの既定（SenseVoice は4、Qwen3-ASR は試走で決める）。 */
+    /** 書き起こしのスレッド数。0 ならモデルの既定（SenseVoice は最速の性能段、Qwen3-ASR は試走で決める）。 */
     val transcribeThreads: Int = 0,
     /** 言語の識別（Whisper tiny）のスレッド数。 */
     val identifyThreads: Int = DEFAULT_IDENTIFY_THREADS,
@@ -23,7 +24,7 @@ data class AsrTuning(
     val vadMinSpeechSeconds: Float = SileroVoiceActivity.DEFAULT_MIN_SPEECH_SECONDS,
 ) {
     companion object {
-        const val DEFAULT_IDENTIFY_THREADS = 2
+        const val DEFAULT_IDENTIFY_THREADS = 0
     }
 }
 
@@ -46,13 +47,13 @@ object SpeechEngines {
         loadQwen: suspend () -> SpeechRecognizer,
     ): SpeechEngine {
         val recognizer: SpeechRecognizer = when (model) {
-            SpeechModel.SENSE_VOICE -> SenseVoiceRecognizer.load(asrDir, tuning.transcribeThreads.takeIf { it > 0 } ?: SenseVoiceRecognizer.THREADS)
+            SpeechModel.SENSE_VOICE -> ScheduledSpeech.senseVoice(tuning.transcribeThreads) { SenseVoiceRecognizer.load(asrDir, it) }
             SpeechModel.QWEN3_ASR -> loadQwen()
         }
         var identifier: LanguageIdentifier? = null
         var vad: SileroVoiceActivity? = null
         try {
-            identifier = if (model == SpeechModel.QWEN3_ASR) WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR), tuning.identifyThreads) else null
+            identifier = if (model == SpeechModel.QWEN3_ASR) ScheduledSpeech.identifier(tuning.identifyThreads) { WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR), it) } else null
             Logs.i("音声認識の組み立て: $model 書き起こし${tuning.transcribeThreads}（0は既定） 識別${tuning.identifyThreads} $profile VAD ${tuning.vadThreshold}/${tuning.vadMinSpeechSeconds}秒")
             vad = SileroVoiceActivity.load(File(asrDir, VAD), profile.phraseSilenceSeconds, tuning.vadThreshold, tuning.vadMinSpeechSeconds)
             return SpeechPipeline(

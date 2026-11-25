@@ -28,6 +28,7 @@ import app.plamotranslate.log.Logs
 import app.plamotranslate.models.ModelCatalog
 import app.plamotranslate.models.TranslationModel
 import app.plamotranslate.pipeline.translation.ModelState
+import app.plamotranslate.AndroidOcrCompute
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.overlay.toBox
 import app.plamotranslate.pipeline.screen.SceneProfile
@@ -81,7 +82,7 @@ class ScreenTranslateService : Service() {
     private var menu: ScreenMenu? = null
     private var touchWatcher: TouchWatcher? = null
     private val preferences by lazy { ScreenPreferences(this) }
-    private val ocr by lazy { MultiScriptOcr(ModelCatalog.ocrDir(this)) }
+    private val ocr by lazy { MultiScriptOcr(ModelCatalog.ocrDir(this), AndroidOcrCompute) }
 
     /** 翻訳のメモリのキャッシュ。1回の翻訳ごとに開く翻訳のストリームで共有する（モデルを切り替えても捨てず、品質で選ぶ。永続キャッシュを消したら捨てる）。 */
     private val memoryCache = MemoryCache()

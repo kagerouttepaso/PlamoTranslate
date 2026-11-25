@@ -13,6 +13,9 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import app.plamotranslate.pipeline.compute.ThreadTrials
+import app.plamotranslate.pipeline.translation.SingleRequest
+import app.plamotranslate.log.Logs
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -24,7 +27,7 @@ class TranslationException(message: String) : Exception(message)
  */
 data class CpuOptions(
     /**
-     * 0なら自動（[TranslationEngine.defaultThreads]）。Android はコアの周波数、Windows は物理コアの構成から決める。
+     * 0なら許された CPU の性能の段から試走で選ぶ。
      */
     val threads: Int = 0,
     /** 性能ヒント（ADPF）で周波数・配置を上げてもらう。 */
@@ -49,6 +52,8 @@ class TranslationEngine private constructor(
     private val dispatcher: ExecutorCoroutineDispatcher,
     /** GPU（OpenCL）で動いているか。false ならCPUだけ。 */
     val usesGpu: Boolean,
+    private var selectedThreads: Int,
+    private var boost: Boolean,
 ) : JobEngine {
     private val modelLock = Mutex()
     private val runtime get() = LlamaRuntime.process
@@ -70,10 +75,19 @@ class TranslationEngine private constructor(
      * （2026-11-12に1文用の入口と生成の処理を取り除いた。翻訳の契約を1本にするため）。
      */
     override suspend fun run(slots: Int, source: JobSource, maxTokens: Int): Int =
-        runtime.translationBatches(usesGpu, slots.coerceIn(1, MAX_PARALLEL)) { turn ->
-            modelLock.withLock {
-                checkOpen()
-                withContext(dispatcher) { translateBatch(slots, source, maxTokens, turn) }
+        modelLock.withLock {
+            checkOpen()
+            withContext(dispatcher) {
+                var tokens = 0
+                do {
+                    val turn = ProcessCompute.borrow(usesGpu, selectedThreads) { count, waiting ->
+                        runtime.native { LlamaNative.nativeConfigure(handle, boost, count) }
+                        TranslationTurn(slots.coerceIn(1, MAX_PARALLEL), waiting).also {
+                            tokens += translateBatch(slots.coerceIn(1, MAX_PARALLEL), source, maxTokens, it)
+                        }
+                    }
+                } while (turn.yielded)
+                tokens
             }
         }
 
@@ -113,29 +127,49 @@ class TranslationEngine private constructor(
      * 解放した後に届いた翻訳の依頼は [TranslationException] で失敗する（翻訳モデルの切り替え、2026-11-06）。
      */
     suspend fun close() = withContext(NonCancellable) {
-        runtime.onDevice(usesGpu) {
-            modelLock.withLock {
-                if (!closed) {
-                    closed = true
-                    try {
-                        withContext(dispatcher) { runtime.native { LlamaNative.nativeFree(handle) } }
-                    } finally {
-                        dispatcher.close()
-                    }
+        modelLock.withLock {
+            if (!closed) {
+                closed = true
+                try {
+                    withContext(dispatcher) { ProcessCompute.borrow(usesGpu, 1) { _, _ -> runtime.native { LlamaNative.nativeFree(handle) } } }
+                } finally {
+                    dispatcher.close()
                 }
             }
         }
     }
 
-    /**
-     * 性能ヒントの有無とスレッド数（0なら変えない）を、読み直さずに切り替える。会話翻訳（`ConversationViewModel`）が聞いている間の
-     * 翻訳のスレッド数を変えるのに使い、デバッグ版では画面翻訳の adb からの計測（`ScreenTranslateService`）も使う。
-     */
+    /** デバッグ計測の設定。次の貸出時に反映する。 */
     suspend fun configure(boost: Boolean, threads: Int = 0) =
         modelLock.withLock {
             checkOpen()
-            withContext(dispatcher) { runtime.native { LlamaNative.nativeConfigure(handle, boost, threads) } }
+            this.boost = boost
+            if (threads > 0) selectedThreads = threads
         }
+
+    private suspend fun tune(candidates: List<Int>): Int {
+        val request = TranslationRequest("明日の朝は駅の北口で待ち合わせましょう。", Language.JA, Language.EN)
+        val trials = ThreadTrials()
+        var best = candidates.first()
+        var fastest = Long.MAX_VALUE
+        for (count in candidates) {
+            val median = ProcessCompute.borrow(usesGpu, count) { n, _ ->
+                if (n != count) return@borrow null
+                runtime.native { LlamaNative.nativeConfigure(handle, boost, n) }
+                trials.measure({
+                    val start = System.nanoTime()
+                    val tokens = translateBatch(1, SingleRequest(request), 8, TranslationTurn(1) { false })
+                    check(tokens > 0)
+                    (System.nanoTime() - start) / tokens
+                }) { warmup, measured -> Logs.i("翻訳 $count スレッド ならし=$warmup 中央値=$measured ns/token") }
+            }
+            if (median != null && median < fastest) {
+                fastest = median
+                best = count
+            }
+        }
+        return best
+    }
 
     private fun checkOpen() {
         if (closed) throw TranslationException("翻訳モデルを切り替えたため、この翻訳は中止しました")
@@ -165,12 +199,6 @@ class TranslationEngine private constructor(
         const val DEFAULT_GPU_LAYERS = 99
 
         /**
-         * 2026-11-05のREDMAGIC 11 Proでの実測。CLI単体では8スレッドが最速だったが、アプリでは画面描画と
-         * CPUを取り合い、8スレッドは生成35トークン/秒、6スレッドは64トークン/秒だった（docs/判断/2026-11-05_アプリ内のCPUのスレッド数を6にする.md）。
-         */
-        const val DEFAULT_THREADS = 6
-
-        /**
          * モデルを読み込む。数秒かかるので起動時に1回だけ呼ぶ。
          *
          * [nativeLibDir] はバックエンドのライブラリ（libggml-opencl.so、libggml-cpu-*.so）の置き場
@@ -183,6 +211,7 @@ class TranslationEngine private constructor(
             target: InferenceTarget,
             nCtx: Int = DEFAULT_CONTEXT,
             cpu: CpuOptions = CpuOptions(),
+            cacheDir: File? = null,
         ): TranslationEngine {
             if (!model.canRead()) throw TranslationException("モデルが読めません: ${model.path}")
             val dispatcher = Executors.newSingleThreadExecutor { task -> Thread(task, "PlamoInference") }.asCoroutineDispatcher()
@@ -190,73 +219,47 @@ class TranslationEngine private constructor(
             var loaded: TranslationEngine? = null
             try {
                 return withContext(dispatcher) {
-                    runtime.onDevice(target.useGpu) {
-                        var gpu = runtime.initialize(nativeLibDir, cpu.variant, target)
-                        val threads = if (cpu.threads > 0) cpu.threads else defaultThreads()
-                        fun nativeLoad(layers: Int) = runtime.native { LlamaNative.nativeLoad(
-                            model.path, nCtx, threads, layers,
-                            if (cpu.spinWait) DEFAULT_POLL else 0, cpu.threadPool, cpu.mmap, cpu.boost, MAX_PARALLEL,
-                        ) }
-                        var handle = nativeLoad(if (gpu) DEFAULT_GPU_LAYERS else 0)
-                        if (handle == 0L && gpu) {
-                            // GPUのドライバーが合わないなど。CPUでやり直す
-                            gpu = false
-                            handle = nativeLoad(0)
-                        }
-                        if (handle == 0L) throw TranslationException("モデルの読み込みに失敗しました: ${model.name}")
-                        TranslationEngine(handle, dispatcher, gpu).also { loaded = it }
+                    var poolCapacity = 1
+                    val requested = ProcessCompute.topology().candidates(cpu.threads).last()
+                    var gpu = runtime.initialize(nativeLibDir, cpu.variant, target)
+                    suspend fun loadHandle(gpu: Boolean) = ProcessCompute.borrow(gpu, requested) { n, _ ->
+                        poolCapacity = n
+                        runtime.native { LlamaNative.nativeLoad(model.path, nCtx, n, if (gpu) DEFAULT_GPU_LAYERS else 0,
+                            if (cpu.spinWait) DEFAULT_POLL else 0, cpu.threadPool, cpu.mmap, cpu.boost, MAX_PARALLEL) }
                     }
+                    var handle = loadHandle(gpu)
+                    if (handle == 0L && gpu) {
+                        gpu = false
+                        handle = loadHandle(false)
+                    }
+                    if (handle == 0L) throw TranslationException("モデルの読み込みに失敗しました: ${model.name}")
+                    val engine = TranslationEngine(handle, dispatcher, gpu, poolCapacity, cpu.boost)
+                    loaded = engine
+                    val topology = ProcessCompute.topology()
+                    val candidates = topology.candidates(cpu.threads).map { minOf(it, poolCapacity) }.distinct()
+                    engine.selectedThreads = candidates.first()
+                    if (candidates.size > 1) {
+                        val key = listOf(model.absolutePath, model.length(), model.lastModified(), topology.key, candidates, gpu, cpu, nCtx, "v1").joinToString("|")
+                        val name = java.util.UUID.nameUUIDFromBytes(key.toByteArray()).toString()
+                        val cache = cacheDir?.resolve(name)
+                        val saved = runCatching { cache?.readText()?.toIntOrNull() }.getOrNull()
+                        engine.selectedThreads = saved?.takeIf { it in candidates } ?: engine.tune(candidates).also { n ->
+                            runCatching {
+                                if (ProcessCompute.topology().key == topology.key) {
+                                    cache?.parentFile?.mkdirs()
+                                    cache?.writeText(n.toString())
+                                }
+                            }
+                        }
+                    }
+                    Logs.i("翻訳のスレッド数=${engine.selectedThreads} CPU=${topology.key}")
+                    engine
                 }
             } catch (failure: Throwable) {
                 withContext(NonCancellable) { loaded?.close() ?: dispatcher.close() }
                 throw failure
             }
         }
-
-        private val windowsThreads by lazy {
-            threadsForWindows(LlamaRuntime.process.native { LlamaNative.nativeWindowsCoreClasses() } ?: intArrayOf())
-        }
-
-        /** CPUのスレッド数の既定。Windows は物理コアの構成、Android はコアの最高周波数から決める。 */
-        fun defaultThreads(): Int = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
-            windowsThreads
-        } else {
-            threadsFor(coreMaxFrequencies())
-        }
-
-        /** 異種コアでは性能クラスが最も高い物理コアだけを数える。同じクラスなら全物理コアを使う。 */
-        internal fun threadsForWindows(efficiencyClasses: IntArray): Int {
-            val highest = efficiencyClasses.maxOrNull() ?: return 1
-            return efficiencyClasses.count { it == highest }
-        }
-
-        /**
-         * 最高周波数が一番低いクラスター（小さいコア）がコアの半分以下なら、それ以外のコア（大きいコア）の数にする。
-         * 小さいコアに処理が回ると、ほかのスレッドが待たされて全体が遅くなる（2026-11-08、15T Pro（2.4GHz×4、
-         * 3.3GHz×3、3.73GHz×1）で6スレッドは0.3〜0.8トークン/秒、4スレッドは56〜62トークン/秒）。
-         * 小さいコアが半分より多い、または周波数が読めない端末は、今までどおり「コア数−2」にする
-         * （REDMAGIC 11 Pro（4.6GHz×2、3.6GHz×6）では6が最速だった。docs/判断/2026-11-05_アプリ内のCPUのスレッド数を6にする.md）。
-         * どちらも2〜[DEFAULT_THREADS]に収める。
-         */
-        internal fun threadsFor(maxFrequencies: List<Long>): Int {
-            val known = maxFrequencies.filter { it > 0 }
-            val lowest = known.minOrNull()
-            val little = known.count { it == lowest }
-            val threads = if (known.size == maxFrequencies.size && known.isNotEmpty() && little < known.size && little * 2 <= known.size) {
-                known.size - little
-            } else {
-                maxFrequencies.size - 2
-            }
-            return threads.coerceIn(2, DEFAULT_THREADS)
-        }
-
-        /** 各コアの最高周波数（kHz）。読めないコアは0。 */
-        private fun coreMaxFrequencies(): List<Long> =
-            (0 until Runtime.getRuntime().availableProcessors()).map { i ->
-                runCatching {
-                    File("/sys/devices/system/cpu/cpu$i/cpufreq/cpuinfo_max_freq").readText().trim().toLong()
-                }.getOrDefault(0L)
-            }
 
         /** llama.cppの既定。処理を待つ間、しばらくスピン待機してから眠る。 */
         private const val DEFAULT_POLL = 50

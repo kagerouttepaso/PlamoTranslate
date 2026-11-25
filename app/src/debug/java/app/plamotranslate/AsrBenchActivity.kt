@@ -1,5 +1,6 @@
 package app.plamotranslate
 
+import app.plamotranslate.llm.ScheduledSpeech
 import android.app.Activity
 import android.os.Bundle
 import android.os.Debug
@@ -53,8 +54,8 @@ class AsrBenchActivity : Activity() {
         val audio = wavs.associate { it.nameWithoutExtension to WavFile.read(it) }
 
         val pss0 = Debug.getPss()
-        val (sv, svMs) = timed { SenseVoiceRecognizer.load(asrDir) }
-        val (lid, lidMs) = timed { WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR)) }
+        val (sv, svMs) = timed { ScheduledSpeech.senseVoice(0) { SenseVoiceRecognizer.load(asrDir, it) } }
+        val (lid, lidMs) = timed { ScheduledSpeech.identifier(0) { WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR), it) } }
         val pss1 = Debug.getPss()
         val (qwen, qwenMs) = timed { AndroidQwen.load(this, 4) }
         val pss2 = Debug.getPss()

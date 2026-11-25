@@ -10,7 +10,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import java.io.File
+
+interface OcrCompute {
+    suspend fun <T> borrow(threads: Int, action: suspend (Int) -> T): T
+}
 
 /**
  * 原文の言語で決めた認識器を並列に動かし、行ごとに文字種に合う読みを選んでまとめる（docs/設計/画面翻訳.md「読む流れ」）。
@@ -21,11 +27,13 @@ import java.io.File
  *
  * 返すのは1行ずつの読み取り（[OcrLine]）。吹き出し・段落にまとめるのは呼ぶ側（中核の `LineGrouper`）。
  */
-class MultiScriptOcr(paddleDir: File? = null) : OcrEngine {
-    private val paddle: PaddleReader? = paddleDir?.let { runCatching { PaddleReader.load(it) }.getOrNull() }
+class MultiScriptOcr(private val paddleDir: File? = null, private val compute: OcrCompute) : OcrEngine {
+    private var paddle: PaddleReader? = paddleDir?.let { runCatching { PaddleReader.load(it, 1) }.getOrNull() }
+
+    private val paddleLock = kotlinx.coroutines.sync.Mutex()
+    private var paddleThreads = 1
 
     private val readers: List<LineReader> = listOfNotNull(
-        paddle,
         MlKitReader(Source.MLKIT_ZH, TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build()), keepGlyphs = true),
         MlKitReader(Source.MLKIT_JA, TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())),
         MlKitReader(Source.MLKIT_KO, TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())),
@@ -59,15 +67,33 @@ class MultiScriptOcr(paddleDir: File? = null) : OcrEngine {
     /** [light] なら重い認識器（[LineReader.heavy]）を使わない。 */
     private suspend fun read(bitmap: Bitmap, use: Set<Source>, light: Boolean = false): List<OcrLine> = coroutineScope {
         val readings = readers.filter { r -> r.sources.any { it in use } && !(light && r.heavy) }
-            .map { r -> async { r.read(bitmap, use) } }
-            .awaitAll()
+            .map { r -> async(Dispatchers.Default) { compute.borrow(Int.MAX_VALUE) { r.read(bitmap, use) } } }
+            .awaitAll().toMutableList()
+        if (!light && paddleDir != null) {
+            paddleLock.withLock {
+                if (paddle?.sources?.any { it in use } == true) withContext(Dispatchers.Default) {
+                    compute.borrow(0) { n ->
+                        if (paddleThreads != n) {
+                            val next = PaddleReader.load(paddleDir, n)
+                            paddle?.close()
+                            paddle = next
+                            paddleThreads = n
+                        }
+                        paddle?.let { readings.add(it.read(bitmap, use)) }
+                    }
+                }
+            }
+        }
         BlockMerger.merge(
             read = readings.fold(mapOf()) { acc, r -> acc + r.lines },
             glyphs = readings.flatMap { it.glyphs },
         )
     }
 
-    override fun close() = readers.forEach { it.close() }
+    override fun close() {
+        paddle?.close()
+        readers.forEach { it.close() }
+    }
 }
 
 /**

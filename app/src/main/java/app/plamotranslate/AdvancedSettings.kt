@@ -112,7 +112,7 @@ private fun RecognitionTuningCard() {
                 TuningChips("書き起こしのスレッド数", listOf(0, 1, 2, 4, 6, 8), preferences.transcribeThreads, { if (it == 0) "既定" else "$it" }) {
                     preferences.transcribeThreads = it
                 }
-                TuningChips("言語の識別のスレッド数", listOf(1, 2, 4), preferences.identifyThreads, { "$it" }) { preferences.identifyThreads = it }
+                TuningChips("言語の識別のスレッド数", listOf(0, 1, 2, 4), preferences.identifyThreads, { if (it == 0) "自動" else "$it" }) { preferences.identifyThreads = it }
                 TuningChips("カードの言語を決める長さ", listOf(0.8f, 1.0f, 1.5f, 2.0f), preferences.cardLanguageSeconds, { "${it}秒" }) {
                     preferences.cardLanguageSeconds = it
                 }
@@ -121,9 +121,6 @@ private fun RecognitionTuningCard() {
                 }
                 TuningChips("話し始めとみなす最短の長さ（VAD）", listOf(0.1f, 0.25f), preferences.vadMinSpeechSeconds, { "${it}秒" }) {
                     preferences.vadMinSpeechSeconds = it
-                }
-                TuningChips("会話中の翻訳のスレッド数", listOf(0, 1, 2, 4, 8), preferences.translateThreads, { if (it == 0) "変えない" else "$it" }) {
-                    preferences.translateThreads = it
                 }
             }
             OutlinedButton(onClick = {

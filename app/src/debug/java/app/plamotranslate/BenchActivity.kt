@@ -16,6 +16,7 @@ import androidx.lifecycle.lifecycleScope
 import app.plamotranslate.llm.Language
 import app.plamotranslate.log.Logs
 import app.plamotranslate.models.ModelCatalog
+import app.plamotranslate.AndroidOcrCompute
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.overlay.OverlaySlot
 import app.plamotranslate.overlay.dp
@@ -88,7 +89,7 @@ class BenchActivity : ComponentActivity() {
         }
         val language = source.recognizers
         say("ベンチ: 原文の言語 ${source?.code ?: "auto"}（認識器の組 $language）")
-        val ocr = MultiScriptOcr(ModelCatalog.ocrDir(this))
+        val ocr = MultiScriptOcr(ModelCatalog.ocrDir(this), AndroidOcrCompute)
         say("ベンチ: PP-OCR ${ocr.paddleSources.ifEmpty { setOf("なし（ML Kitだけ）") }.joinToString("・")}")
         val statusBar = statusBarHeight()
         val results = File(output, "results.jsonl")

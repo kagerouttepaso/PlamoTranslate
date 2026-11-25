@@ -47,6 +47,7 @@ foreach ($hit in Grep @('-E', '^import (android|androidx|app\.plamotranslate\.(l
 # 約束2：翻訳はすべて TranslationStream を通す。エンジンを直接使ってよいのは、速さの計測と初回の準備だけ
 $singleRequestAllowed = @(
     'core-pipeline/',                                              # 定義と単体テスト
+    'core-llm-jvm/src/main/kotlin/app/plamotranslate/llm/TranslationEngine.kt', # スレッド数の試走
     'app/src/main/java/app/plamotranslate/LlamaEngineLoader.kt',   # 初回の準備
     'app/src/main/java/app/plamotranslate/EngineBenchmark.kt',     # 速さの計測
     'app/src/debug/java/app/plamotranslate/TranslateBenchActivity.kt' # 翻訳モデルの比べ（デバッグ版）
@@ -65,7 +66,6 @@ $awaitEngineAllowed = @(
     'app/src/main/java/app/plamotranslate/translation/Translations.kt',           # ストリームの入口
     'desktop/src/main/kotlin/app/plamotranslate/desktop/DesktopServices.kt',      # PC版のストリームの入口
     'app/src/main/java/app/plamotranslate/EngineBenchmark.kt',                    # 速さの計測
-    'app/src/main/java/app/plamotranslate/conversation/ConversationViewModel.kt', # スレッド数を変える口
     'app/src/main/java/app/plamotranslate/screen/ScreenTranslateService.kt'       # DEBUG_CONFIG（デバッグ版のスレッド数）
 )
 foreach ($hit in Grep @('-E', '\bawaitEngine\b', '--', 'app/*.kt', 'desktop/*.kt')) {

@@ -44,7 +44,7 @@ internal class PaddleReader(
          * [dir]（端末の `files/models/ocr/`）にあるモデルから作る。ファイルの並びは [PaddleModels]。
          * 読めない認識器だけを外し（壊れたモデルが、ほかの認識器を道連れにしない）、検出か認識器が1つも無ければ null（ML Kit だけで動く）。
          */
-        fun load(dir: File, threads: Int = 4): PaddleReader? {
+        fun load(dir: File, threads: Int): PaddleReader? {
             val options = OrtSession.SessionOptions().apply { setIntraOpNumThreads(threads) }
             val detector = runCatching { PaddleDetector.load(File(dir, PaddleModels.DETECTOR), options) }.getOrNull() ?: return null
             val recognizers = PaddleModels.recognizers.mapNotNull { (source, files) ->

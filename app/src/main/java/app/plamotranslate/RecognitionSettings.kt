@@ -90,10 +90,6 @@ class RecognitionPreferences(context: Context) : TranscriptionTuner.Store {
         get() = prefs.getFloat("vadMinSpeechSeconds", DEFAULT_TUNING.vadMinSpeechSeconds)
         set(value) = prefs.edit().putFloat("vadMinSpeechSeconds", value).apply()
 
-    /** 会話翻訳で聞いている間の、翻訳（llama.cpp）の CPU のスレッド数。0なら変えない。 */
-    var translateThreads: Int
-        get() = prefs.getInt("translateThreads", 0)
-        set(value) = prefs.edit().putInt("translateThreads", value).apply()
 
     val asrTuning: AsrTuning
         get() = AsrTuning(transcribeThreads, identifyThreads, vadThreshold, vadMinSpeechSeconds)
@@ -110,7 +106,7 @@ class RecognitionPreferences(context: Context) : TranscriptionTuner.Store {
         val DEFAULT_PROFILE = SegmentationProfile.CONVERSATION
         val DEFAULT_TUNING = AsrTuning()
         val TUNING_KEYS = listOf(
-            "transcribeThreads", "identifyThreads", "cardLanguageSeconds", "vadThreshold", "vadMinSpeechSeconds", "translateThreads",
+            "transcribeThreads", "identifyThreads", "cardLanguageSeconds", "vadThreshold", "vadMinSpeechSeconds",
         )
     }
 }

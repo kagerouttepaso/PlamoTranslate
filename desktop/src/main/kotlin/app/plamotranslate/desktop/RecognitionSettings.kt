@@ -59,7 +59,7 @@ internal fun RecognitionSettings(
                 change(settings.copy(transcribeThreads = it ?: defaults.transcribeThreads))
             }
             if (!settings.model.identifiesLanguage) {
-                CountMenu("言語識別のスレッド数", settings.identifyThreads, "既定（${defaults.identifyThreads}）", 1..8, enabled) {
+                CountMenu("言語識別のスレッド数", settings.identifyThreads.takeIf { it > 0 }, "自動", 1..8, enabled) {
                     change(settings.copy(identifyThreads = it ?: defaults.identifyThreads))
                 }
             }

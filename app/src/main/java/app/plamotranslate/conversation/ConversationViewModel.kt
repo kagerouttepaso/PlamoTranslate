@@ -11,7 +11,6 @@ import app.plamotranslate.EngineHolder
 import app.plamotranslate.ReadAloud
 import app.plamotranslate.AdvancedPreferences
 import app.plamotranslate.RecognitionPreferences
-import app.plamotranslate.TranslationPreferences
 import app.plamotranslate.loadSpeechEngine
 import app.plamotranslate.asr.WavFile
 import app.plamotranslate.audio.MicRecorder
@@ -37,13 +36,10 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import app.plamotranslate.llm.TranslationEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.coroutineScope
@@ -119,11 +115,6 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     /** 聞き始める作業（[Effect.Begin]）で流す音声の入力（マイクか音声ファイル）。 */
     private var pendingInput: (suspend (SpeechEngine) -> Unit)? = null
 
-    /** 聞いている間だけ変えた翻訳の CPU のスレッド数（0 なら変えていない）。 */
-    private var translateThreads = 0
-
-    /** 画面を閉じた後にも終える後始末（翻訳のスレッド数を戻す）。エンジンは画面より長く生きるので、viewModelScope の外で行う。 */
-    private val releaseScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** 走っている途中訳。確定訳が来たら取り消す。 */
     private val partialJobs = mutableMapOf<Long, Job>()
@@ -299,8 +290,6 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         pendingInput = null
         inputJob = viewModelScope.launch {
             try {
-                translateThreads = recognition.translateThreads
-                if (translateThreads > 0) configureTranslation(translateThreads)
                 engine.reset()
                 withContext(Dispatchers.IO) { block(engine) }
             } catch (e: CancellationException) {
@@ -314,30 +303,11 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         }
     }
 
-    /**
-     * 聞き終えた（[Effect.Finish]）。音声の入力が残っていれば止め、聞いている間だけ変えた翻訳のスレッド数を戻す。画面を閉じたとき
-     * （[Event.Closed]）にも届くので、戻す処理は viewModelScope の外（[releaseScope]）で行う（エンジンは画面より長く生きる）。
-     */
+    /** 聞き終えたら入力を止め、画面の音量と遅延を戻す。 */
     private fun finish() {
         inputJob?.cancel()
         inputJob = null
         _state.update { it.copy(level = 0f, lagSeconds = 0f) }
-        val threads = translateThreads
-        translateThreads = 0
-        if (threads > 0) releaseScope.launch { configureTranslation(0) }
-    }
-
-    /**
-     * 翻訳の CPU のスレッド数を変える（0 なら設定の画面の値か既定に戻す）。エンジンの設定なので、翻訳のストリームを通さずエンジンを直接使う
-     * （docs/設計/翻訳コア.md「ストリームを通さない呼び出し」）。
-     */
-    private suspend fun configureTranslation(threads: Int) {
-        if (model.value !is ModelState.Ready) return
-        val engine = EngineHolder.awaitEngine(app)?.first ?: return
-        val cpu = TranslationPreferences(app).cpuOptions
-        val restore = if (cpu.threads > 0) cpu.threads else TranslationEngine.defaultThreads()
-        engine.configure(cpu.boost, if (threads > 0) threads else restore)
-        log("翻訳のスレッド数: ${if (threads > 0) threads else restore}")
     }
 
     /** 音声認識のスレッドから、出来事を画面のスレッドの制御へ順に渡す（画面のスレッドは届いた順に処理する）。 */
@@ -457,7 +427,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     }
 
     override fun onCleared() {
-        // 聞いていれば確定を待たずに聞き終える（音声の入力を止め、翻訳のスレッド数を戻す）
+        // 聞いていれば確定を待たずに聞き終える（音声の入力を止める）
         handle(Event.Closed)
         // 認識中のジョブが終わってから解放される（呼んだスレッドは待たない）
         asr?.close()

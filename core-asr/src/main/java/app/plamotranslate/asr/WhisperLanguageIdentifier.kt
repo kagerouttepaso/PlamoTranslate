@@ -112,7 +112,7 @@ class WhisperLanguageIdentifier private constructor(
 
         fun missingFiles(dir: File): List<String> = FILES.map { File(dir, it) }.filterNot { it.canRead() }.map { it.path }
 
-        fun load(dir: File, threads: Int = 2): WhisperLanguageIdentifier {
+        fun load(dir: File, threads: Int): WhisperLanguageIdentifier {
             val env = OrtEnvironment.getEnvironment()
             fun session(name: String) = env.createSession(
                 File(dir, name).path,
