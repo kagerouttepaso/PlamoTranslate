@@ -6,7 +6,10 @@ import kotlinx.coroutines.ensureActive
 sealed interface TranscriptLanguage {
     data object Unspecified : TranscriptLanguage
     data class Specified(val code: String) : TranscriptLanguage
-    /** モデルが会話の言語を返したら採用し、それ以外なら [fallback] を指定して書き直す。 */
+    /**
+     * モデルが会話の言語を返したら採用し、それ以外なら [fallback] を指定して書き直す。何も聞き取れなかった（本文が空の）結果は
+     * 書き直さない。言語を指定すると、雑音や無音からも文を作ることがあるため。
+     */
     data class Conversation(val groups: Set<String>, val fallback: String) : TranscriptLanguage
     data class Identify(val candidates: SpeechLanguages, val fallback: String?) : TranscriptLanguage
 }
@@ -26,7 +29,7 @@ class RecognitionRunner(private val recognizer: SpeechRecognizer, private val id
                 is TranscriptLanguage.Specified -> recognizer.transcribe(job.samples, language.code, job.priority)
                 is TranscriptLanguage.Conversation -> {
                     val result = recognizer.transcribe(job.samples, null, job.priority)
-                    if (LanguageEvidence.group(result.lang, separateChinese = true) in language.groups) result
+                    if (result.text.isBlank() || LanguageEvidence.group(result.lang, separateChinese = true) in language.groups) result
                     else {
                         currentCoroutineContext().ensureActive()
                         recognizer.transcribe(job.samples, language.fallback, job.priority)

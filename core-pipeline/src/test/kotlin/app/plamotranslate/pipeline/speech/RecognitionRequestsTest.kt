@@ -72,6 +72,13 @@ class RecognitionRequestsTest {
     }
 
     @Test
+    fun `何も聞き取れなかった確定文は書き直さない`() = runBlocking {
+        val recognizer = RecordingRecognizer(Recognition("", null))
+        assertEquals(recognizer.judged, finalTranscript(setOf("ja", "en"), recognizer))
+        assertEquals(listOf(null), recognizer.calls)
+    }
+
+    @Test
     fun `最初の書き起こし中に取り消されたら書き直さない`() = runBlocking {
         lateinit var recognizer: RecordingRecognizer
         val job = launch {
