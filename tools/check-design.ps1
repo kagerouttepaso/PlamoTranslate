@@ -96,10 +96,12 @@ foreach ($hit in Grep @('-E', '__android_log_(print|write|vprint)', '--', '*.cpp
 # 約束5：モジュールの依存は docs/設計/アーキテクチャ.md「層とモジュール」の表に書いたものだけ。表を正本にし、ここに依存の一覧を書き写さない
 $archLines = @(Get-Content -LiteralPath (Join-Path $root 'docs/設計/アーキテクチャ.md') -Encoding utf8)
 $allowedDeps = @{}
+$testOnlyDeps = @{}
 $inLayers = $false
 foreach ($line in $archLines) {
     if ($line -match '^#{1,6} ') { $inLayers = $line -match '^## 層とモジュール$'; continue }
     if ($inLayers -and $line -match '^\| `(?<m>[a-z-]+)` \| (?<deps>.+?) \|$') {
+        $testOnlyDeps[$Matches['m']] = @([regex]::Matches($Matches['deps'], '`([a-z-]+)`（[^）]*試験のみ）') | ForEach-Object { $_.Groups[1].Value })
         $allowedDeps[$Matches['m']] = @([regex]::Matches($Matches['deps'], '`([a-z-]+)`') | ForEach-Object { $_.Groups[1].Value })
     }
 }
@@ -112,6 +114,9 @@ if ($allowedDeps.Count -lt 3) {
         $gradle = Get-Content -LiteralPath (Join-Path $root "$m/build.gradle.kts") -Encoding utf8 -Raw
         foreach ($d in [regex]::Matches($gradle, 'project\(\s*"(?::)?(?<d>[a-z-]+)"\s*\)')) {
             $dep = $d.Groups['d'].Value
+            if ($dep -in $testOnlyDeps[$m] -and $gradle.Substring(0, $d.Index) -notmatch 'testImplementation\(\s*$') {
+                $errors.Add("$m が試験専用の依存を製品で使っている：$dep")
+            }
             if ($dep -notin $allowedDeps[$m]) { $errors.Add("$m が表に無いモジュールに依存している：$dep（docs/設計/アーキテクチャ.md「層とモジュール」）") }
         }
     }

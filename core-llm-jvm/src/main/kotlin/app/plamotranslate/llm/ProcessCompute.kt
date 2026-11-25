@@ -1,12 +1,13 @@
 package app.plamotranslate.llm
 
 import app.plamotranslate.log.Logs
+import app.plamotranslate.pipeline.compute.ComputeResources
 import app.plamotranslate.pipeline.compute.ComputeScheduler
 import app.plamotranslate.pipeline.compute.ComputeWork
 import app.plamotranslate.pipeline.compute.CpuTopology
 import java.io.File
 
-object ProcessCompute {
+object ProcessCompute : ComputeResources {
     private val scheduler = ComputeScheduler { topology, gpu, count, waited ->
         Logs.i("計算資源 GPU=$gpu CPU=${topology.key} 予算=${topology.budget} 貸出=$count 待ち=${waited / 1_000_000}ms")
     }
@@ -32,7 +33,7 @@ object ProcessCompute {
 
     private fun IntArray?.orEmptyPairs() = this?.asList()?.chunked(2)?.associate { it[0] to it[1].toLong() }.orEmpty()
 
-    suspend fun <T> borrow(gpu: Boolean, threads: Int, work: ComputeWork = ComputeWork.Regular,
+    override suspend fun <T> borrow(gpu: Boolean, threads: Int, work: ComputeWork,
         action: suspend (Int, () -> Boolean) -> T): T =
         scheduler.borrow(topology(), gpu, threads, work, action)
 }

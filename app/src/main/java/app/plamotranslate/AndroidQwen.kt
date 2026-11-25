@@ -10,6 +10,7 @@ import app.plamotranslate.models.present
 import app.plamotranslate.pipeline.speech.SegmentationProfile
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechModel
+import app.plamotranslate.llm.ProcessCompute
 import app.plamotranslate.llm.QwenAudioRecognizer
 import app.plamotranslate.llm.QwenTrialAudio
 import app.plamotranslate.log.Logs
@@ -75,7 +76,7 @@ internal suspend fun loadSpeechEngine(
                     "Qwen3-ASR のモデル更新が必要です。設定の「音声認識」で取得量を確認してください。"
                 } else "音声認識のモデルがありません。モデルの準備を確認してください。"
             }
-            SpeechEngines.load(model, ModelCatalog.asrDir(app), profile, tuning, retain) {
+            SpeechEngines.load(model, ModelCatalog.asrDir(app), ProcessCompute, profile, tuning, retain) {
                 AndroidQwen.load(app, tuning.transcribeThreads)
             }.also { loaded = it }
         }

@@ -30,7 +30,7 @@ dependencies {
     // 言語の識別のスコア（Whisper tiny を直接動かす）。漫画用OCRと同じ版（sherpa-onnx は ONNX Runtime を静的に組み込んでいて、名前がぶつからない）
     implementation(libs.onnxruntime.android)
     testImplementation(libs.junit)
-    implementation(project(":core-llm-jvm"))
+    testImplementation(project(":core-llm-jvm"))
     testImplementation(libs.kotlinx.coroutines.core)
     testImplementation(libs.onnxruntime.jvm)
     // 会話の録音を PC でリプレイする試験（ConversationReplayTest）が、端末と同じ VAD と書き起こしを使うため。

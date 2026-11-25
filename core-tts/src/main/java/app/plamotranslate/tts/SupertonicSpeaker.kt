@@ -34,7 +34,7 @@ import kotlinx.coroutines.withContext
 class SupertonicSpeaker(
     private val dir: File,
     /** 音声を作る間だけ、呼び出し側に CPU の貸出を頼む。 */
-    private val withCpu: suspend (suspend (Int) -> Unit) -> Unit,
+    private val compute: TtsCompute,
     /** 声（voice.bin の何番目の声か）。 */
     var voice: Int = 0,
     /** 読む速さ（1が標準）。 */
@@ -49,15 +49,13 @@ class SupertonicSpeaker(
 
     /** 声の数。読み込んでいなければ読み込む。 */
     suspend fun voices(): Int = withContext(dispatcher) {
-        var voices = 0
-        withCpu { voices = engine(it).numSpeakers() }
-        voices
+        compute.borrow(0) { engine(it).numSpeakers() }
     }
 
     override suspend fun speak(text: String, lang: String) = withContext(dispatcher) {
         var rate = 0
         var speakers = 0
-        withCpu { n ->
+        compute.borrow(0) { n ->
             val engine = engine(n)
             rate = engine.sampleRate()
             speakers = engine.numSpeakers()
@@ -129,7 +127,7 @@ class SupertonicSpeaker(
                 try {
                     for (sentence in sentences(text)) {
                         if (!job.isActive) break
-                        withCpu { n -> engine(n).generateWithConfigAndCallback(sentence, config, callback) }
+                        compute.borrow(0) { n -> engine(n).generateWithConfigAndCallback(sentence, config, callback) }
                     }
                 } finally {
                     chunks.close()

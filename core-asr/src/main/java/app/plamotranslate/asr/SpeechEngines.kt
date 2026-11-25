@@ -7,7 +7,8 @@ import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.pipeline.speech.SpeechPipeline
 import app.plamotranslate.pipeline.speech.SpeechRecognizer
-import app.plamotranslate.llm.ScheduledSpeech
+import app.plamotranslate.pipeline.compute.ComputeResources
+import app.plamotranslate.pipeline.speech.ScheduledSpeech
 import java.io.File
 
 /**
@@ -40,6 +41,7 @@ object SpeechEngines {
     suspend fun load(
         model: SpeechModel,
         asrDir: File,
+        compute: ComputeResources,
         profile: SegmentationProfile = SegmentationProfile.CONVERSATION,
         tuning: AsrTuning = AsrTuning(),
         /** 書き起こし直しのために保持する確定した発話の数（会話翻訳だけ。0 なら保持しない）。 */
@@ -47,13 +49,13 @@ object SpeechEngines {
         loadQwen: suspend () -> SpeechRecognizer,
     ): SpeechEngine {
         val recognizer: SpeechRecognizer = when (model) {
-            SpeechModel.SENSE_VOICE -> ScheduledSpeech.senseVoice(tuning.transcribeThreads) { SenseVoiceRecognizer.load(asrDir, it) }
+            SpeechModel.SENSE_VOICE -> ScheduledSpeech.senseVoice(compute, tuning.transcribeThreads) { SenseVoiceRecognizer.load(asrDir, it) }
             SpeechModel.QWEN3_ASR -> loadQwen()
         }
         var identifier: LanguageIdentifier? = null
         var vad: SileroVoiceActivity? = null
         try {
-            identifier = if (model == SpeechModel.QWEN3_ASR) ScheduledSpeech.identifier(tuning.identifyThreads) { WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR), it) } else null
+            identifier = if (model == SpeechModel.QWEN3_ASR) ScheduledSpeech.identifier(compute, tuning.identifyThreads) { WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR), it) } else null
             Logs.i("音声認識の組み立て: $model 書き起こし${tuning.transcribeThreads}（0は既定） 識別${tuning.identifyThreads} $profile VAD ${tuning.vadThreshold}/${tuning.vadMinSpeechSeconds}秒")
             vad = SileroVoiceActivity.load(File(asrDir, VAD), profile.phraseSilenceSeconds, tuning.vadThreshold, tuning.vadMinSpeechSeconds)
             return SpeechPipeline(

@@ -1,11 +1,11 @@
-package app.plamotranslate.llm
+package app.plamotranslate.pipeline.speech
 
 import app.plamotranslate.pipeline.compute.ComputeWork
-import app.plamotranslate.pipeline.speech.*
+import app.plamotranslate.pipeline.compute.ComputeResources
 import kotlinx.coroutines.runBlocking
 
 /** ONNX のスレッド数はセッションを作るときに決まる。呼び出し中は同じセッションを保持する。 */
-private class SpeechSession<T : AutoCloseable>(val requested: Int, var threads: Int, var model: T, val create: (Int) -> T) {
+private class SpeechSession<T : AutoCloseable>(private val compute: ComputeResources, val requested: Int, var threads: Int, var model: T, val create: (Int) -> T) {
     @Synchronized fun <R> run(count: Int, action: (T) -> R): R {
         if (threads != count) {
             val replacement = create(count)
@@ -17,12 +17,12 @@ private class SpeechSession<T : AutoCloseable>(val requested: Int, var threads: 
     }
 
     suspend fun <R> use(work: ComputeWork, action: (T) -> R): R =
-        ProcessCompute.borrow(false, requested, work) { count, _ -> run(count, action) }
+        compute.borrow(false, requested, work) { count, _ -> run(count, action) }
 }
 
 object ScheduledSpeech {
-    suspend fun senseVoice(threads: Int, create: (Int) -> SpeechRecognizer): SpeechRecognizer {
-        val session = ProcessCompute.borrow(false, threads) { n, _ -> SpeechSession(threads, n, create(n), create) }
+    suspend fun senseVoice(compute: ComputeResources, threads: Int, create: (Int) -> SpeechRecognizer): SpeechRecognizer {
+        val session = compute.borrow(false, threads) { n, _ -> SpeechSession(compute, threads, n, create(n), create) }
         return object : SpeechRecognizer by session.model {
             override fun recognize(samples: FloatArray) = recognizeAs(samples, null)
             override fun recognizeAs(samples: FloatArray, language: String?) = runBlocking {
@@ -34,8 +34,8 @@ object ScheduledSpeech {
         }
     }
 
-    suspend fun identifier(threads: Int, create: (Int) -> LanguageIdentifier): LanguageIdentifier {
-        val session = ProcessCompute.borrow(false, threads) { n, _ -> SpeechSession(threads, n, create(n), create) }
+    suspend fun identifier(compute: ComputeResources, threads: Int, create: (Int) -> LanguageIdentifier): LanguageIdentifier {
+        val session = compute.borrow(false, threads) { n, _ -> SpeechSession(compute, threads, n, create(n), create) }
         return object : LanguageIdentifier {
             override fun scores(samples: FloatArray, candidates: Set<String>?) = runBlocking {
                 session.use(ComputeWork.Regular) { it.scores(samples, candidates) }

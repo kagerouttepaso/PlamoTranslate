@@ -8,7 +8,7 @@ import android.os.SystemClock
 import app.plamotranslate.EngineHolder
 import app.plamotranslate.llm.Language
 import app.plamotranslate.log.Logs
-import app.plamotranslate.AndroidOcrCompute
+import app.plamotranslate.AndroidCpuCompute
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.ocr.OcrLanguage
 import app.plamotranslate.overlay.BoxColors
@@ -87,7 +87,7 @@ class LiveFrame(
  */
 class LiveTranslator(private val context: Context, private val scope: CoroutineScope) {
     // 1行ずつ読む（段落にまとめると読み揺れで揃わない）。漫画モデルは縦書きの漫画用で遅いので使わない
-    private val ocr = MultiScriptOcr(null, AndroidOcrCompute)
+    private val ocr = MultiScriptOcr(null, AndroidCpuCompute)
     private val _frame = MutableStateFlow<LiveFrame?>(null)
     val frame: StateFlow<LiveFrame?> = _frame.asStateFlow()
 
