@@ -52,48 +52,110 @@ object TranscriptionTuner {
         environment: Environment, reference: Reference, store: Store, beginGpu: () -> Boolean, endGpu: (String?) -> Unit,
         load: suspend (TranscriptionCandidate) -> T, trial: suspend (T) -> Sample): Pair<T, TranscriptionChoice> {
         val gpu = cpus.first().copy(gpu = true)
-        val compareGpu = allowedGpu && preference != TranscriptionPreference.CPU
-        val key = environment.cacheKey(cpus, compareGpu)
-        val automatic = preference == TranscriptionPreference.AUTO
-        val cached = if (automatic) store.read(key)?.takeIf { it.candidate in cpus || compareGpu && it.candidate == gpu } else null
-        suspend fun measure(candidate: TranscriptionCandidate, reason: String): TranscriptionChoice = load(candidate).use { engine ->
+        val key = environment.cacheKey(cpus, allowedGpu && preference != TranscriptionPreference.CPU)
+        val cpuReason = "CPU の試走結果を採用"
+        var selectedEngine: T? = null
+
+        suspend fun evaluate(candidate: TranscriptionCandidate, checkEngine: suspend (T) -> TranscriptionChoice): Pair<T, TranscriptionChoice> {
+            currentCoroutineContext().ensureActive()
+            val engine = load(candidate)
+            try {
+                val choice = checkEngine(engine)
+                currentCoroutineContext().ensureActive()
+                return engine to choice
+            } catch (error: Throwable) {
+                engine.close()
+                throw error
+            }
+        }
+
+        suspend fun ready(candidate: TranscriptionCandidate, cached: TranscriptionChoice? = null) = evaluate(candidate) { engine ->
+            val sample = trial(engine)
+            check(reference.matches(sample.result)) { "ならし運転の本文または言語が正解と一致しません" }
+            cached ?: TranscriptionChoice(candidate, sample.nanos, "GPU を指定")
+        }
+
+        suspend fun measure(candidate: TranscriptionCandidate, reason: String) = evaluate(candidate) { engine ->
             trial(engine)
             val samples = List(3) { trial(engine) }
             check(samples.all { reference.matches(it.result) }) { "試走の本文または言語が正解と一致しません" }
             TranscriptionChoice(candidate, samples.map { it.nanos }.sorted()[1], reason)
         }
-        suspend fun ready(choice: TranscriptionChoice): Pair<T, TranscriptionChoice> {
-            val engine = load(choice.candidate)
-            try {
-                check(reference.matches(trial(engine).result)) { "ならし運転の本文または言語が正解と一致しません" }
-                currentCoroutineContext().ensureActive()
-                return engine to choice
-            } catch (error: Throwable) { engine.close(); throw error }
+
+        fun select(prepared: Pair<T, TranscriptionChoice>): TranscriptionChoice {
+            val previous = selectedEngine
+            selectedEngine = prepared.first
+            previous?.close()
+            return prepared.second
         }
-        fun save(prepared: Pair<T, TranscriptionChoice>): Pair<T, TranscriptionChoice> {
-            try { store.write(key, prepared.second) } catch (error: Throwable) { prepared.first.close(); throw error }
-            return prepared
+
+        suspend fun fastestCpu(reason: String = cpuReason): TranscriptionChoice {
+            var best: TranscriptionChoice? = null
+            for (candidate in cpus) {
+                val measured = measure(candidate, reason)
+                if (best == null || measured.second.medianNanos < best.medianNanos) {
+                    best = select(measured)
+                } else {
+                    measured.first.close()
+                }
+            }
+            return checkNotNull(best)
         }
-        if (cached != null && !cached.candidate.gpu) return ready(cached)
-        suspend fun fastestCpu() = cpus.map { measure(it, if (preference == TranscriptionPreference.CPU) "CPU を指定" else "CPU の試走結果を採用") }.minBy { it.medianNanos }
-        val cpu = if (cached == null && (!compareGpu || preference != TranscriptionPreference.GPU)) fastestCpu() else null
-        var saveCpu = automatic && !compareGpu
-        if (compareGpu && beginGpu()) {
+
+        fun save(choice: TranscriptionChoice) = choice.also { store.write(key, it) }
+
+        suspend fun cpuOnly(reason: String): TranscriptionChoice {
+            val cached = store.read(key)?.takeIf { it.candidate in cpus }
+            if (cached == null) return save(fastestCpu(reason))
+            return select(ready(cached.candidate, cached.copy(reason = reason)))
+        }
+
+        suspend fun tryGpu(attempt: suspend () -> Pair<T, TranscriptionChoice>): Pair<T, TranscriptionChoice>? {
+            if (!allowedGpu || !beginGpu()) return null
             var failure: String? = null
             var prepared: Pair<T, TranscriptionChoice>? = null
             try {
-                val measured = cached ?: measure(gpu, if (automatic) "GPU の試走結果を採用" else "GPU を指定")
-                if (cpu == null || measured.medianNanos <= cpu.medianNanos * GPU_RATIO) prepared = ready(measured)
-                else saveCpu = automatic
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { failure = error.message ?: "GPU の準備に失敗しました" }
-            finally {
-                try { endGpu(failure) } catch (error: Throwable) { prepared?.first?.close(); throw error }
+                prepared = attempt()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                failure = error.message ?: "GPU の準備に失敗しました"
+            } finally {
+                try {
+                    endGpu(failure)
+                } catch (error: Throwable) {
+                    prepared?.first?.close()
+                    throw error
+                }
             }
-            prepared?.let { return if (automatic && cached == null) save(it) else it }
+            return prepared
         }
-        val selected = cpu ?: fastestCpu()
-        val prepared = ready(if (saveCpu && compareGpu) selected.copy(reason = "GPU は CPU より十分には速くありません") else selected)
-        return if (saveCpu) save(prepared) else prepared
+
+        suspend fun automatic(): TranscriptionChoice {
+            if (!allowedGpu) return cpuOnly(cpuReason)
+            val cached = store.read(key)
+            if (cached != null) {
+                if (cached.candidate in cpus) return select(ready(cached.candidate, cached))
+                if (cached.candidate == gpu) return tryGpu { ready(gpu, cached) }?.let(::select) ?: fastestCpu()
+            }
+            val cpu = fastestCpu()
+            val measured = tryGpu { measure(gpu, "GPU の試走結果を採用") } ?: return cpu
+            if (measured.second.medianNanos <= cpu.medianNanos * GPU_RATIO) return save(select(measured))
+            measured.first.close()
+            return save(cpu.copy(reason = "GPU は CPU より十分には速くありません"))
+        }
+
+        try {
+            val choice = when (preference) {
+                TranscriptionPreference.GPU -> tryGpu { ready(gpu) }?.let(::select) ?: fastestCpu()
+                TranscriptionPreference.CPU -> cpuOnly("CPU を指定")
+                TranscriptionPreference.AUTO -> automatic()
+            }
+            currentCoroutineContext().ensureActive()
+            return checkNotNull(selectedEngine) to choice
+        } catch (error: Throwable) {
+            selectedEngine?.close()
+            throw error
+        }
     }
 }
