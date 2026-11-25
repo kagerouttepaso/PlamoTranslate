@@ -32,7 +32,7 @@ class LlamaRuntimeTest {
     @Test(timeout = 10000) fun `初回推論の間は次の準備マーカーもチューナーの計測も始めない`() = runBlocking {
         val runtime = LlamaRuntime({ _, _ -> }, { true })
         val scheduler = app.plamotranslate.pipeline.compute.ComputeScheduler()
-        val cpu = app.plamotranslate.pipeline.compute.CpuTopology(mapOf(0 to 1L))
+        val cpu = app.plamotranslate.pipeline.compute.CpuTopology(mapOf(0 to null))
         val release = CompletableDeferred<Unit>()
         val order = mutableListOf<String>()
         val preparing = launch(start = CoroutineStart.UNDISPATCHED) {

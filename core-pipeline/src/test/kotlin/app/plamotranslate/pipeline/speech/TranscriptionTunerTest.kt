@@ -11,7 +11,7 @@ import org.junit.Test
 class TranscriptionTunerTest {
     private fun candidates(n: Int, threads: Int = 0): List<TranscriptionCandidate> {
         val capacities = listOf(3L, 3L, 3L, 3L, 2L, 2L, 1L, 1L).take(n)
-        val topology = CpuTopology(capacities.indices.associateWith { capacities[it] })
+        val topology = CpuTopology(capacities.indices.associateWith { CpuTopology.Core(capacities[it].toInt(), capacities[it]) })
         return topology.candidates(threads).map { TranscriptionCandidate(false, it, it) }
     }
     private var cpus = candidates(2)
@@ -132,7 +132,7 @@ class TranscriptionTunerTest {
 
     @Test fun `段の数が同じでも許された番号が変われば再計測する`() = runTest {
         for (first in listOf(0, 4, 4)) {
-            environment = environment.copy(cpu = CpuTopology(mapOf(first to 10L, first + 1 to 10L)).key)
+            environment = environment.copy(cpu = CpuTopology(mapOf(first to null, first + 1 to null)).key)
             prepare(100, preference = TranscriptionPreference.CPU)
         }
         assertEquals(listOf(4, 4, 1), engines.map { it.trials })

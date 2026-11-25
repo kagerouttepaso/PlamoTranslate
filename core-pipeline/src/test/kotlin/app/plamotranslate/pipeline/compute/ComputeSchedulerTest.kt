@@ -6,13 +6,31 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ComputeSchedulerTest {
-    private val topology = CpuTopology(mapOf(2 to 10L, 5 to 20L, 7 to 20L))
-    @Test fun 性能順に許された番号だけを数える() {
+    private fun core(group: Int, speed: Long) = CpuTopology.Core(group, speed)
+    private val topology = CpuTopology(mapOf(2 to core(0, 10), 5 to core(4, 20), 7 to core(4, 20)))
+
+    @Test fun 許されたCPUだけを所属ごとに速い順に数える() {
+        assertEquals(listOf(listOf(5, 7), listOf(2)), topology.tiers)
         assertEquals(listOf(2, 3), topology.candidates())
-        assertEquals(listOf(1, 2, 3), CpuTopology(mapOf(2 to 2L, 5 to 3L, 7 to 4L)).candidates())
-        assertEquals(listOf(2), CpuTopology(mapOf(3 to null, 8 to 1L)).candidates())
-        assertEquals(listOf(2), CpuTopology(mapOf(3 to 0L, 8 to 0L)).candidates())
-        assertNotEquals(topology.key, CpuTopology(mapOf(1 to 10L, 5 to 20L, 7 to 20L)).key)
+        val three = CpuTopology(mapOf(2 to core(0, 10), 5 to core(4, 20), 7 to core(7, 20)))
+        assertEquals(listOf(listOf(5), listOf(7), listOf(2)), three.tiers)
+        assertEquals(listOf(1, 2, 3), three.candidates())
+        assertNotEquals(topology.key, three.key)
+        assertNotEquals(topology.key, CpuTopology(mapOf(2 to core(0, 10), 5 to core(4, 20))).key)
+    }
+
+    @Test fun 同じ所属で性能値が揺れても段と保存鍵を保つ() {
+        val changed = CpuTopology(mapOf(7 to core(4, 19), 5 to core(4, 21), 2 to core(0, 9)))
+        assertEquals(topology.tiers, changed.tiers)
+        assertEquals(topology.key, changed.key)
+    }
+
+    @Test fun 所属が一つか情報が欠けるときは全予算が唯一の候補になる() {
+        for (first in listOf(null, core(1, 9))) {
+            val cpu = CpuTopology(mapOf(3 to first, 8 to core(1, 10)))
+            assertEquals(listOf(listOf(3, 8)), cpu.tiers)
+            assertEquals(listOf(2), cpu.candidates())
+        }
     }
 
     @Test fun 資源ごとの上限と優先順位と待ちの通知() = runTest {
