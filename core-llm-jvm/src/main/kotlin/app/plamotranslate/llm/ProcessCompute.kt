@@ -8,9 +8,7 @@ import app.plamotranslate.pipeline.compute.CpuTopology
 import java.io.File
 
 object ProcessCompute : ComputeResources {
-    private val scheduler = ComputeScheduler { topology, gpu, count, waited ->
-        Logs.i("計算資源 GPU=$gpu CPU段(速い順)=${topology.tiers} 予算=${topology.budget} 貸出=$count 待ち=${waited / 1_000_000}ms")
-    }
+    private val scheduler = ComputeScheduler { Logs.i(it) }
 
     fun topology(): CpuTopology {
         if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {

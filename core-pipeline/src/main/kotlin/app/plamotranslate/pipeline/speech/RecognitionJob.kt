@@ -1,5 +1,7 @@
 package app.plamotranslate.pipeline.speech
 
+import app.plamotranslate.pipeline.compute.*
+
 /**
  * セグメンター（[SpeechSegmenter]）が認識のワーカーに頼むジョブ（docs/設計/会話翻訳.md「認識の段と CPU の割り当て」）。
  * セグメンターはジョブを出して待たずに次の音声へ進み、結果（[RecognitionOutput]）を受け取ってから次を決める。
@@ -134,7 +136,13 @@ enum class RecognitionPriority(
     PHRASE_LANGUAGE(urgent = true, droppable = false),
     RETRANSCRIBE(urgent = false, droppable = false),
     LANGUAGE(urgent = false, droppable = true),
-    PARTIAL(urgent = false, droppable = true),
+    PARTIAL(urgent = false, droppable = true);
+
+    val work: ComputeWork get() = when (this) {
+        LANGUAGE -> ComputeWork(ComputePriority.Interactive, name = name)
+        PARTIAL -> ComputeWork(ComputePriority.Speculative, StopMode.Cancel, name = name)
+        else -> ComputeWork(ComputePriority.Critical, name = name)
+    }
 }
 
 /**

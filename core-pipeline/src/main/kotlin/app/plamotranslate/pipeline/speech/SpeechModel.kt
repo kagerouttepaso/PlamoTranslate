@@ -54,6 +54,8 @@ interface LanguageIdentifier : AutoCloseable {
      * 判定できなければ null。どちらの言語に近いかを比べるので、一番の言語の名前ではなくスコアを返す。
      */
     fun scores(samples: FloatArray, candidates: Set<String>?): Map<String, Float>?
+    suspend fun scores(samples: FloatArray, candidates: Set<String>?, priority: RecognitionPriority): Map<String, Float>? =
+        scores(samples, candidates)
 }
 
 /**
@@ -71,7 +73,7 @@ class IdentifiedRecognizer(
      */
     suspend fun identifyAndRecognize(samples: FloatArray, languages: SpeechLanguages, fallback: String? = null, priority: RecognitionPriority): Recognition {
         val groups = languages.groups
-        val identified = SpeakerJudge.decide(identifier.groupedScores(samples, languages), languages.copy(primary = null), 0f)
+        val identified = SpeakerJudge.decide(identifier.groupedScores(samples, languages, priority), languages.copy(primary = null), 0f)
         if (identified != null) return recognizeAs(samples, identified, groups, LanguageSource.JUDGED, priority)
         return recognizeAs(samples, fallback?.takeIf { groups == null || it in groups }, groups, LanguageSource.SPECIFIED, priority)
     }
@@ -84,8 +86,8 @@ class IdentifiedRecognizer(
 
 }
 
-internal fun LanguageIdentifier.groupedScores(samples: FloatArray, languages: SpeechLanguages): Map<String, Float>? {
-    val raw = scores(samples, languages.groups) ?: return null
+internal suspend fun LanguageIdentifier.groupedScores(samples: FloatArray, languages: SpeechLanguages, priority: RecognitionPriority): Map<String, Float>? {
+    val raw = scores(samples, languages.groups, priority) ?: return null
     val grouped = HashMap<String, Float>()
     for ((lang, p) in raw) {
         val group = LanguageEvidence.group(lang, separateChinese = true) ?: continue

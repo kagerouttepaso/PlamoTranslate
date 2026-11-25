@@ -43,8 +43,8 @@ class ComputeSchedulerTest {
                     scheduler.borrow(topology, gpu, 2, work) { _, _ -> order.add(name) }
                 }
                 enqueue("先着", ComputeWork.Regular)
-                enqueue("取消", ComputeWork.FinalTranscript).cancelAndJoin()
-                enqueue("確定", ComputeWork.FinalTranscript)
+                enqueue("取消", app.plamotranslate.pipeline.speech.RecognitionPriority.FINAL.work).cancelAndJoin()
+                enqueue("確定", app.plamotranslate.pipeline.speech.RecognitionPriority.FINAL.work)
                 assertTrue(waiting())
                 assertTrue(order.isEmpty())
             }
@@ -82,5 +82,52 @@ class ComputeSchedulerTest {
         }
         yield()
         assertEquals(1, granted)
+    }
+
+    @Test fun 高い組が取り消してよい依頼を止めてから借りる() = runTest {
+        val scheduler = ComputeScheduler()
+        val order = mutableListOf<String>()
+        val low = launch(start = CoroutineStart.UNDISPATCHED) {
+            scheduler.borrow(topology, false, topology.budget, ComputeWork(ComputePriority.Speculative, StopMode.Cancel)) { _, _ ->
+                try { awaitCancellation() } finally { order.add("返却") }
+            }
+        }
+        scheduler.borrow(topology, false, 1) { _, _ -> order.add("貸出") }
+        low.join()
+        assertTrue(low.isCancelled)
+        assertEquals(listOf("返却", "貸出"), order)
+    }
+
+    @Test fun 区切りで譲った依頼は後続より先に戻る() = runTest {
+        val scheduler = ComputeScheduler()
+        val order = mutableListOf<String>()
+        scheduler.borrow(topology, false, topology.budget, ComputeWork.Translation) { _, boundary ->
+            if (order.isEmpty()) {
+                for ((name, priority) in listOf("後続" to ComputePriority.Normal, "確定" to ComputePriority.Critical)) {
+                    launch(start = CoroutineStart.UNDISPATCHED) {
+                        scheduler.borrow(topology, false, topology.budget, ComputeWork(priority)) { _, _ -> order.add(name) }
+                    }
+                }
+                assertTrue(order.isEmpty())
+                assertTrue(boundary())
+                order.add("区切り")
+            } else order.add("再開")
+        }
+        testScheduler.runCurrent()
+        assertEquals(listOf("区切り", "確定", "再開", "後続"), order)
+    }
+
+    @Test fun 軽い処理は空きだけ借り重い処理は全数を待つ() = runTest {
+        val scheduler = ComputeScheduler()
+        val counts = mutableListOf<Int>()
+        scheduler.borrow(topology, false, 1) { _, _ ->
+            scheduler.borrow(topology, false, topology.budget, ComputeWork.Translation) { n, _ -> counts.add(n) }
+            launch(start = CoroutineStart.UNDISPATCHED) {
+                scheduler.borrow(topology, false, topology.budget) { n, _ -> counts.add(n) }
+            }
+            assertEquals(listOf(topology.budget - 1), counts)
+        }
+        testScheduler.runCurrent()
+        assertEquals(listOf(topology.budget - 1, topology.budget), counts)
     }
 }

@@ -29,7 +29,7 @@ object ScheduledSpeech {
                 transcribe(samples, language, RecognitionPriority.PARTIAL)
             }
             override suspend fun transcribe(samples: FloatArray, language: String?, priority: RecognitionPriority): Recognition =
-                session.use(if (priority.urgent) ComputeWork.FinalTranscript else ComputeWork.Regular) { it.recognizeAs(samples, language) }
+                session.use(priority.work) { it.recognizeAs(samples, language) }
             override fun close() = session.model.close()
         }
     }
@@ -38,8 +38,10 @@ object ScheduledSpeech {
         val session = compute.borrow(false, threads) { n, _ -> SpeechSession(compute, threads, n, create(n), create) }
         return object : LanguageIdentifier {
             override fun scores(samples: FloatArray, candidates: Set<String>?) = runBlocking {
-                session.use(ComputeWork.Regular) { it.scores(samples, candidates) }
+                scores(samples, candidates, RecognitionPriority.LANGUAGE)
             }
+            override suspend fun scores(samples: FloatArray, candidates: Set<String>?, priority: RecognitionPriority) =
+                session.use(priority.work) { it.scores(samples, candidates) }
             override fun close() = session.model.close()
         }
     }

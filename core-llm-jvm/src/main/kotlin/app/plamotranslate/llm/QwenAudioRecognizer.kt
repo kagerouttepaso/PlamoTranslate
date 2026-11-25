@@ -41,7 +41,7 @@ class QwenAudioRecognizer private constructor(private val session: QwenAudioSess
 
     suspend fun trial(samples: FloatArray, clock: () -> Long = System::nanoTime): TranscriptionTuner.Sample {
         var started = 0L
-        val result = run(samples, null, RecognitionPriority.PARTIAL) { started = clock() }
+        val result = run(samples, null, RecognitionPriority.FINAL) { started = clock() }
         return TranscriptionTuner.Sample(result, clock() - started)
     }
 
@@ -54,7 +54,7 @@ class QwenAudioRecognizer private constructor(private val session: QwenAudioSess
         try {
             val name = language?.let { QwenTranscript.names.getValue(it) }.orEmpty()
             execution.withLock {
-                val work = if (priority.urgent) ComputeWork.FinalTranscript else ComputeWork.Regular
+                val work = priority.work
                 val raw = if (samples.isEmpty()) "" else session.use(work) { handle ->
                     coroutineContext.ensureActive()
                     started()

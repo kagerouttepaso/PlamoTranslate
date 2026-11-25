@@ -80,7 +80,7 @@ class TranslationEngine private constructor(
             withContext(dispatcher) {
                 var tokens = 0
                 do {
-                    val turn = ProcessCompute.borrow(usesGpu, selectedThreads) { count, waiting ->
+                    val turn = ProcessCompute.borrow(usesGpu, selectedThreads, app.plamotranslate.pipeline.compute.ComputeWork.Translation) { count, waiting ->
                         runtime.native { LlamaNative.nativeConfigure(handle, boost, count) }
                         TranslationTurn(slots.coerceIn(1, MAX_PARALLEL), waiting).also {
                             tokens += translateBatch(slots.coerceIn(1, MAX_PARALLEL), source, maxTokens, it)

@@ -36,6 +36,6 @@ class ScheduledSpeechTest {
         }
         assertEquals(listOf(4, 2, 4), loads)
         assertEquals(loads, closed)
-        assertEquals(listOf(ComputeWork.Regular) + List(3) { ComputeWork.FinalTranscript }, observedWork)
+        assertEquals(listOf(ComputeWork.Regular) + List(3) { app.plamotranslate.pipeline.speech.RecognitionPriority.FINAL.work }, observedWork)
     }
 }

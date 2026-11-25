@@ -48,7 +48,7 @@ class RecognitionRunner(private val recognizer: SpeechRecognizer, private val id
      * [strict] なら、書き起こした結果の言語は、話し手の根拠になるもの（[LanguageEvidence.of]：文字の種類が合い、1語より多い）だけを使う。
      */
     private suspend fun scored(samples: FloatArray, languages: SpeechLanguages, priority: RecognitionPriority, strict: Boolean): RecognitionOutput.Scored {
-        if (identifier != null) return RecognitionOutput.Scored(identifier.groupedScores(samples, languages))
+        if (identifier != null) return RecognitionOutput.Scored(identifier.groupedScores(samples, languages, priority))
         val r = TranscriptCleanup.clean(recognizer.transcribe(samples, null, priority))
         val lang = if (strict) {
             LanguageEvidence.of(r, languages)
