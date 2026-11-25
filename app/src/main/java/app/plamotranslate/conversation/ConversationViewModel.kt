@@ -84,6 +84,7 @@ data class ConversationUiState(
     val cards: List<LiveSpeech> = emptyList(),
     /** 区切るボタンを押せるか（聞いていて、話し中のカードがある）。 */
     val canCut: Boolean = false,
+    val canStart: Boolean = false,
     val awaitingInput: Boolean = false,
     val error: String? = null,
     /** 会話で選べる言語（設定で選んだ音声認識モデルの言語）。 */
@@ -108,7 +109,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     private val recognition = RecognitionPreferences(app)
     private val speechModel = recognition.model
 
-    private val session = ConversationSession(startWhenReady = true, self = preferences.self(speechModel.languages) ?: Language.JA, heard = speechModel.languages)
+    private val session = ConversationSession(self = preferences.self(speechModel.languages) ?: Language.JA, heard = speechModel.languages)
 
     private var asr: SpeechEngine? = null
 
@@ -130,13 +131,15 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     init {
         preferences.viewMode?.let { mode -> _state.update { it.copy(viewMode = mode) } }
         _state.update { it.copy(languages = speechModel.languages) }
-        sync()
+        requestStart()
+        viewModelScope.launch { model.collect { updateModels() } }
         EngineHolder.ensureLoaded(app)
         loadAsr()
     }
 
     fun loadAsr() {
         _state.update { it.copy(asr = AsrState.Loading) }
+        updateModels()
         viewModelScope.launch {
             val begin = System.nanoTime()
             val result = runCatching {
@@ -149,10 +152,12 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
             _state.update {
                 it.copy(asr = result.fold({ AsrState.Ready }, { e -> AsrState.Failed(e.message ?: e.toString()) }))
             }
+            updateModels()
         }
     }
 
-    fun modelsReady() = handle(Event.ModelsReady)
+    private fun updateModels() = handle(Event.ModelsChanged(_state.value.asr == AsrState.Ready && model.value is ModelState.Ready))
+
     fun requestStart() = handle(Event.StartRequested)
 
     fun setMode(mode: PartnerMode) = handle(Event.ModeChanged(mode))
@@ -276,8 +281,8 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
      * 聞く。始める順番は制御が決め、聞き始める作業（[Effect.Begin]）で [begin] が [block] を流す。
      */
     private fun listen(block: suspend (SpeechEngine) -> Unit) {
+        updateModels()
         if (!session.awaitingInput) return
-        if (_state.value.asr != AsrState.Ready || model.value !is ModelState.Ready) return stop()
         pendingInput = block
         _state.update { it.copy(error = null) }
         handle(Event.InputAvailable)
@@ -391,7 +396,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         asr?.languages = session.speechLanguages
         _state.update {
             it.copy(
-                awaitingInput = session.awaitingInput,
+                canStart = session.canStart, awaitingInput = session.awaitingInput,
                 turns = session.turns, cards = session.listeningCards, listening = session.listening, canCut = session.canCut,
                 self = session.self, mode = session.mode, partner = session.partner, partnerFound = session.partnerFound,
             )

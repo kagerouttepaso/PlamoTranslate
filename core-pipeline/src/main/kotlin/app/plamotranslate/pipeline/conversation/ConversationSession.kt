@@ -101,7 +101,6 @@ class ConversationSession(
     self: Language = Language.JA,
     /** 音声認識が聞ける言語（自動の相手を探す候補）。 */
     heard: List<Language> = SpeechModel.DEFAULT.languages,
-    startWhenReady: Boolean = false,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     sealed interface Event {
@@ -121,8 +120,8 @@ class ConversationSession(
         data class SelfChanged(val self: Language) : Event
         data class ModeChanged(val mode: PartnerMode) : Event
 
-        /** Android の会話画面で、音声認識と翻訳モデルが両方使えるようになった。 */
-        data object ModelsReady : Event
+        /** 音声認識と翻訳モデルの準備状態が変わった。 */
+        data class ModelsChanged(val ready: Boolean) : Event
 
         /** 利用者が開始を押した。入力を使えるか確認する。 */
         data object StartRequested : Event
@@ -207,7 +206,10 @@ class ConversationSession(
 
     private enum class Phase { WAITING_FOR_MODELS, WAITING_FOR_INPUT, IDLE, LISTENING, STOPPING, CLOSED }
 
-    private var phase = if (startWhenReady) Phase.WAITING_FOR_MODELS else Phase.IDLE
+    private var phase = Phase.IDLE
+    private var modelsReady = false
+
+    val canStart: Boolean get() = phase == Phase.IDLE && modelsReady
 
     val awaitingInput: Boolean get() = phase == Phase.WAITING_FOR_INPUT
 
@@ -290,8 +292,15 @@ class ConversationSession(
                 router.mode = event.mode
                 retarget(onlyUntranslated = false)
             }
-            Event.ModelsReady -> if (phase == Phase.WAITING_FOR_MODELS) phase = Phase.WAITING_FOR_INPUT
-            Event.StartRequested -> if (phase == Phase.IDLE) phase = Phase.WAITING_FOR_INPUT
+            is Event.ModelsChanged -> {
+                modelsReady = event.ready
+                // 入力を確認中ならモデルの準備も待ち直す。聞き始めた会話の録音は続ける。
+                if (phase == Phase.WAITING_FOR_MODELS && modelsReady) phase = Phase.WAITING_FOR_INPUT
+                else if (awaitingInput && !modelsReady) phase = Phase.WAITING_FOR_MODELS
+            }
+            Event.StartRequested -> if (phase == Phase.IDLE) {
+                phase = if (modelsReady) Phase.WAITING_FOR_INPUT else Phase.WAITING_FOR_MODELS
+            }
             Event.InputAvailable -> if (awaitingInput) begin(effects)
             Event.Started -> if (phase == Phase.IDLE) begin(effects)
             Event.Closed -> {

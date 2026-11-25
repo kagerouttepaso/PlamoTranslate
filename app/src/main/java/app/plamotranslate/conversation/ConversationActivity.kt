@@ -51,14 +51,17 @@ import kotlinx.coroutines.flow.drop
  */
 class ConversationActivity : ComponentActivity() {
     private val vm: ConversationViewModel by viewModels()
+    private var requestingMic = false
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startListening() else vm.stop()
+        requestingMic = false
+        if (granted && !isFinishing) startListening() else vm.stop()
     }
 
     private val logExport = ConversationLogExport(this) { vm.state.value.turns }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        requestingMic = savedInstanceState?.getBoolean(REQUESTING_MIC) == true
         enableEdgeToEdge()
         // 読み上げの失敗は画面にいる間だけ出す。画面を離れたら読み上げのモデルを手放す
         ReadAloud.attach(this)
@@ -84,10 +87,6 @@ class ConversationActivity : ComponentActivity() {
                         saveLog = logExport::save,
                     ),
                 )
-                val ready = state.asr == AsrState.Ready && model is ModelState.Ready
-                LaunchedEffect(ready) {
-                    if (ready) vm.modelsReady()
-                }
                 LaunchedEffect(state.awaitingInput) {
                     if (!state.awaitingInput) return@LaunchedEffect
                     val wav = intent.getStringExtra(EXTRA_WAV)
@@ -103,14 +102,21 @@ class ConversationActivity : ComponentActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(REQUESTING_MIC, requestingMic)
+    }
+
     override fun onStop() {
         super.onStop()
         // 画面を離れたらマイクを止める（フォアグラウンドサービスはまだ無い。読み上げは ReadAloud.attach が止める）
-        vm.stop()
+        if (!requestingMic || isFinishing) vm.stop()
     }
 
     private fun startListening() {
+        if (requestingMic || !vm.state.value.awaitingInput || isFinishing) return
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestingMic = true
             micPermission.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
@@ -120,6 +126,7 @@ class ConversationActivity : ComponentActivity() {
     private fun isDebuggable() = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
 
     companion object {
+        private const val REQUESTING_MIC = "requestingMic"
         const val EXTRA_WAV = "wav"
         const val EXTRA_PARTNER = "partner"
     }

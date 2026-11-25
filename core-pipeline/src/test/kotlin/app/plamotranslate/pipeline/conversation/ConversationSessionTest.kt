@@ -15,15 +15,15 @@ import org.junit.Test
 class ConversationSessionTest {
     @Test
     fun 準備と入力の確認が済むと一度だけ始め停止後は開始操作を待つ() {
-        val session = ConversationSession(startWhenReady = true)
-        session.handle(Event.ModelsReady)
+        val session = ConversationSession().apply { handle(Event.StartRequested) }
+        session.handle(Event.ModelsChanged(true))
         assertTrue(session.awaitingInput)
         assertEquals(listOf(Effect.Begin), session.handle(Event.InputAvailable))
-        assertTrue(session.handle(Event.ModelsReady).isEmpty())
+        assertTrue(session.handle(Event.ModelsChanged(true)).isEmpty())
         assertTrue(session.handle(Event.InputAvailable).isEmpty())
         assertEquals(listOf(Effect.Flush), session.handle(Event.StopRequested))
         assertEquals(listOf(Effect.Finish), session.handle(Event.Speech(SpeechEvent.Flushed)))
-        session.handle(Event.ModelsReady)
+        session.handle(Event.ModelsChanged(true))
         assertFalse(session.awaitingInput)
         assertTrue(session.handle(Event.InputAvailable).isEmpty())
         session.handle(Event.StartRequested)
@@ -35,15 +35,35 @@ class ConversationSessionTest {
     fun 準備中や権限待ちに停止するか画面を閉じたら遅れて準備が済んでも始めない() {
         for (waitingForInput in listOf(false, true)) {
             for (cancel in listOf(Event.StopRequested, Event.Closed)) {
-                val session = ConversationSession(startWhenReady = true)
-                if (waitingForInput) session.handle(Event.ModelsReady)
+                val session = ConversationSession().apply { handle(Event.StartRequested) }
+                if (waitingForInput) session.handle(Event.ModelsChanged(true))
                 assertTrue(session.handle(cancel).isEmpty())
-                session.handle(Event.ModelsReady)
+                session.handle(Event.ModelsChanged(true))
                 assertFalse(session.awaitingInput)
                 assertTrue(session.handle(Event.InputAvailable).isEmpty())
                 assertFalse(session.listening)
             }
         }
+    }
+
+    @Test
+    fun 入力の確認中に準備を失ったら待ち直し聞き始めた後の読み直しでは録音を続ける() {
+        val session = ConversationSession()
+        session.handle(Event.StartRequested)
+        assertFalse(session.awaitingInput)
+        session.handle(Event.ModelsChanged(true))
+        session.handle(Event.ModelsChanged(false))
+        assertTrue(session.handle(Event.InputAvailable).isEmpty())
+        session.handle(Event.ModelsChanged(true))
+        assertEquals(listOf(Effect.Begin), session.handle(Event.InputAvailable))
+        assertTrue(session.handle(Event.ModelsChanged(false)).isEmpty())
+        assertTrue(session.listening)
+        session.handle(Event.StopRequested)
+        session.handle(Event.Speech(SpeechEvent.Flushed))
+        assertFalse(session.canStart)
+        session.handle(Event.ModelsChanged(true))
+        assertTrue(session.canStart)
+        assertFalse(session.awaitingInput)
     }
 
     /** 音声認識のカードの番号の採番と、話し中のカード。 */

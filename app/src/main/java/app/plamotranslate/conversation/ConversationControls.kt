@@ -77,11 +77,10 @@ internal fun Controls(state: ConversationUiState, model: ModelState<TranslationM
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                val ready = state.asr == AsrState.Ready && model is ModelState.Ready
                 if (state.listening) {
                     OutlinedButton(onClick = actions.stop, modifier = Modifier.fillMaxWidth()) { Text("停止") }
                 } else {
-                    Button(onClick = actions.start, enabled = ready, modifier = Modifier.fillMaxWidth()) { Text("開始") }
+                    Button(onClick = actions.start, enabled = state.canStart, modifier = Modifier.fillMaxWidth()) { Text("開始") }
                 }
                 SelfMenu(state.self, state.languages, actions.self)
                 PartnerMenu(state.mode, state.partner.takeIf { state.partnerFound }, state.self, state.languages, actions.partnerMode)
