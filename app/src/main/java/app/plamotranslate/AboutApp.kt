@@ -89,6 +89,16 @@ private val MODELS = listOf(
         source = "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
     ),
     ModelNotice(
+        "Qwen3-ASR 0.6B（GGUF Q8_0）", "音声認識（設定で選んだときだけ）", "Alibaba Cloud（Qwen チーム）",
+        "Apache License 2.0", "https://huggingface.co/Qwen/Qwen3-ASR-0.6B", LicenseText.APACHE,
+        source = "https://huggingface.co/ggml-org/Qwen3-ASR-0.6B-GGUF",
+    ),
+    ModelNotice(
+        "Whisper tiny（sherpa-onnx 用の int8 版）", "話している言語の識別（Qwen3-ASR と一緒に使う）", "OpenAI",
+        "MIT License", "https://github.com/openai/whisper/blob/main/LICENSE",
+        source = "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny",
+    ),
+    ModelNotice(
         "Silero VAD", "話しているかの判定", "Silero Team（Copyright (c) 2020-present Silero Team）",
         "MIT License", "https://github.com/snakers4/silero-vad/blob/master/LICENSE",
         source = "https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models",

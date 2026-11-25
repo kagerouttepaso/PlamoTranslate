@@ -3,7 +3,7 @@
 Apache License 2.0 の全文は apache-2.0.txt にある。版を変えたら docs/手順/開発環境.md「ライセンス文を集め直す」に従って直す。
 
 ========================================
-llama.cpp / ggml（翻訳モデルの実行。third_party/llama.cpp）
+llama.cpp / ggml（翻訳モデルと Qwen3-ASR の実行。third_party/llama.cpp）
 ========================================
 MIT License
 
