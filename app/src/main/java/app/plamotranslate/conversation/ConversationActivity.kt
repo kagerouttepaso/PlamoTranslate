@@ -52,7 +52,7 @@ import kotlinx.coroutines.flow.drop
 class ConversationActivity : ComponentActivity() {
     private val vm: ConversationViewModel by viewModels()
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startListening()
+        if (granted) startListening() else vm.stop()
     }
 
     private val logExport = ConversationLogExport(this) { vm.state.value.turns }
@@ -71,7 +71,7 @@ class ConversationActivity : ComponentActivity() {
                     state = state,
                     model = model,
                     actions = ConversationActions(
-                        start = ::startListening,
+                        start = vm::requestStart,
                         stop = vm::stop,
                         cut = vm::cut,
                         partnerMode = vm::setMode,
@@ -84,17 +84,20 @@ class ConversationActivity : ComponentActivity() {
                         saveLog = logExport::save,
                     ),
                 )
-                // デバッグ版だけ：adb から音声ファイルを流して確かめる（docs/設計/会話翻訳.md「動作確認」）
-                val wav = intent.getStringExtra(EXTRA_WAV)
-                // 実際に話すときと同じく、翻訳モデルの準備が済んでから流す（途中訳も確かめるため）
                 val ready = state.asr == AsrState.Ready && model is ModelState.Ready
-                LaunchedEffect(ready, wav) {
-                    if (wav != null && ready && isDebuggable()) {
+                LaunchedEffect(ready) {
+                    if (ready) vm.modelsReady()
+                }
+                LaunchedEffect(state.awaitingInput) {
+                    if (!state.awaitingInput) return@LaunchedEffect
+                    val wav = intent.getStringExtra(EXTRA_WAV)
+                    if (wav != null && isDebuggable()) {
+                        intent.removeExtra(EXTRA_WAV)
                         // 相手の言語は保存しないので、流す前に決めたいときは渡す（言語のコード。無ければ自動）
                         intent.getStringExtra(EXTRA_PARTNER)?.let { code -> Language.entries.firstOrNull { it.code == code } }
                             ?.let { vm.setMode(PartnerMode(it)) }
                         vm.startFromWav(wav)
-                    }
+                    } else startListening()
                 }
             }
         }

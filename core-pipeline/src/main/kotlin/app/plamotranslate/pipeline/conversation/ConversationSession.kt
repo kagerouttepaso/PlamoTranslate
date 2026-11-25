@@ -87,7 +87,7 @@ data class LiveSpeech(
  *   確定訳が残っている間は始めない。
  * - 確定した発話が来たら、走っている途中訳を取り消す。途中訳はカードの番号で持ち、話し中でなくなったカードの途中訳は始めない。
  *
- * 聞くことの始めと止める順番もここで決める：始める（[Event.Started]）と聞き始める作業（[Effect.Begin]）を返す。止める
+ * 聞くことの始めと止める順番もここで決める：準備が済み、入力を使えると（[Event.InputAvailable]）、または手動で始めると（[Event.Started]）、聞き始める作業（[Effect.Begin]）を返す。止める
  * （[Event.StopRequested]）と、話していた分を確定させる作業（[Effect.Flush]）を返し、確定し終えたら（[SpeechEvent.Flushed]）
  * 聞き終える作業（[Effect.Finish]）を返す。画面を閉じたら（[Event.Closed]）確定を待たずに聞き終える。[Effect.Begin] と
  * [Effect.Finish] は1回ずつ対で返す。区切るボタンを押せるか（[canCut]）は、
@@ -101,6 +101,7 @@ class ConversationSession(
     self: Language = Language.JA,
     /** 音声認識が聞ける言語（自動の相手を探す候補）。 */
     heard: List<Language> = SpeechModel.DEFAULT.languages,
+    startWhenReady: Boolean = false,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     sealed interface Event {
@@ -119,6 +120,15 @@ class ConversationSession(
 
         data class SelfChanged(val self: Language) : Event
         data class ModeChanged(val mode: PartnerMode) : Event
+
+        /** Android の会話画面で、音声認識と翻訳モデルが両方使えるようになった。 */
+        data object ModelsReady : Event
+
+        /** 利用者が開始を押した。入力を使えるか確認する。 */
+        data object StartRequested : Event
+
+        /** マイクの許可、または試験用の音声ファイルを確認した。 */
+        data object InputAvailable : Event
 
         /** 聞き始めた（音声認識は新しい会話として始め直す）。 */
         data object Started : Event
@@ -195,12 +205,14 @@ class ConversationSession(
     var listeningCards: List<LiveSpeech> = emptyList()
         private set
 
-    private enum class Phase { IDLE, LISTENING, STOPPING }
+    private enum class Phase { WAITING_FOR_MODELS, WAITING_FOR_INPUT, IDLE, LISTENING, STOPPING, CLOSED }
 
-    private var phase = Phase.IDLE
+    private var phase = if (startWhenReady) Phase.WAITING_FOR_MODELS else Phase.IDLE
+
+    val awaitingInput: Boolean get() = phase == Phase.WAITING_FOR_INPUT
 
     /** 聞いているか（止めて、確定し終えるのを待っている間も含む）。 */
-    val listening: Boolean get() = phase != Phase.IDLE
+    val listening: Boolean get() = phase == Phase.LISTENING || phase == Phase.STOPPING
 
     /** 区切るボタンを押せるか：聞いていて、話し中のカードがある。 */
     val canCut: Boolean get() = phase == Phase.LISTENING && listeningCards.any { it.open }
@@ -278,16 +290,22 @@ class ConversationSession(
                 router.mode = event.mode
                 retarget(onlyUntranslated = false)
             }
-            Event.Started -> if (phase == Phase.IDLE) {
-                phase = Phase.LISTENING
-                listeningCards = emptyList()
-                effects += Effect.Begin
+            Event.ModelsReady -> if (phase == Phase.WAITING_FOR_MODELS) phase = Phase.WAITING_FOR_INPUT
+            Event.StartRequested -> if (phase == Phase.IDLE) phase = Phase.WAITING_FOR_INPUT
+            Event.InputAvailable -> if (awaitingInput) begin(effects)
+            Event.Started -> if (phase == Phase.IDLE) begin(effects)
+            Event.Closed -> {
+                if (listening) finish(effects)
+                phase = Phase.CLOSED
             }
-            Event.Closed -> if (phase != Phase.IDLE) finish(effects)
-            Event.StopRequested -> if (phase == Phase.LISTENING) {
-                phase = Phase.STOPPING
-                partialPending = null
-                effects += Effect.Flush
+            Event.StopRequested -> when (phase) {
+                Phase.WAITING_FOR_MODELS, Phase.WAITING_FOR_INPUT -> phase = Phase.IDLE
+                Phase.LISTENING -> {
+                    phase = Phase.STOPPING
+                    partialPending = null
+                    effects += Effect.Flush
+                }
+                else -> Unit
             }
             is Event.RecognitionBusy -> recognitionBusy = event.busy
             is Event.LanguageSwapped -> swapLanguage(event.turnId, effects)
@@ -304,7 +322,7 @@ class ConversationSession(
     private fun onSpeech(event: SpeechEvent, specifiedLanguage: Language?, effects: MutableList<Effect>) {
         when (event) {
             // 止めた後に開いたカードも、止める前に渡した音声のものなので、確定まで出す
-            is SpeechEvent.CardOpened -> if (phase != Phase.IDLE) {
+            is SpeechEvent.CardOpened -> if (listening) {
                 listeningCards = listeningCards + LiveSpeech(event.card, "", null, startedAtMs = clock())
             }
             is SpeechEvent.CardText -> onCardText(event, specifiedLanguage)
@@ -341,6 +359,12 @@ class ConversationSession(
         if (event.text.isNotEmpty() && target != null) {
             partialPending = PartialRequest(nextRequestId++, event.card, event.text, direction.source, target)
         }
+    }
+
+    private fun begin(effects: MutableList<Effect>) {
+        phase = Phase.LISTENING
+        listeningCards = emptyList()
+        effects += Effect.Begin
     }
 
     private fun finish(effects: MutableList<Effect>) {

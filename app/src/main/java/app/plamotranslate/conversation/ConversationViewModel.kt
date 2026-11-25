@@ -84,6 +84,7 @@ data class ConversationUiState(
     val cards: List<LiveSpeech> = emptyList(),
     /** 区切るボタンを押せるか（聞いていて、話し中のカードがある）。 */
     val canCut: Boolean = false,
+    val awaitingInput: Boolean = false,
     val error: String? = null,
     /** 会話で選べる言語（設定で選んだ音声認識モデルの言語）。 */
     val languages: List<Language> = SpeechModel.DEFAULT.languages,
@@ -107,7 +108,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     private val recognition = RecognitionPreferences(app)
     private val speechModel = recognition.model
 
-    private val session = ConversationSession(self = preferences.self(speechModel.languages) ?: Language.JA, heard = speechModel.languages)
+    private val session = ConversationSession(startWhenReady = true, self = preferences.self(speechModel.languages) ?: Language.JA, heard = speechModel.languages)
 
     private var asr: SpeechEngine? = null
 
@@ -150,6 +151,9 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
             }
         }
     }
+
+    fun modelsReady() = handle(Event.ModelsReady)
+    fun requestStart() = handle(Event.StartRequested)
 
     fun setMode(mode: PartnerMode) = handle(Event.ModeChanged(mode))
 
@@ -272,10 +276,11 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
      * 聞く。始める順番は制御が決め、聞き始める作業（[Effect.Begin]）で [begin] が [block] を流す。
      */
     private fun listen(block: suspend (SpeechEngine) -> Unit) {
-        if (asr == null || session.listening) return
+        if (!session.awaitingInput) return
+        if (_state.value.asr != AsrState.Ready || model.value !is ModelState.Ready) return stop()
         pendingInput = block
         _state.update { it.copy(error = null) }
-        handle(Event.Started)
+        handle(Event.InputAvailable)
     }
 
     /**
@@ -386,6 +391,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         asr?.languages = session.speechLanguages
         _state.update {
             it.copy(
+                awaitingInput = session.awaitingInput,
                 turns = session.turns, cards = session.listeningCards, listening = session.listening, canCut = session.canCut,
                 self = session.self, mode = session.mode, partner = session.partner, partnerFound = session.partnerFound,
             )

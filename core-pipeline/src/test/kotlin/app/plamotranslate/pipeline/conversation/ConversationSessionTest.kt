@@ -13,6 +13,39 @@ import org.junit.Test
 
 /** 会話の訳す順番（[ConversationSession]）。 */
 class ConversationSessionTest {
+    @Test
+    fun 準備と入力の確認が済むと一度だけ始め停止後は開始操作を待つ() {
+        val session = ConversationSession(startWhenReady = true)
+        session.handle(Event.ModelsReady)
+        assertTrue(session.awaitingInput)
+        assertEquals(listOf(Effect.Begin), session.handle(Event.InputAvailable))
+        assertTrue(session.handle(Event.ModelsReady).isEmpty())
+        assertTrue(session.handle(Event.InputAvailable).isEmpty())
+        assertEquals(listOf(Effect.Flush), session.handle(Event.StopRequested))
+        assertEquals(listOf(Effect.Finish), session.handle(Event.Speech(SpeechEvent.Flushed)))
+        session.handle(Event.ModelsReady)
+        assertFalse(session.awaitingInput)
+        assertTrue(session.handle(Event.InputAvailable).isEmpty())
+        session.handle(Event.StartRequested)
+        assertEquals(listOf(Effect.Begin), session.handle(Event.InputAvailable))
+        assertEquals(listOf(Effect.Finish), session.handle(Event.Closed))
+    }
+
+    @Test
+    fun 準備中や権限待ちに停止するか画面を閉じたら遅れて準備が済んでも始めない() {
+        for (waitingForInput in listOf(false, true)) {
+            for (cancel in listOf(Event.StopRequested, Event.Closed)) {
+                val session = ConversationSession(startWhenReady = true)
+                if (waitingForInput) session.handle(Event.ModelsReady)
+                assertTrue(session.handle(cancel).isEmpty())
+                session.handle(Event.ModelsReady)
+                assertFalse(session.awaitingInput)
+                assertTrue(session.handle(Event.InputAvailable).isEmpty())
+                assertFalse(session.listening)
+            }
+        }
+    }
+
     /** 音声認識のカードの番号の採番と、話し中のカード。 */
     private var nextCard = 100L
     private var card = -1L
