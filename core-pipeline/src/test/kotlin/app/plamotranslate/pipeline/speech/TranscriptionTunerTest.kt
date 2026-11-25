@@ -124,6 +124,42 @@ class TranscriptionTunerTest {
         assertEquals(0, gpuEnds)
     }
 
+    @Test fun `各段を端末の上限に収め同じ候補を一度だけ試す`() {
+        val four = TranscriptionCandidate(false, 4, 4)
+        assertEquals(listOf(four), TranscriptionTuner.cpuCandidates(4))
+        assertEquals(listOf(four), TranscriptionTuner.cpuCandidates(4, threads = 8))
+        assertEquals(listOf(four, TranscriptionCandidate(false, 6, 6), TranscriptionCandidate(false, 6, 4)),
+            TranscriptionTuner.cpuCandidates(6))
+    }
+
+    @Test fun `ならしが首位の4倍を超えたCPUとGPUを閉じ首位を保存する`() = runTest {
+        cpus = TranscriptionTuner.cpuCandidates(8)
+        cpuTimes[cpus[1]] = 50L
+        cpuTimes[cpus[2]] = 201L
+        val choice = prepare(201)
+        assertEquals(listOf(4, 4, 1, 1), engines.map { it.trials })
+        assertTrue(engines.all { it.closed })
+        assertNull(fallback)
+        assertEquals(cpus[1], choice.candidate)
+        assertEquals(choice, choices.values.single())
+        assertEquals(choice, prepare(1))
+        assertEquals(1, engines.last().trials)
+    }
+
+    @Test fun `保存した首位が候補に残っていても一覧が変われば測り直す`() = runTest {
+        cpus = TranscriptionTuner.cpuCandidates(8)
+        val selected = prepare(1, preference = TranscriptionPreference.CPU)
+        cpus = TranscriptionTuner.cpuCandidates(4)
+        assertEquals(selected, prepare(1, preference = TranscriptionPreference.CPU))
+        assertEquals(4, engines.last().trials)
+        assertEquals(2, choices.size)
+    }
+
+    @Test fun `ならしが首位の4倍なら3回計測する`() = runTest {
+        prepare(400)
+        assertEquals(listOf(4, 4), engines.map { it.trials })
+    }
+
     @Test fun `GPU無効の自動選択で保存したCPU候補は自動とCPU指定で再利用できる`() = runTest {
         cpus = TranscriptionTuner.cpuCandidates(8)
         val fastest = cpus.last()
