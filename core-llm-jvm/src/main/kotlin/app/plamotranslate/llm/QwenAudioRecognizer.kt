@@ -17,6 +17,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -25,7 +26,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.resume
 import java.io.File
 
-class QwenAudioRecognizer private constructor(private val session: QwenAudioSession) : SpeechRecognizer {
+class QwenAudioRecognizer internal constructor(private val session: QwenAudioSession) : SpeechRecognizer {
     override val judgesFinalTranscript = true
     override val cpuThreads get() = session.cpuThreads
     override fun recognize(samples: FloatArray): Recognition = recognizeAs(samples, null)
@@ -33,6 +34,7 @@ class QwenAudioRecognizer private constructor(private val session: QwenAudioSess
     private val execution = Mutex()
     private val requests = mutableSetOf<Job>()
     private var closing = false
+    private var ownsModelSlot = false
 
     override fun recognizeAs(samples: FloatArray, language: String?): Recognition = runBlocking {
         transcribe(samples, language, RecognitionPriority.PARTIAL)
@@ -87,38 +89,69 @@ class QwenAudioRecognizer private constructor(private val session: QwenAudioSess
         active.forEach { it.cancel() }
         runBlocking { active.forEach { it.join() } }
         session.close()
+        if (ownsModelSlot) modelSlot.unlock()
     }
 
     companion object {
+        // 試走の開始から採用した認識器の解放まで保持する。貸出数に合わせて読み直す間も保持する。
+        private val modelSlot = Mutex()
+
+        internal suspend fun <T> loadExclusive(create: suspend () -> Pair<QwenAudioRecognizer, T>): Pair<QwenAudioRecognizer, T> {
+            modelSlot.lock()
+            var recognizer: QwenAudioRecognizer? = null
+            try {
+                currentCoroutineContext().ensureActive()
+                val prepared = create()
+                recognizer = prepared.first
+                recognizer.ownsModelSlot = true
+                currentCoroutineContext().ensureActive()
+                return prepared
+            } catch (error: Throwable) {
+                if (recognizer == null) modelSlot.unlock() else recognizer.close()
+                throw error
+            }
+        }
+
         /** 両 OS の試走とならし運転で同じ音声、候補、実装を使う。 */
         suspend fun prepare(
             models: File, nativeDir: String, variant: String, target: InferenceTarget,
             threads: Int, preference: TranscriptionPreference, environment: TranscriptionTuner.Environment,
             store: TranscriptionTuner.Store, beginGpu: () -> Boolean, endGpu: (String?) -> Unit,
-        ): Pair<QwenAudioRecognizer, TranscriptionChoice> {
+        ): Pair<QwenAudioRecognizer, TranscriptionChoice> = loadExclusive {
             val topology = ProcessCompute.availableTopology()
             val candidates = topology.candidates(threads).map { TranscriptionCandidate(false, it, it) }
-            return TranscriptionTuner.prepare(candidates, target.useGpu,
+            TranscriptionTuner.prepare(candidates, target.useGpu,
                 preference, environment.copy(cpu = "${environment.cpu}/${topology.key}"), ProcessCompute.trialBoard, SpeechTrialAudio.reference, store,
                 { action -> LlamaRuntime.process.prepare(true, action) }, beginGpu, endGpu, { candidate ->
-                    load(File(models, SharedModelCatalog.qwenWeights.path), File(models, SharedModelCatalog.qwenProjector.path),
+                    loadCandidate(File(models, SharedModelCatalog.qwenWeights.path), File(models, SharedModelCatalog.qwenProjector.path),
                         nativeDir, variant, target.copy(requestGpu = candidate.gpu),
                         if (threads > 0 && !candidate.gpu) threads else candidate.batch)
                 }, { it.trial(SpeechTrialAudio.samples) }, { Logs.i(it) }, models.resolve("thread-profiles"),
                 if (threads > 0) candidates.single().batch..candidates.single().batch else 1..topology.budget, { ProcessCompute.availableTopology().key == topology.key })
         }
 
-        suspend fun load(model: File, projector: File, nativeDir: String, cpuVariant: String, target: InferenceTarget, threads: Int? = null): QwenAudioRecognizer {
+        suspend fun load(model: File, projector: File, nativeDir: String, cpuVariant: String, target: InferenceTarget, threads: Int? = null): QwenAudioRecognizer =
+            loadExclusive { loadCandidate(model, projector, nativeDir, cpuVariant, target, threads) to Unit }.first
+
+        private suspend fun loadCandidate(model: File, projector: File, nativeDir: String, cpuVariant: String, target: InferenceTarget,
+            threads: Int?): QwenAudioRecognizer {
             val runtime = LlamaRuntime.process
             val requested = threads ?: ProcessCompute.availableTopology().budget
-            return ProcessCompute.borrow(target.useGpu, requested) { count, _ ->
-                val gpu = runtime.initialize(nativeDir, cpuVariant, target)
-                check(!target.useGpu || gpu) { "GPU を使用できません。CPU 専用で起動した場合は再起動が必要です" }
-                fun loadHandle(n: Int) = runtime.native { LlamaNative.nativeLoadAudio(model.absolutePath, projector.absolutePath, gpu, n, n, n) }
-                val session = QwenAudioSession(ProcessCompute, gpu, requested, count, loadHandle(count), ::loadHandle) { handle ->
-                    runtime.native { LlamaNative.nativeFreeAudio(handle) }
+            var loaded: QwenAudioRecognizer? = null
+            try {
+                return ProcessCompute.borrow(target.useGpu, requested) { count, _ ->
+                    val gpu = runtime.initialize(nativeDir, cpuVariant, target)
+                    check(!target.useGpu || gpu) { "GPU を使用できません。CPU 専用で起動した場合は再起動が必要です" }
+                    fun loadHandle(n: Int) = runtime.native { LlamaNative.nativeLoadAudio(model.absolutePath, projector.absolutePath, gpu, n, n, n) }
+                    val session = QwenAudioSession(ProcessCompute, gpu, requested, count, loadHandle(count), ::loadHandle) { handle ->
+                        runtime.native { LlamaNative.nativeFreeAudio(handle) }
+                    }
+                    QwenAudioRecognizer(session).also { loaded = it }
                 }
-                QwenAudioRecognizer(session)
+            } catch (error: Throwable) {
+                // 貸出から戻るときに取り消された場合も、作成済みの認識器を解放する。
+                loaded?.close()
+                throw error
             }
         }
     }

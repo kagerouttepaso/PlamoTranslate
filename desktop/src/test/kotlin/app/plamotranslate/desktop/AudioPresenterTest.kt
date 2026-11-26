@@ -2,8 +2,10 @@ package app.plamotranslate.desktop
 
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.TranslationRequest
+import app.plamotranslate.pipeline.conversation.SwapState
 import app.plamotranslate.pipeline.speech.Recognition
 import app.plamotranslate.pipeline.speech.RecognitionLoad
+import app.plamotranslate.pipeline.speech.RetranscribeFailure
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechEvent
 import app.plamotranslate.pipeline.speech.SpeechLanguages
@@ -14,10 +16,8 @@ import app.plamotranslate.pipeline.translation.JobSource
 import app.plamotranslate.pipeline.translation.ModelOrigin
 import app.plamotranslate.pipeline.translation.TranslationStream
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -25,20 +25,31 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.file.Files
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AudioPresenterTest {
     @Test
-    fun `会話を開き直すと認識器を再利用し実行先を変えたときだけ再準備する`() = runTest {
-        var loads = 0
-        val presenter = AudioPresenter(backgroundScope, FakeCapture(), { loads++; FakeSpeech() }, FakeTranslationEngine()::open,
+    fun `停止中に画面を離れると認識器を閉じ 開き直すと準備する`() = runTest {
+        val engines = mutableListOf<FakeSpeech>()
+        val presenter = AudioPresenter(backgroundScope, FakeCapture(), { FakeSpeech().also(engines::add) }, FakeTranslationEngine()::open,
             io = StandardTestDispatcher(testScheduler))
+        presenter.setVisible(true)
         presenter.prepare()
         presenter.prepare()
-        assertEquals(1, loads)
+        runCurrent()
+        val first = engines.single()
+        presenter.setVisible(false)
+        assertTrue(first.closed)
+        presenter.setVisible(true)
+        presenter.prepare()
+        runCurrent()
+        assertEquals(2, engines.size)
         presenter.resetRecognitionBackend()
+        assertTrue(engines[1].closed)
         presenter.prepare()
-        assertEquals(2, loads)
+        runCurrent()
+        assertEquals(3, engines.size)
         presenter.close()
     }
     @Test
@@ -47,12 +58,109 @@ class AudioPresenterTest {
         val capture = FakeCapture()
         val presenter = AudioPresenter(backgroundScope, capture, { loads++; FakeSpeech() }, FakeTranslationEngine()::open,
             io = StandardTestDispatcher(testScheduler))
-        launch(start = CoroutineStart.UNDISPATCHED) { presenter.prepare() }
+        presenter.setVisible(true)
+        presenter.prepare()
         presenter.start()
         runCurrent()
         assertEquals(1, loads)
         assertEquals(AudioPhase.LISTENING, presenter.state.value.phase)
         presenter.close()
+    }
+
+    @Test
+    fun `開始後は画面を離れてもQwenの準備と聞き取りを続け 停止すると解放する`() = runTest {
+        val speech = FakeSpeech(detected = "en")
+        val presenter = AudioPresenter(
+            backgroundScope, FakeCapture(), { speech }, FakeTranslationEngine()::open,
+            initialSelection = AudioSelection(recognition = DesktopRecognitionSettings(model = SpeechModel.QWEN3_ASR)),
+            io = StandardTestDispatcher(testScheduler),
+        )
+        presenter.setVisible(true)
+        presenter.prepare()
+        presenter.start()
+        presenter.setVisible(false)
+        assertTrue(presenter.isUsingQwen())
+        runCurrent()
+        assertEquals(AudioPhase.LISTENING, presenter.state.value.phase)
+        assertFalse(speech.closed)
+        presenter.stop()
+        runCurrent()
+        assertTrue(speech.closed)
+        assertFalse(presenter.isUsingQwen())
+        assertEquals(1, presenter.state.value.turns.size)
+        presenter.close()
+    }
+
+    @Test
+    fun `停止中に画面を離れると不要になった準備を取り消す`() = runTest {
+        var cancelled = false
+        val presenter = AudioPresenter(
+            backgroundScope, FakeCapture(), {
+                try {
+                    awaitCancellation()
+                } finally {
+                    cancelled = true
+                }
+            }, FakeTranslationEngine()::open, io = StandardTestDispatcher(testScheduler),
+        )
+        presenter.setVisible(true)
+        presenter.prepare()
+        runCurrent()
+        presenter.setVisible(false)
+        runCurrent()
+        assertTrue(cancelled)
+        presenter.close()
+    }
+
+    @Test
+    fun `認識器を閉じると書き起こし直しが取り消され 会話ログは保存とコピーができる`() = runTest {
+        val engines = mutableListOf<FakeSpeech>()
+        val log = Files.createTempFile("conversation-test-", ".md")
+        var copied = ""
+        val presenter = AudioPresenter(
+            backgroundScope, FakeCapture(), { FakeSpeech(detected = "en").also(engines::add) }, FakeTranslationEngine()::open,
+            io = StandardTestDispatcher(testScheduler), chooseLog = { log }, copyText = { copied = it },
+        )
+        try {
+            presenter.setVisible(true)
+            presenter.start()
+            runCurrent()
+            presenter.stop()
+            runCurrent()
+            val original = presenter.state.value.turns.single()
+            presenter.swapLanguage(original.id)
+            assertEquals(SwapState.REWRITING, presenter.state.value.turns.single().swap)
+            presenter.setVisible(false)
+            assertTrue(engines.single().closed)
+
+            presenter.setVisible(true)
+            presenter.prepare()
+            runCurrent()
+            val restored = presenter.state.value.turns.single()
+            assertEquals(original.copy(retained = false, swap = SwapState.EXPIRED), restored)
+            presenter.swapLanguage(restored.id)
+            assertEquals(SwapState.EXPIRED, presenter.state.value.turns.single().swap)
+            presenter.copyLog()
+            presenter.exportLog()
+            runCurrent()
+            assertTrue(copied.contains(original.original))
+            assertTrue(copied.contains(original.translation))
+            assertEquals(copied, Files.readString(log))
+
+            presenter.start()
+            runCurrent()
+            presenter.stop()
+            runCurrent()
+            val next = presenter.state.value.turns.last()
+            assertEquals(original.utteranceId, next.utteranceId)
+            presenter.swapLanguage(next.id)
+            engines.last().events.tryEmit(SpeechEvent.RetranscribeFailed(checkNotNull(next.utteranceId), RetranscribeFailure.NOTHING_HEARD))
+            runCurrent()
+            assertEquals(listOf(restored, next), presenter.state.value.turns)
+        } finally {
+            presenter.close()
+            Files.deleteIfExists(log)
+        }
     }
 
     @Test
@@ -62,11 +170,14 @@ class AudioPresenterTest {
         val presenter = AudioPresenter(backgroundScope, FakeCapture(), { loads++; FakeSpeech() }, FakeTranslationEngine()::open,
             initialSelection = AudioSelection(recognition = DesktopRecognitionSettings(model = SpeechModel.QWEN3_ASR)),
             supportsAutomatic = { available }, io = StandardTestDispatcher(testScheduler))
+        presenter.setVisible(true)
         presenter.prepare()
+        runCurrent()
         assertEquals(0, loads)
         available = true
         presenter.usePreparedRecognition(SpeechModel.QWEN3_ASR)
         presenter.prepare()
+        runCurrent()
         assertEquals(1, loads)
         presenter.close()
     }
@@ -189,6 +300,8 @@ class AudioPresenterTest {
         override val events = kotlinx.coroutines.flow.MutableSharedFlow<SpeechEvent>(extraBufferCapacity = Int.MAX_VALUE)
         override val load = kotlinx.coroutines.flow.MutableStateFlow(RecognitionLoad())
         private var card = 0L
+        var closed = false
+            private set
 
         private fun recognize(final: Boolean): Recognition =
             Recognition(if (final) "A complete sentence." else "A partial sentence.", detected)
@@ -211,7 +324,7 @@ class AudioPresenterTest {
 
         override fun reset() { card++ }
         override fun retranscribe(utterance: Long, language: Language) = Unit
-        override fun close() = Unit
+        override fun close() { closed = true }
     }
 
     private class FakeTranslationEngine : JobEngine {

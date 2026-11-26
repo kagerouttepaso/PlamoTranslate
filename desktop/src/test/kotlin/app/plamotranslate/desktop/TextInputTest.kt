@@ -5,6 +5,7 @@ import app.plamotranslate.pipeline.speech.RecognitionLoad
 import app.plamotranslate.pipeline.speech.SpeechEngine
 import app.plamotranslate.pipeline.speech.SpeechEvent
 import app.plamotranslate.pipeline.speech.SpeechLanguages
+import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.pipeline.speech.Utterance
 import app.plamotranslate.pipeline.translation.JobEngine
 import app.plamotranslate.pipeline.translation.JobSource
@@ -64,7 +65,30 @@ class TextInputTest {
         assertEquals("訳：Hello world", presenter.state.value.output)
     }
 
-    private fun TestScope.presenter(clipboard: MutableList<String>, targets: MutableList<Language>): TextPresenter {
+    @Test
+    fun `音声翻訳がQwenを使用中は音声入力に案内を出し SenseVoiceなら開始する`() = runTest {
+        var model = SpeechModel.QWEN3_ASR
+        val presenter = presenter(mutableListOf(), mutableListOf(), recognition = { DesktopRecognitionSettings(model = model) },
+            qwenInUse = { true })
+        presenter.startVoice()
+        assertEquals(TextVoicePhase.IDLE, presenter.state.value.voice)
+        assertEquals("音声翻訳を止めてから、音声入力を使ってください。", presenter.state.value.error)
+
+        model = SpeechModel.SENSE_VOICE
+        presenter.startVoice()
+        runCurrent()
+        assertEquals(TextVoicePhase.LISTENING, presenter.state.value.voice)
+        assertEquals(null, presenter.state.value.error)
+        presenter.stopVoice()
+        runCurrent()
+    }
+
+    private fun TestScope.presenter(
+        clipboard: MutableList<String>,
+        targets: MutableList<Language>,
+        recognition: () -> DesktopRecognitionSettings = { DesktopRecognitionSettings() },
+        qwenInUse: () -> Boolean = { false },
+    ): TextPresenter {
         val audio = AudioCapture { _, started, accept ->
             started()
             accept(floatArrayOf(0.5f))
@@ -73,7 +97,7 @@ class TextInputTest {
         return TextPresenter(backgroundScope, MutableStateFlow(ModelState.Ready(Path.of("fake"), 1, 1, false, 0)),
             { scope, options -> TranslationStream(scope, { TranslationStream.Backend(FakeTranslation, ModelOrigin("fake", 0)) }, options) },
             { "Hello" }, { clipboard.add(it) }, DesktopTextVoice(audio, { _, _ -> FakeSpeech() }, StandardTestDispatcher(testScheduler)),
-            { DesktopRecognitionSettings() }, { targets.add(it) })
+            recognition, { targets.add(it) }, qwenInUse)
     }
 
     private object FakeTranslation : JobEngine {

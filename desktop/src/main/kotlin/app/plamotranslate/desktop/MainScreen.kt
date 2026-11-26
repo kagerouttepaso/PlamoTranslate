@@ -73,6 +73,10 @@ private fun DesktopPages(components: DesktopComponents, settings: SettingsState)
                         val audio by components.audio.state.collectAsState()
                         val recognition = audio.selection.recognition.model
                         if (settings.hasRecognition(recognition)) {
+                            DisposableEffect(components.audio) {
+                                components.audio.setVisible(true)
+                                onDispose { components.audio.setVisible(false) }
+                            }
                             AudioScreen(audio, components.audio.level, settings.modelStatus, components.audio) {
                                 components.navigation.select(Page.SETTINGS)
                             }

@@ -2,6 +2,7 @@ package app.plamotranslate.desktop
 
 import app.plamotranslate.llm.Language
 import app.plamotranslate.log.Logs
+import app.plamotranslate.pipeline.speech.SpeechModel
 import app.plamotranslate.pipeline.translation.ModelState
 import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
@@ -47,6 +48,7 @@ internal class TextPresenter(
     private val voiceInput: DesktopTextVoice,
     private val recognition: () -> DesktopRecognitionSettings,
     private val saveTarget: (Language) -> Unit,
+    private val qwenInUse: () -> Boolean = { false },
 ) {
     private val mutableState = MutableStateFlow(TranslationState(model = model.value))
     val state = mutableState.asStateFlow()
@@ -149,13 +151,18 @@ internal class TextPresenter(
     fun startVoice() {
         val current = state.value
         if (voice?.isActive == true || current.translating) return
+        val settings = recognition()
+        if (settings.model == SpeechModel.QWEN3_ASR && qwenInUse()) {
+            mutableState.update { it.copy(error = "音声翻訳を止めてから、音声入力を使ってください。") }
+            return
+        }
         val finished = CompletableDeferred<Unit>()
         finishVoice = finished
         mutableState.update { it.copy(voice = TextVoicePhase.LOADING, output = "", error = null) }
         voice = scope.launch {
             var final = false
             try {
-                voiceInput.listen(recognition(), current.source, finished).collect { update ->
+                voiceInput.listen(settings, current.source, finished).collect { update ->
                     when (update) {
                         TextVoiceUpdate.Listening -> mutableState.update { it.copy(voice = TextVoicePhase.LISTENING) }
                         is TextVoiceUpdate.Partial -> mutableState.update { it.copy(input = appendSpeech(current.input, update.text)) }

@@ -110,12 +110,20 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
     val copy: (String) -> Unit = { value ->
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(value), null)
     }
+    val audio = AudioPresenter(
+        scope, WindowsAudio, asr::load, translations::open,
+        initialSelection = audioPreferences.loadSelection(), saveSelection = audioPreferences::saveSelection,
+        supportsAutomatic = asr::supportsAutomatic,
+        chooseLog = { filename -> chooseConversationLog(filename, owner()) },
+        copyText = copy,
+    )
     val text = TextPresenter(scope, models.state, translations::open,
         paste = {
             val clipboard = Toolkit.getDefaultToolkit().systemClipboard
             if (clipboard.isDataFlavorAvailable(DataFlavor.stringFlavor)) clipboard.getData(DataFlavor.stringFlavor) as? String else null
         }, copy = copy, voiceInput = DesktopTextVoice(WindowsAudio, asr::load),
-        recognition = { audioPreferences.loadSelection().recognition }, saveTarget = settings::selectTranslationTarget)
+        recognition = { audioPreferences.loadSelection().recognition }, saveTarget = settings::selectTranslationTarget,
+        qwenInUse = audio::isUsingQwen)
     val pdf = PdfPresenter(
         scope, DesktopPdfReader(scope), { childScope, options -> translations.open(childScope, options, pdfCache) },
         chooseFile = {
@@ -138,13 +146,6 @@ private fun assemble(scope: CoroutineScope, owner: () -> java.awt.Window?): Desk
             pdf.selectTarget(target)
         }
     }
-    val audio = AudioPresenter(
-        scope, WindowsAudio, asr::load, translations::open,
-        initialSelection = audioPreferences.loadSelection(), saveSelection = audioPreferences::saveSelection,
-        supportsAutomatic = asr::supportsAutomatic,
-        chooseLog = { filename -> chooseConversationLog(filename, owner()) },
-        copyText = copy,
-    )
     return DesktopComponents(
         NavigationPresenter(),
         text,

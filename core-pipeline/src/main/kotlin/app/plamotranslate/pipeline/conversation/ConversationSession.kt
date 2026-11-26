@@ -138,6 +138,9 @@ class ConversationSession(
         /** 画面を閉じた。聞いていれば、確定を待たずに聞き終える（音声認識も一緒に閉じる）。 */
         data object Closed : Event
 
+        /** 認識器を閉じ、書き起こし直しに使う音声を手放した。 */
+        data object RecognitionReleased : Event
+
         /**
          * 音声認識の混み具合（[RecognitionLoad.urgent]：確定に要る書き起こしが残っている）。残っている間は途中訳を始めない。
          * 翻訳と音声認識が CPU を取り合うと、確定の書き起こしが遅れるため（docs/設計/会話翻訳.md「認識の段と CPU の割り当て」）。
@@ -307,6 +310,10 @@ class ConversationSession(
                 if (listening) finish(effects)
                 phase = Phase.CLOSED
             }
+            Event.RecognitionReleased -> {
+                turns = turns.map { if (it.retained) it.copy(retained = false) else it }
+                turns.forEach(::restoreBeforeSwap)
+            }
             Event.StopRequested -> when (phase) {
                 Phase.WAITING_FOR_MODELS, Phase.WAITING_FOR_INPUT -> phase = Phase.IDLE
                 Phase.LISTENING -> {
@@ -469,7 +476,12 @@ class ConversationSession(
      * 相手の言語を選び直していれば、前の訳は使わず訳し直す。その間に訳が止まっていても訳し直す）。
      */
     private fun onRetranscribeFailed(id: Long) {
-        val turn = turns.firstOrNull { it.utteranceId == id } ?: return
+        // 認識器を作り直すと同じ発話番号が使われる。書き起こし直しを待っている発話だけを戻す。
+        val turn = turns.firstOrNull { it.utteranceId == id && it.swappedFrom != null } ?: return
+        restoreBeforeSwap(turn)
+    }
+
+    private fun restoreBeforeSwap(turn: Turn) {
         val before = turn.swappedFrom ?: return
         val target = if (before.direction.mine) router.partner else router.self
         val retargeted = before.direction.target != target

@@ -56,9 +56,15 @@ object TranscriptionTuner {
         fun isCpu(candidate: TranscriptionCandidate) = candidate.batch in range && candidate == cpu(candidate.batch)
         val cpuReason = "CPU の試走結果を採用"
         var selectedEngine: T? = null
+        var selectedCandidate: TranscriptionCandidate? = null
 
+        // 認識器は同時に1つまで持つ。候補を読み込む前に、保持している認識器を閉じる（モデル2つ分を同時に持つと、
+        // 翻訳を CPU で動かす端末ではメモリが尽き、OS がプロセスを止める）。
         suspend fun <R> evaluate(candidate: TranscriptionCandidate, checkEngine: suspend (T) -> R): Pair<T, R> {
             currentCoroutineContext().ensureActive()
+            selectedEngine?.close()
+            selectedEngine = null
+            selectedCandidate = null
             val engine = load(candidate)
             try {
                 val choice = checkEngine(engine)
@@ -89,9 +95,14 @@ object TranscriptionTuner {
         fun select(prepared: Pair<T, TranscriptionChoice>): TranscriptionChoice {
             val previous = selectedEngine
             selectedEngine = prepared.first
+            selectedCandidate = prepared.second.candidate
             previous?.close()
             return prepared.second
         }
+
+        /** [choice] の認識器を持っていなければ（比べる間に閉じていれば）、読み込み直す。 */
+        suspend fun keep(choice: TranscriptionChoice): TranscriptionChoice =
+            if (selectedEngine != null && selectedCandidate == choice.candidate) choice else select(ready(choice.candidate, choice))
 
         suspend fun fastestCpu(reason: String = cpuReason, compareGpu: Boolean = false): TranscriptionChoice {
             if (range.first == range.last) {
@@ -105,7 +116,6 @@ object TranscriptionTuner {
                 return select(engine to choice.copy(reason = reason))
             }
             var current: T? = null
-            var retained: TranscriptionCandidate? = null
             val benchmark = ThreadBenchmark(ThreadBenchmark.Purpose.Transcription, "Qwen3-ASR", key, directory) {
                 val sample = trial(checkNotNull(current))
                 check(reference.matches(sample.result)) { "試走の本文または言語が正解と一致しません" }
@@ -119,20 +129,14 @@ object TranscriptionTuner {
                 }
                 current = null
                 if (median != null && measurements.preferred() == count) {
-                    retained = candidate
                     select(engine to TranscriptionChoice(candidate, median, reason))
                 } else engine.close()
             }
             trials = ThreadTrials.decode(curve.encode())
             val count = curve.preferred()
-            val candidate = cpu(count)
-            val choice = TranscriptionChoice(candidate, curve.median(count), reason)
-            if (retained != candidate) {
-                selectedEngine?.close()
-                selectedEngine = null
-                select(ready(candidate, choice))
-            }
-            return choice
+            val choice = TranscriptionChoice(cpu(count), curve.median(count), reason)
+            // GPU と比べるときは、比べ終えてから採用した方を読み込む（ここで読み込んでも GPU を読み込む前に閉じる）
+            return if (compareGpu) choice else keep(choice)
         }
 
         suspend fun save(choice: TranscriptionChoice) = choice.also { if (valid()) store.write(key, it) }
@@ -176,10 +180,10 @@ object TranscriptionTuner {
             }
             val cpu = fastestCpu(compareGpu = true)
             val fastestCpuTime = trials.fastestMedian
-            val (engine, choice) = tryGpu { measure(gpu, "GPU の試走結果を採用") } ?: return cpu
+            val (engine, choice) = tryGpu { measure(gpu, "GPU の試走結果を採用") } ?: return keep(cpu)
             if (choice != null && choice.medianNanos <= fastestCpuTime * GPU_RATIO) return save(select(engine to choice))
             engine.close()
-            return save(cpu.copy(reason = "GPU は CPU より十分には速くありません"))
+            return save(keep(cpu.copy(reason = "GPU は CPU より十分には速くありません")))
         }
 
         try {

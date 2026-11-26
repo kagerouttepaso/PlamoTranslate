@@ -28,7 +28,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -140,6 +139,7 @@ internal class AudioPresenter(
     private var engine: SpeechEngine? = null
     private val loading = Mutex()
     private var preparing: Job? = null
+    private var visible = false
     private var closed = false
     private var active: CaptureRun? = null
     private var partialJob: Pair<Long, Job>? = null
@@ -187,6 +187,13 @@ internal class AudioPresenter(
         if (selection.source == AudioSource.MICROPHONE && engine != null) handle(session, Event.LanguageSwapped(turnId))
     }
 
+    fun setVisible(visible: Boolean) {
+        this.visible = visible
+        releaseIfHidden()
+    }
+
+    fun isUsingQwen(): Boolean = active?.selection?.recognition?.model == SpeechModel.QWEN3_ASR
+
     /**
      * マイクの自分・相手の言語の選び直し。会話中でも中核に知らせるだけで、認識器もセッションも作り直さない。
      * 中核が次の発話から新しい言語で振り分け、相手を選び直したときは自分の発話を訳し直す（docs/設計/会話翻訳.md）。
@@ -208,10 +215,7 @@ internal class AudioPresenter(
     /** 音の出どころ・認識の設定・再生音の言語。止めているときだけ変え、認識器とセッションを作り直す。 */
     private fun configure(updated: AudioSelection, reload: Boolean = false) {
         if (!state.value.canConfigure || closed || (!reload && updated == selection)) return
-        preparing?.cancel()
-        subscription?.cancel()
-        engine?.close()
-        engine = null
+        releaseEngine()
         session = updated.session()
         partialJob = null
         translations.coroutineContext.cancelChildren()
@@ -276,17 +280,38 @@ internal class AudioPresenter(
         if (state.value.canExport) action(session.turns)
     }
 
-    /** Android の会話画面と同じく、画面を開いた時点で準備する。入力開始時も同じ読み込みを待つ。 */
-    suspend fun prepare() {
-        if (!state.value.canStart || closed) return
+    /** 画面の表示中に準備を始める。入力開始後は画面を離れても同じ読み込みを続ける。 */
+    fun prepare() {
+        if (!visible || !state.value.canStart || closed || engine != null || preparing?.isActive == true) return
         val current = session
-        try {
-            obtainEngine()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            if (!closed && current === session) mutableState.value = state.value.copy(error = error.message ?: "音声認識を準備できません。")
+        preparing = scope.launch {
+            try {
+                obtainEngine()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (visible && !closed && current === session) {
+                    mutableState.value = state.value.copy(error = error.message ?: "音声認識を準備できません。")
+                }
+            }
         }
+    }
+
+    private fun releaseIfHidden() {
+        if (closed || visible || active != null) return
+        val hadEngine = engine != null
+        releaseEngine()
+        if (hadEngine) handle(session, Event.RecognitionReleased)
+    }
+
+    private fun releaseEngine() {
+        preparing?.cancel()
+        preparing = null
+        subscription?.cancel()
+        subscription = null
+        val previous = engine
+        engine = null
+        previous?.close()
     }
 
     private suspend fun obtainEngine(): SpeechEngine = loading.withLock {
@@ -295,10 +320,7 @@ internal class AudioPresenter(
         val requested = selection
         var loaded: SpeechEngine? = null
         try {
-            val asr = coroutineScope {
-                preparing = currentCoroutineContext()[Job]
-                withContext(io) { loadEngine(requested).also { loaded = it } }
-            }
+            val asr = withContext(io) { loadEngine(requested).also { loaded = it } }
             if (closed || current !== session) throw CancellationException("認識の設定が変わりました")
             engine = asr
             subscription = scope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -322,7 +344,6 @@ internal class AudioPresenter(
         } finally {
             // JNI の読み込み中に画面を離れた場合も、作成済みの認識器を解放する。
             loaded?.takeUnless { it === engine }?.close()
-            preparing = null
         }
     }
 
@@ -385,6 +406,7 @@ internal class AudioPresenter(
                 active = null
                 mutableLevel.value = 0f
                 mutableState.value = state.value.copy(phase = AudioPhase.IDLE, lagSeconds = 0f)
+                releaseIfHidden()
             }
             is Effect.TranslateFinal -> translations.launch { translateFinal(current, effect) }
             is Effect.TranslatePartial -> translatePartial(current, effect)
@@ -468,12 +490,10 @@ internal class AudioPresenter(
     override fun close() {
         if (closed) return
         closed = true
-        preparing?.cancel()
         active?.input?.cancel()
         active = null
         translations.cancel()
-        subscription?.cancel()
-        engine?.close()
+        releaseEngine()
     }
 }
 
