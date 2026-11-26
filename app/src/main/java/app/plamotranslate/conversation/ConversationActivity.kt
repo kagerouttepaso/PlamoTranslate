@@ -68,6 +68,7 @@ class ConversationActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContent {
             AppTheme {
+                app.plamotranslate.ThreadTrialDialog()
                 val state by vm.state.collectAsStateWithLifecycle()
                 val model by vm.model.collectAsStateWithLifecycle()
                 ConversationScreen(

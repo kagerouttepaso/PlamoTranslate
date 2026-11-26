@@ -59,7 +59,10 @@ class TextTranslateActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { AppTheme { TextTranslateScreen(onBack = ::finish) } }
+        setContent { AppTheme {
+            ThreadTrialDialog()
+            TextTranslateScreen(onBack = ::finish)
+        } }
         // 読み上げの失敗は画面にいる間だけ出す。画面を離れたら読み上げのモデルを手放す
         ReadAloud.attach(this)
     }

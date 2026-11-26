@@ -1,5 +1,6 @@
 package app.plamotranslate.pipeline.compute
 
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -73,6 +74,27 @@ class ThreadTrialsTest {
             curve.measure(n, { iterator.next() }) {}
         }
         assertEquals(4, curve.preferred())
+    }
+
+    @Test fun 計測中と中央値と打ち切りと選択を通知して終了時に解除する() = runTest {
+        val observed = mutableListOf<ThreadTrialProgress?>()
+        val collector = launch(kotlinx.coroutines.test.UnconfinedTestDispatcher(testScheduler)) {
+            ActiveThreadTrials.progress.collect { observed += it }
+        }
+        try {
+            ThreadBenchmark("部品", "1", null) { n -> n * 100L }
+                .select("CPU", listOf(1, 2), { true }) { curve, n -> curve.measure(n, { n * 100L }) {} }
+            val measured = ThreadTrialRow.Measured(100)
+            assertEquals(listOf(null,
+                listOf(ThreadTrialRow.Measuring, ThreadTrialRow.Pending),
+                listOf(measured, ThreadTrialRow.Pending),
+                listOf(measured, ThreadTrialRow.Measuring),
+                listOf(measured, ThreadTrialRow.CutOff),
+                listOf(measured, ThreadTrialRow.CutOff), null), observed.map { it?.rows })
+            assertEquals(1, observed[observed.lastIndex - 1]?.selected)
+        } finally {
+            collector.cancel()
+        }
     }
 
     @Test fun 同じ部品と版とCPUの組でだけ保存した関係を使う() = runTest {

@@ -36,6 +36,8 @@ class ThreadTrials {
 
     val fastestMedian get() = fastest?.get(1) ?: Long.MAX_VALUE
 
+    internal fun measuredMedian(count: Int) = samples[count]?.get(1)
+
     fun median(count: Int) = samples.getValue(count)[1]
 
     private fun withinDeviation(times: List<Long>): Boolean {
@@ -97,8 +99,28 @@ class ThreadBenchmark(val component: String, val version: String, private val di
                 return@withLock cached
             }
             val trials = ThreadTrials()
-            trials.search(candidates, range) { measure(trials, it) }
-            trials.preferred()
+            val id = Any()
+            val rows = MutableList<ThreadTrialRow>(range.last) { ThreadTrialRow.Pending }
+            fun publish(selected: Int? = null): ThreadTrialProgress {
+                val state = ThreadTrialProgress(component, range.last, rows.toList(), selected)
+                ActiveThreadTrials.publish(id, state)
+                return state
+            }
+            try {
+                trials.search(candidates, range) { count ->
+                    rows[count - 1] = ThreadTrialRow.Measuring
+                    publish()
+                    measure(trials, count)
+                    rows[count - 1] = trials.measuredMedian(count)?.let { ThreadTrialRow.Measured(it) }
+                        ?: ThreadTrialRow.CutOff
+                    publish()
+                }
+                val selected = publish(trials.preferred())
+                // 画面で結果を読める時間を取る。CPU の貸出は各計測で既に返している。
+                if (ActiveThreadTrials.visible(selected)) kotlinx.coroutines.delay(700)
+            } finally {
+                ActiveThreadTrials.publish(id, null)
+            }
             if (valid() && file != null) {
                 cache[key] = trials
                 runCatching {
