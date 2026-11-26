@@ -45,13 +45,28 @@ class TranslationPreferences(context: Context) {
     /** Snapdragonの端末でもGPUを使わず、CPUだけで動かすか（CPUの速さを確かめるため）。 */
     val cpuOnly: Boolean get() = cpu.getBoolean("cpuOnly", false)
 
+    /** 使う GPU バックエンドの指定。既定は自動（Qualcomm は OpenCL、それ以外は CPU）。 */
+    var gpuBackend: GpuBackendChoice
+        get() = if (cpuOnly) GpuBackendChoice.CPU else GpuBackendChoice.fromKey(cpu.getString(KEY_GPU_BACKEND, null))
+        set(value) {
+            cpu.edit()
+                .putString(KEY_GPU_BACKEND, value.key)
+                .putBoolean("cpuOnly", value == GpuBackendChoice.CPU)
+                .apply()
+        }
+
+    /** GPU バックエンド比較ダイアログを初回自動表示した版（versionCode）。 */
+    var gpuProbeShownVersion: Long
+        get() = cpu.getLong(KEY_GPU_PROBE_SHOWN, 0L)
+        set(value) = cpu.edit().putLong(KEY_GPU_PROBE_SHOWN, value).apply()
+
     /**
      * CPUの詳細設定を保存する。効かせるには翻訳モデルを読み直す（[EngineHolder.reload]）。
      * CPUバックエンドの版（[CpuOptions.variant]）と「CPUだけ」は、バックエンドのライブラリを読み込むのがアプリの起動ごとに
      * 1回だけなので、アプリを起動し直すと効く。
      */
     fun saveCpu(options: CpuOptions, cpuOnly: Boolean) {
-        cpu.edit()
+        val editor = cpu.edit()
             .putInt("threads", options.threads)
             .putBoolean("boost", options.boost)
             .putBoolean("spinWait", options.spinWait)
@@ -59,10 +74,17 @@ class TranslationPreferences(context: Context) {
             .putBoolean("mmap", options.mmap)
             .putString("variant", options.variant)
             .putBoolean("cpuOnly", cpuOnly)
-            .apply()
+        if (cpuOnly) {
+            editor.putString(KEY_GPU_BACKEND, GpuBackendChoice.CPU.key)
+        } else if (GpuBackendChoice.fromKey(cpu.getString(KEY_GPU_BACKEND, null)) == GpuBackendChoice.CPU) {
+            editor.putString(KEY_GPU_BACKEND, GpuBackendChoice.AUTO.key)
+        }
+        editor.apply()
     }
 
     private companion object {
         const val KEY_MODEL = "model"
+        const val KEY_GPU_BACKEND = "gpuBackend"
+        const val KEY_GPU_PROBE_SHOWN = "gpuProbeShownVersion"
     }
 }

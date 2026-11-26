@@ -10,6 +10,8 @@ import app.plamotranslate.diagnostics.Diagnostics
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
+        // バックエンド比較の別プロセスでは、不具合の記録やテーマの初期化を行わない
+        if (android.app.Application.getProcessName().endsWith(":gpu_probe")) return
         Diagnostics.install(this)
         ThemePreferences.load(this)
     }

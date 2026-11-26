@@ -28,6 +28,7 @@ internal object LlamaNative {
 
     external fun nativeInitCpu(nativeLibDir: String, cpuVariant: String)
     external fun nativeRegisterGpu(nativeLibDir: String): Boolean
+    external fun nativeGpuDeviceName(): String
 
     /** 読み込んだCPUバックエンドのファイル名（libggml-cpu-*.so）。GPUの端末で自動選択したときは空。 */
     external fun nativeCpuBackend(): String

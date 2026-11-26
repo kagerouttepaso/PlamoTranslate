@@ -21,6 +21,13 @@ android {
                 arguments += "-DCMAKE_BUILD_TYPE=Release"
                 // llama.cppを複数の共有ライブラリに分けたので、C++の標準ライブラリも共有にする（ライブラリ間で1つにそろえる）
                 arguments += "-DANDROID_STL=c++_shared"
+                val vulkanSdk = System.getenv("VULKAN_SDK")?.takeIf { it.isNotBlank() }?.replace('\\', '/')
+                if (vulkanSdk != null) {
+                    val glslc = if (System.getProperty("os.name").lowercase().contains("win")) "$vulkanSdk/Bin/glslc.exe" else "$vulkanSdk/bin/glslc"
+                    arguments += "-DVulkan_INCLUDE_DIR=$vulkanSdk/Include"
+                    arguments += "-DVulkan_GLSLC_EXECUTABLE=$glslc"
+                    arguments += "-DSPIRV-Headers_DIR=$vulkanSdk/Lib/cmake/SPIRV-Headers"
+                }
             }
         }
     }
@@ -28,6 +35,8 @@ android {
         cmake {
             path("src/main/cpp/CMakeLists.txt")
             version = "3.31.6"
+            // Windows の worktree など長いパスでは vulkan-shaders-gen が MAX_PATH に当たるため短い作業先を使う
+            buildStagingDirectory = file("${System.getProperty("java.io.tmpdir")}/plamo-cxx")
         }
     }
     compileOptions {

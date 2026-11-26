@@ -214,13 +214,13 @@ void log_callback(ggml_log_level level, const char *text, void *) {
     } else if (level == GGML_LOG_LEVEL_WARN) {
         emit_log(LOG_PRIORITY_WARN, text);
     } else if (level == GGML_LOG_LEVEL_INFO &&
-               (strstr(text, "ggml_opencl: OpenCL device:") || strstr(text, "ggml_opencl: OpenCL driver:"))) {
+               (strstr(text, "ggml_opencl: OpenCL device:") || strstr(text, "ggml_opencl: OpenCL driver:") ||
+                strstr(text, "ggml_vulkan: Found") || strstr(text, "ggml_vulkan: 0 =") ||
+                strstr(text, "using device Vulkan"))) {
         // 端末による失敗の切り分けに必要な識別情報だけを、既存のログ経路へ渡す。
         emit_log(LOG_PRIORITY_INFO, text);
 #if defined(_WIN32)
     } else if (level == GGML_LOG_LEVEL_INFO && strstr(text, "loaded CPU backend from ")) {
-        emit_log(LOG_PRIORITY_INFO, text);
-    } else if (level == GGML_LOG_LEVEL_INFO && strstr(text, "using device Vulkan")) {
         emit_log(LOG_PRIORITY_INFO, text);
 #endif
     }
@@ -434,11 +434,21 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_app_plamotranslate_llm_LlamaNative_nativeRegisterGpu(JNIEnv *env, jobject, jstring jlib_dir) {
     const std::string lib_dir = to_std_string(env, jlib_dir);
 #if defined(__ANDROID__)
-    ggml_backend_load((lib_dir + "/libggml-opencl.so").c_str());
+    const char *backend = std::getenv("PLAMO_GPU_BACKEND");
+    const bool use_vulkan = backend && std::strcmp(backend, "vulkan") == 0;
+    const std::string so = lib_dir + (use_vulkan ? "/libggml-vulkan.so" : "/libggml-opencl.so");
+    ggml_backend_load(so.c_str());
 #elif defined(_WIN32)
     ggml_backend_load((std::filesystem::u8path(lib_dir) / "ggml-vulkan.dll").u8string().c_str());
 #endif
     return gpu_device() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_app_plamotranslate_llm_LlamaNative_nativeGpuDeviceName(JNIEnv *env, jobject) {
+    auto dev = gpu_device();
+    const char *desc = dev ? ggml_backend_dev_description(dev) : "";
+    return env->NewStringUTF(desc ? desc : "");
 }
 
 extern "C" JNIEXPORT jlong JNICALL

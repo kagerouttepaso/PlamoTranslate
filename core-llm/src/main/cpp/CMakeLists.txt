@@ -56,6 +56,9 @@ set(GGML_OPENMP           OFF CACHE BOOL "" FORCE)
 set(GGML_LLAMAFILE        OFF CACHE BOOL "" FORCE)
 set(GGML_CPU_KLEIDIAI     ON  CACHE BOOL "" FORCE)
 set(GGML_OPENCL           ON  CACHE BOOL "" FORCE)
+if(Vulkan_GLSLC_EXECUTABLE)
+    set(GGML_VULKAN       ON  CACHE BOOL "" FORCE)
+endif()
 
 add_subdirectory(${THIRD_PARTY}/llama.cpp build-llama)
 

@@ -109,8 +109,24 @@ class MainActivity : ComponentActivity() {
                 val active = items.any { it.status is DownloadStatus.Waiting || it.status is DownloadStatus.Running }
                 LaunchedEffect(ready, active) { if (ready && !active) setup = false }
                 if (ready && !setup) {
+                    val prefs = remember { TranslationPreferences(applicationContext) }
+                    val versionCode = remember {
+                        runCatching { packageManager.getPackageInfo(packageName, 0).longVersionCode }.getOrDefault(0L)
+                    }
+                    var showGpuProbe by rememberSaveable {
+                        mutableStateOf(versionCode > 0L && prefs.gpuProbeShownVersion < versionCode)
+                    }
                     LaunchedEffect(Unit) { EngineHolder.ensureLoaded(applicationContext) }
                     HomeScreen(onToggleScreenTranslate = ::toggleScreenTranslate)
+                    if (showGpuProbe) {
+                        GpuProbeDialog(
+                            initialPrompt = true,
+                            onDismiss = {
+                                prefs.gpuProbeShownVersion = versionCode
+                                showGpuProbe = false
+                            },
+                        )
+                    }
                 } else {
                     SetupScreen(items)
                 }

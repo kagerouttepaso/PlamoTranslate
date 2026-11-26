@@ -53,8 +53,11 @@ fun PerformanceCard(model: ModelState<TranslationModel>) {
     val preferences = remember { TranslationPreferences(context) }
     val startVariant = remember { preferences.cpuOptions.variant }
     val startCpuOnly = remember { preferences.cpuOnly }
+    val startGpuBackend = remember { preferences.gpuBackend }
     var options by remember { mutableStateOf(preferences.cpuOptions) }
     var cpuOnly by remember { mutableStateOf(preferences.cpuOnly) }
+    var gpuBackend by remember { mutableStateOf(preferences.gpuBackend) }
+    var showGpuProbe by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
     var measuring by remember { mutableStateOf(false) }
     var parallel by remember { mutableStateOf(preferences.parallel) }
@@ -79,11 +82,19 @@ fun PerformanceCard(model: ModelState<TranslationModel>) {
             )
             val ready = model as? ModelState.Ready
             val backend = remember(ready) { TranslationEngine.cpuBackend() }
+            val gpuDevice = remember(ready) { TranslationEngine.gpuDeviceName() }
             Text(
-                "今：${if (ready?.gpu == true) "GPU" else "CPU"}で動作" +
-                    (if (backend.isNotEmpty()) "（${backend.removePrefix("libggml-cpu-").removeSuffix(".so")}）" else ""),
+                "今：${if (ready?.gpu == true) "GPU（${gpuDevice.ifBlank { gpuBackend.label }}）" else "CPU"}で動作" +
+                    (if (ready?.gpu != true && backend.isNotEmpty()) "（${backend.removePrefix("libggml-cpu-").removeSuffix(".so")}）" else ""),
                 style = MaterialTheme.typography.bodySmall,
             )
+
+            OutlinedButton(enabled = !busy && ready != null, onClick = { showGpuProbe = true }) {
+                Text("GPUバックエンドを一通り比べる")
+            }
+            if (showGpuProbe) {
+                GpuProbeDialog(initialPrompt = false, onDismiss = { showGpuProbe = false })
+            }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(enabled = !busy && ready != null, onClick = {
@@ -205,7 +216,23 @@ fun PerformanceCard(model: ModelState<TranslationModel>) {
             SettingSwitch("メモリマップで読む（mmap）", "オフにすると、モデルをメモリへ全部読み込む", options.mmap, !busy) {
                 apply(options.copy(mmap = it))
             }
+            Text("GPUバックエンド（起動し直すと効く）", style = MaterialTheme.typography.titleSmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                GpuBackendChoice.entries.forEach { choice ->
+                    FilterChip(
+                        selected = gpuBackend == choice,
+                        enabled = !busy,
+                        onClick = {
+                            gpuBackend = choice
+                            cpuOnly = choice == GpuBackendChoice.CPU
+                            preferences.gpuBackend = choice
+                        },
+                        label = { Text(choice.label) },
+                    )
+                }
+            }
             SettingSwitch("CPUだけで動かす", "Snapdragonの端末でもGPUを使わない（起動し直すと効く）", cpuOnly, !busy) {
+                gpuBackend = if (it) GpuBackendChoice.CPU else GpuBackendChoice.AUTO
                 apply(nextCpuOnly = it)
             }
 
@@ -228,9 +255,9 @@ fun PerformanceCard(model: ModelState<TranslationModel>) {
                     }
                 }
             }
-            if (options.variant != startVariant || cpuOnly != startCpuOnly) {
+            if (options.variant != startVariant || cpuOnly != startCpuOnly || gpuBackend != startGpuBackend) {
                 Text(
-                    "版・「CPUだけ」の変更は、アプリを起動し直すと効きます。",
+                    "GPUバックエンド・版・「CPUだけ」の変更は、アプリを起動し直すと効きます。",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )

@@ -241,6 +241,9 @@ class TranslationEngine private constructor(
         /** 読み込んだCPUバックエンドの版。まだ読み込んでいない、または版名を返さないバックエンドでは空。 */
         fun cpuBackend(): String = LlamaRuntime.process.native { LlamaNative.nativeCpuBackend() }
 
+        /** 読み込んだGPUデバイスの説明。GPUを登録していなければ空。 */
+        fun gpuDeviceName(): String = LlamaRuntime.process.native { LlamaNative.nativeGpuDeviceName() }
+
         private fun errorMessage(code: Int) = when (code) {
             -1 -> "文をトークンに分けられませんでした"
             -2 -> "文が長すぎます（${DEFAULT_CONTEXT}トークンまで）"
