@@ -108,7 +108,8 @@ class QwenAudioRecognizer private constructor(private val session: QwenAudioSess
                     load(File(models, SharedModelCatalog.qwenWeights.path), File(models, SharedModelCatalog.qwenProjector.path),
                         nativeDir, variant, target.copy(requestGpu = candidate.gpu),
                         if (threads > 0 && !candidate.gpu) threads else candidate.batch)
-                }, { it.trial(SpeechTrialAudio.samples) }, { Logs.i(it) }, models.resolve("thread-profiles"), { ProcessCompute.topology().key == topology.key })
+                }, { it.trial(SpeechTrialAudio.samples) }, { Logs.i(it) }, models.resolve("thread-profiles"),
+                if (threads > 0) candidates.single().batch..candidates.single().batch else 1..topology.budget, { ProcessCompute.topology().key == topology.key })
         }
 
         suspend fun load(model: File, projector: File, nativeDir: String, cpuVariant: String, target: InferenceTarget, threads: Int = ProcessCompute.topology().budget): QwenAudioRecognizer {

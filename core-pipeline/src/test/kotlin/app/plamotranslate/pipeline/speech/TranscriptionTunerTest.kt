@@ -14,7 +14,7 @@ class TranscriptionTunerTest {
         val topology = CpuTopology(capacities.indices.associateWith { CpuTopology.Core(capacities[it].toInt(), capacities[it]) })
         return topology.candidates(threads).map { TranscriptionCandidate(false, it, it) }
     }
-    private var cpus = candidates(2)
+    private var cpus = candidates(1)
     private val reference = TranscriptionTuner.Reference("Hello!", "en")
     private var environment = TranscriptionTuner.Environment("a", "b", "c", "d", "e", "f", "g")
     private val choices = mutableMapOf<String, TranscriptionChoice>()
@@ -116,22 +116,25 @@ class TranscriptionTunerTest {
         assertEquals(fastest, selected.candidate)
         assertEquals(selected, TranscriptionChoice.decode(choices.values.single().encode()))
         assertEquals(selected, prepare(1, preference = preference))
-        assertEquals(candidates + fastest, engines.map { it.candidate })
-        assertEquals(listOf(4, 4, 3, 1), engines.map { it.trials })
+        val neighbors = listOf(5, 7).map { TranscriptionCandidate(false, it, it) }
+        val measured = candidates + neighbors
+        assertEquals(measured + fastest, engines.map { it.candidate })
+        assertEquals(listOf(4, 4, 3, 3, 3, 1), engines.map { it.trials })
 
         environment = environment.copy(runtime = "別")
         assertEquals(selected, prepare(1, preference = preference))
         cpus = candidates(2)
         assertEquals(listOf(TranscriptionCandidate(false, 2, 2)), cpus)
-        assertEquals(cpus.single(), prepare(1, preference = preference).candidate)
-        assertEquals(candidates + cpus, engines.drop(4).map { it.candidate })
-        assertEquals(listOf(4, 4, 3, 4), engines.drop(4).map { it.trials })
+        assertEquals(1, prepare(1, preference = preference).candidate.batch)
+        assertEquals(measured + cpus + candidates(1), engines.drop(6).map { it.candidate })
+        assertEquals(listOf(4, 4, 3, 3, 3, 4, 4), engines.drop(6).map { it.trials })
         assertEquals(0, gpuEntries)
         assertEquals(0, gpuEnds)
     }
 
     @Test fun `CPUはばらつき内の最小数を選びGPUは最速CPUと比べる`() = runTest {
         cpus = candidates(6)
+        cpuTimes[TranscriptionCandidate(false, 5, 5)] = 150L
         val times = listOf(100L, 88L, 104L, 120L).iterator()
         onTrial = { candidate ->
             if (candidate == cpus.first()) cpuTimes[candidate] = times.next()
@@ -163,7 +166,7 @@ class TranscriptionTunerTest {
         cpuTimes[cpus[1]] = 50L
         cpuTimes[cpus[2]] = 201L
         val choice = prepare(201)
-        assertEquals(listOf(4, 4, 3, 3), engines.map { it.trials })
+        assertEquals(listOf(4, 4, 3, 3, 3, 3), engines.map { it.trials })
         assertTrue(engines.all { it.closed })
         assertNull(fallback)
         assertEquals(cpus[1], choice.candidate)
@@ -193,8 +196,8 @@ class TranscriptionTunerTest {
         assertEquals(fastest, prepare(1, allowedGpu = false).candidate)
         assertEquals(fastest, prepare(1, allowedGpu = false).candidate)
         assertEquals(fastest, prepare(1, preference = TranscriptionPreference.CPU).candidate)
-        assertEquals(cpus + fastest + fastest, engines.map { it.candidate })
-        assertEquals(listOf(4, 4, 4, 1, 1), engines.map { it.trials })
+        assertEquals(cpus + TranscriptionCandidate(false, 7, 7) + fastest + fastest, engines.map { it.candidate })
+        assertEquals(listOf(4, 4, 4, 3, 1, 1), engines.map { it.trials })
         assertEquals(0, gpuEntries)
         assertEquals(0, gpuEnds)
     }

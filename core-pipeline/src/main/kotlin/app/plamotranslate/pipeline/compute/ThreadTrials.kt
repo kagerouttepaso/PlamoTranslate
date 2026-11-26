@@ -38,12 +38,33 @@ class ThreadTrials {
 
     fun median(count: Int) = samples.getValue(count)[1]
 
+    private fun withinDeviation(times: List<Long>): Boolean {
+        val best = checkNotNull(fastest)
+        fun deviation(values: List<Long>) = minOf(values[1] - values[0], values[2] - values[1])
+        return times[1] - best[1] <= maxOf(deviation(times), deviation(best))
+    }
+
+    suspend fun search(boundaries: List<Int>, range: IntRange, measure: suspend (Int) -> Unit) {
+        require(boundaries.isNotEmpty() && boundaries.all { it in range })
+        val visited = mutableSetOf<Int>()
+        suspend fun visit(count: Int) {
+            if (visited.add(count)) measure(count)
+        }
+        for (count in boundaries) visit(count)
+        val peak = samples.minBy { it.value[1] }.key
+        for (count in peak - 1 downTo range.first) {
+            visit(count)
+            if (samples[count]?.let(::withinDeviation) != true) break
+        }
+        for (count in peak + 1..range.last) {
+            val previousBest = fastestMedian
+            visit(count)
+            if (fastestMedian >= previousBest) break
+        }
+    }
+
     fun preferred(): Int {
-        val fastest = samples.values.minBy { it[1] }
-        fun deviation(times: List<Long>) = minOf(times[1] - times[0], times[2] - times[1])
-        return samples.entries.first { (_, times) ->
-            times[1] - fastest[1] <= maxOf(deviation(times), deviation(fastest))
-        }.key
+        return samples.entries.first { withinDeviation(it.value) }.key
     }
 
     fun encode() = samples.entries.joinToString("\n") { (n, times) -> (listOf(n) + times).joinToString(",") }
@@ -65,18 +86,18 @@ class ThreadTrials {
 class ThreadBenchmark(val component: String, val version: String, private val directory: File?,
     val sample: suspend (Int) -> Long) {
     suspend fun select(cpuKey: String, candidates: List<Int>, valid: () -> Boolean,
-        measure: suspend (ThreadTrials, Int) -> Unit): ThreadTrials {
-        val key = listOf(directory?.absolutePath, component, version, cpuKey, candidates, "mad-4").joinToString("|")
+        range: IntRange = 1..candidates.max(), measure: suspend (ThreadTrials, Int) -> Unit): ThreadTrials {
+        val key = listOf(directory?.absolutePath, component, version, cpuKey, candidates, range, SEARCH_VERSION).joinToString("|")
         val file = directory?.resolve(UUID.nameUUIDFromBytes(key.toByteArray()).toString())
         val lock = synchronized(locks) { locks.getOrPut(key) { Mutex() } }
         return lock.withLock {
             val cached = if (file == null) null else cache[key] ?: runCatching { ThreadTrials.decode(file.readText()) }.getOrNull()
-            if (cached != null && cached.preferred() in candidates) {
+            if (cached != null && cached.preferred() in range) {
                 cache[key] = cached
                 return@withLock cached
             }
             val trials = ThreadTrials()
-            candidates.forEach { measure(trials, it) }
+            trials.search(candidates, range) { measure(trials, it) }
             trials.preferred()
             if (valid() && file != null) {
                 cache[key] = trials
@@ -96,6 +117,7 @@ class ThreadBenchmark(val component: String, val version: String, private val di
     }
 
     companion object {
+        const val SEARCH_VERSION = "mad-5"
         private val cache = java.util.concurrent.ConcurrentHashMap<String, ThreadTrials>()
         private val locks = mutableMapOf<String, Mutex>()
     }

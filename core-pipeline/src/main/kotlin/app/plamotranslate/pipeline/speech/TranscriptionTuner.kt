@@ -28,7 +28,7 @@ object TranscriptionTuner {
     data class Environment(val weights: String, val projector: String, val runtime: String, val platform: String,
         val cpu: String, val device: String, val fixture: String) {
         fun cacheKey(candidates: List<TranscriptionCandidate>, gpu: Boolean): String =
-            listOf(weights, projector, runtime, platform, cpu, device, fixture, candidates, gpu, "5:$GPU_RATIO")
+            listOf(weights, projector, runtime, platform, cpu, device, fixture, candidates, gpu, ThreadBenchmark.SEARCH_VERSION, "5:$GPU_RATIO")
                 .joinToString { "${it.toString().length}:$it" }
     }
 
@@ -48,9 +48,11 @@ object TranscriptionTuner {
         environment: Environment, reference: Reference, store: Store,
         withGpuPreparation: suspend (suspend () -> Unit) -> Unit, beginGpu: () -> Boolean, endGpu: (String?) -> Unit,
         load: suspend (TranscriptionCandidate) -> T, trial: suspend (T) -> Sample, log: (String) -> Unit = {},
-        directory: java.io.File? = null, valid: () -> Boolean = { true }): Pair<T, TranscriptionChoice> {
+        directory: java.io.File? = null, range: IntRange = 1..cpus.maxOf { it.batch }, valid: () -> Boolean = { true }): Pair<T, TranscriptionChoice> {
         val gpu = cpus.first().copy(gpu = true)
-        val key = environment.cacheKey(cpus, allowedGpu && preference != TranscriptionPreference.CPU)
+        val key = environment.cacheKey(cpus, allowedGpu && preference != TranscriptionPreference.CPU) + "/$range"
+        fun cpu(count: Int) = TranscriptionCandidate(false, count, count)
+        fun isCpu(candidate: TranscriptionCandidate) = candidate.batch in range && candidate == cpu(candidate.batch)
         val cpuReason = "CPU の試走結果を採用"
         var selectedEngine: T? = null
 
@@ -98,8 +100,8 @@ object TranscriptionTuner {
                 check(reference.matches(sample.result)) { "試走の本文または言語が正解と一致しません" }
                 sample.nanos
             }
-            val curve = benchmark.select(environment.cpu, cpus.map { it.batch }, valid) { measurements, count ->
-                val candidate = cpus.first { it.batch == count }
+            val curve = benchmark.select(environment.cpu, cpus.map { it.batch }, valid, range) { measurements, count ->
+                val candidate = cpu(count)
                 val (engine, median) = evaluate(candidate) {
                     current = it
                     measurements.measure(count, { benchmark.sample(count) }) { message -> log("Qwen3-ASR CPU $message") }
@@ -112,7 +114,7 @@ object TranscriptionTuner {
             }
             trials = ThreadTrials.decode(curve.encode())
             val count = curve.preferred()
-            val candidate = cpus.first { it.batch == count }
+            val candidate = cpu(count)
             val choice = TranscriptionChoice(candidate, curve.median(count), reason)
             if (retained != candidate) {
                 selectedEngine?.close()
@@ -125,7 +127,7 @@ object TranscriptionTuner {
         fun save(choice: TranscriptionChoice) = choice.also { store.write(key, it) }
 
         suspend fun cpuOnly(reason: String): TranscriptionChoice {
-            val cached = store.read(key)?.takeIf { it.candidate in cpus }
+            val cached = store.read(key)?.takeIf { isCpu(it.candidate) }
             if (cached == null) return save(fastestCpu(reason))
             return select(ready(cached.candidate, cached.copy(reason = reason)))
         }
@@ -158,7 +160,7 @@ object TranscriptionTuner {
             if (!allowedGpu) return cpuOnly(cpuReason)
             val cached = store.read(key)
             if (cached != null) {
-                if (cached.candidate in cpus) return select(ready(cached.candidate, cached))
+                if (isCpu(cached.candidate)) return select(ready(cached.candidate, cached))
                 if (cached.candidate == gpu) return tryGpu { ready(gpu, cached) }?.let(::select) ?: fastestCpu()
             }
             val cpu = fastestCpu()

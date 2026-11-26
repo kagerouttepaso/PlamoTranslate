@@ -6,6 +6,32 @@ import org.junit.Test
 import java.nio.file.Files
 
 class ThreadTrialsTest {
+    private suspend fun search(boundaries: List<Int>, times: List<Long>, spread: Long = 0): Pair<List<Int>, Int> {
+        val visited = mutableListOf<Int>()
+        val curve = ThreadTrials()
+        curve.search(boundaries, 1..times.size) { n ->
+            visited += n
+            val median = times[n - 1]
+            val samples = listOf(median, median - spread, median, median + spread).iterator()
+            curve.measure(n, { samples.next() }) {}
+        }
+        return visited to curve.preferred()
+    }
+
+    @Test fun 境目の間の最速を探し改善が止まれば多い側を閉じる() = runTest {
+        assertEquals(listOf(2, 8, 1, 3, 4, 5, 6) to 5,
+            search(listOf(2, 8), listOf(150, 120, 100, 90, 70, 82, 140, 200)))
+    }
+
+    @Test fun 少ない側はばらつきの範囲を超えた所で止める() = runTest {
+        assertEquals(listOf(1, 4, 8, 3, 5, 6, 7) to 4,
+            search(listOf(1, 4, 8), listOf(300, 240, 180, 104, 102, 100, 140, 800), 5))
+    }
+
+    @Test fun 予算が一つなら一度だけ測る() = runTest {
+        assertEquals(listOf(1) to 1, search(listOf(1), listOf(90)))
+    }
+
     @Test fun 最速との差が反復の偏差に収まる最小の数を選ぶ() = runTest {
         val curve = ThreadTrials()
         for ((n, samples) in listOf(

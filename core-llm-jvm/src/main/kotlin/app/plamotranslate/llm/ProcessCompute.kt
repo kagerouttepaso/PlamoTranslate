@@ -48,7 +48,7 @@ object ProcessCompute : ComputeResources {
         while (true) {
             val topology = topology()
             val candidates = topology.candidates(requested).map { minOf(it, capacity) }.distinct()
-            if (candidates.size == 1) return candidates.single()
+            if (requested > 0 || candidates.last() == 1) return candidates.last()
             try {
                 return benchmark.select(topology.key, candidates, { topology().key == topology.key }) { trials, n ->
                     borrow(gpu, n, ComputeWork(name = "${benchmark.component} 試走", exclusiveCpu = true)) { available, _ ->
