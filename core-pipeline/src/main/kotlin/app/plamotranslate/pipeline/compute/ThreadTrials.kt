@@ -85,9 +85,13 @@ class ThreadTrials {
     }
 }
 
-class ThreadBenchmark(val component: String, val version: String, private val directory: File?,
+class ThreadBenchmark(val purpose: Purpose, val component: String, val version: String, private val directory: File?,
     val sample: suspend (Int) -> Long) {
-    suspend fun select(cpuKey: String, candidates: List<Int>, valid: () -> Boolean,
+    enum class Purpose(val label: String) {
+        Transcription("音声認識"), LanguageIdentification("言語の判定"), Translation("翻訳"), SpeechSynthesis("読み上げ")
+    }
+
+    suspend fun select(board: ThreadTrialBoard, cpuKey: String, candidates: List<Int>, valid: () -> Boolean,
         range: IntRange = 1..candidates.max(), measure: suspend (ThreadTrials, Int) -> Unit): ThreadTrials {
         val key = listOf(directory?.absolutePath, component, version, cpuKey, candidates, range, SEARCH_VERSION).joinToString("|")
         val file = directory?.resolve(UUID.nameUUIDFromBytes(key.toByteArray()).toString())
@@ -99,12 +103,10 @@ class ThreadBenchmark(val component: String, val version: String, private val di
                 return@withLock cached
             }
             val trials = ThreadTrials()
-            val id = Any()
+            val id = UUID.randomUUID().toString()
             val rows = MutableList<ThreadTrialRow>(range.last) { ThreadTrialRow.Pending }
-            fun publish(selected: Int? = null): ThreadTrialProgress {
-                val state = ThreadTrialProgress(component, range.last, rows.toList(), selected)
-                ActiveThreadTrials.publish(id, state)
-                return state
+            fun publish(selected: Int? = null) {
+                board.publish(id, ThreadTrialProgress(id, purpose, rows.toList(), selected))
             }
             try {
                 trials.search(candidates, range) { count ->
@@ -115,11 +117,9 @@ class ThreadBenchmark(val component: String, val version: String, private val di
                         ?: ThreadTrialRow.CutOff
                     publish()
                 }
-                val selected = publish(trials.preferred())
-                // 画面で結果を読める時間を取る。CPU の貸出は各計測で既に返している。
-                if (ActiveThreadTrials.visible(selected)) kotlinx.coroutines.delay(700)
+                publish(trials.preferred())
             } finally {
-                ActiveThreadTrials.publish(id, null)
+                board.publish(id, null)
             }
             if (valid() && file != null) {
                 cache[key] = trials

@@ -43,7 +43,7 @@ class TranscriptionTunerTest {
     private var gpuEnds = 0
     private suspend fun prepare(duration: Long, valid: Boolean = true,
         preference: TranscriptionPreference = TranscriptionPreference.AUTO, allowedGpu: Boolean = true): TranscriptionChoice {
-        val (engine, choice) = TranscriptionTuner.prepare(cpus, allowedGpu && fallback == null, preference, environment, reference, store,
+        val (engine, choice) = TranscriptionTuner.prepare(cpus, allowedGpu && fallback == null, preference, environment, app.plamotranslate.pipeline.compute.ThreadTrialBoard(), reference, store,
             { action -> gpuPreparation.withLock { gpuEntries++; action() } },
             { assertTrue(gpuPreparation.isLocked); true },
             { assertTrue(gpuPreparation.isLocked); fallback = it; gpuEnds++; onGpuEnd() }, { candidate ->

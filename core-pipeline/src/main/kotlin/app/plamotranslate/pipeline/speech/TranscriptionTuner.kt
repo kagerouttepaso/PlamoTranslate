@@ -45,7 +45,7 @@ object TranscriptionTuner {
     }
 
     suspend fun <T : AutoCloseable> prepare(cpus: List<TranscriptionCandidate>, allowedGpu: Boolean, preference: TranscriptionPreference,
-        environment: Environment, reference: Reference, store: Store,
+        environment: Environment, board: app.plamotranslate.pipeline.compute.ThreadTrialBoard, reference: Reference, store: Store,
         withGpuPreparation: suspend (suspend () -> Unit) -> Unit, beginGpu: () -> Boolean, endGpu: (String?) -> Unit,
         load: suspend (TranscriptionCandidate) -> T, trial: suspend (T) -> Sample, log: (String) -> Unit = {},
         directory: java.io.File? = null, range: IntRange = 1..cpus.maxOf { it.batch }, valid: () -> Boolean = { true }): Pair<T, TranscriptionChoice> {
@@ -95,12 +95,12 @@ object TranscriptionTuner {
         suspend fun fastestCpu(reason: String = cpuReason): TranscriptionChoice {
             var current: T? = null
             var retained: TranscriptionCandidate? = null
-            val benchmark = ThreadBenchmark("Qwen3-ASR", key, directory) {
+            val benchmark = ThreadBenchmark(ThreadBenchmark.Purpose.Transcription, "Qwen3-ASR", key, directory) {
                 val sample = trial(checkNotNull(current))
                 check(reference.matches(sample.result)) { "試走の本文または言語が正解と一致しません" }
                 sample.nanos
             }
-            val curve = benchmark.select(environment.cpu, cpus.map { it.batch }, valid, range) { measurements, count ->
+            val curve = benchmark.select(board, environment.cpu, cpus.map { it.batch }, valid, range) { measurements, count ->
                 val candidate = cpu(count)
                 val (engine, median) = evaluate(candidate) {
                     current = it

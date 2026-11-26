@@ -221,7 +221,7 @@ class TranslationEngine private constructor(
                     val topology = ProcessCompute.availableTopology()
                     val version = listOf(model.absolutePath, model.length(), model.lastModified(), gpu, cpu, nCtx).joinToString("|")
                     engine.selectedThreads = ProcessCompute.selectThreads(
-                        ThreadBenchmark("PLaMo", version, cacheDir, engine::trial), cpu.threads, gpu, poolCapacity)
+                        ThreadBenchmark(ThreadBenchmark.Purpose.Translation, "PLaMo", version, cacheDir, engine::trial), cpu.threads, gpu, poolCapacity)
                     Logs.i("翻訳のスレッド数=${engine.selectedThreads} CPU=${topology.key}")
                     engine
                 }

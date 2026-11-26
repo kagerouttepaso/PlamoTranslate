@@ -103,7 +103,7 @@ class QwenAudioRecognizer private constructor(private val session: QwenAudioSess
                 }
             }
             return TranscriptionTuner.prepare(candidates, target.useGpu,
-                preference, environment.copy(cpu = "${environment.cpu}/${topology.key}"), SpeechTrialAudio.reference, stableStore,
+                preference, environment.copy(cpu = "${environment.cpu}/${topology.key}"), ProcessCompute.trialBoard, SpeechTrialAudio.reference, stableStore,
                 { action -> LlamaRuntime.process.prepare(true, action) }, beginGpu, endGpu, { candidate ->
                     load(File(models, SharedModelCatalog.qwenWeights.path), File(models, SharedModelCatalog.qwenProjector.path),
                         nativeDir, variant, target.copy(requestGpu = candidate.gpu),

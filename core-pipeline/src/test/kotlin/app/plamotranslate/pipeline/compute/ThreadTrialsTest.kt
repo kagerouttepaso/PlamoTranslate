@@ -7,6 +7,8 @@ import org.junit.Test
 import java.nio.file.Files
 
 class ThreadTrialsTest {
+    private val board = ThreadTrialBoard()
+
     private suspend fun search(boundaries: List<Int>, times: List<Long>, spread: Long = 0): Pair<List<Int>, Int> {
         val visited = mutableListOf<Int>()
         val curve = ThreadTrials()
@@ -79,11 +81,11 @@ class ThreadTrialsTest {
     @Test fun 計測中と中央値と打ち切りと選択を通知して終了時に解除する() = runTest {
         val observed = mutableListOf<ThreadTrialProgress?>()
         val collector = launch(kotlinx.coroutines.test.UnconfinedTestDispatcher(testScheduler)) {
-            ActiveThreadTrials.progress.collect { observed += it }
+            board.progress.collect { observed += it }
         }
         try {
-            ThreadBenchmark("部品", "1", null) { n -> n * 100L }
-                .select("CPU", listOf(1, 2), { true }) { curve, n -> curve.measure(n, { n * 100L }) {} }
+            ThreadBenchmark(ThreadBenchmark.Purpose.Translation, "部品", "1", null) { n -> n * 100L }
+                .select(board, "CPU", listOf(1, 2), { true }) { curve, n -> curve.measure(n, { n * 100L }) {} }
             val measured = ThreadTrialRow.Measured(100)
             assertEquals(listOf(null,
                 listOf(ThreadTrialRow.Measuring, ThreadTrialRow.Pending),
@@ -102,8 +104,8 @@ class ThreadTrialsTest {
         var measurements = 0
         try {
             suspend fun selected(cpu: String, version: String): Int {
-                val benchmark = ThreadBenchmark("部品", version, dir) { n -> 100L / n }
-                return benchmark.select(cpu, listOf(1, 2), { true }) { curve, n ->
+                val benchmark = ThreadBenchmark(ThreadBenchmark.Purpose.Translation, "部品", version, dir) { n -> 100L / n }
+                return benchmark.select(board, cpu, listOf(1, 2), { true }) { curve, n ->
                     measurements++
                     curve.measure(n, { benchmark.sample(n) }) {}
                 }.preferred()

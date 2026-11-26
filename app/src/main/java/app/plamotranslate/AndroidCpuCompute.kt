@@ -9,7 +9,7 @@ import app.plamotranslate.tts.TtsCompute
 internal object AndroidCpuCompute : OcrCompute, TtsCompute {
     override suspend fun <T> measured(component: String, version: String, directory: java.io.File,
         sample: suspend (Int) -> Long, action: suspend (Int) -> T): T {
-        val benchmark = ThreadBenchmark(component, version, directory.resolve("thread-profiles"), sample)
+        val benchmark = ThreadBenchmark(ThreadBenchmark.Purpose.SpeechSynthesis, component, version, directory.resolve("thread-profiles"), sample)
         val work = ComputeWork(name = component, benchmark = benchmark)
         return ProcessCompute.borrow(false, work = work) { n, _ -> action(n) }
     }

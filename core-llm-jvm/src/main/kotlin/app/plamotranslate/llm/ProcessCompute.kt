@@ -13,6 +13,9 @@ import kotlin.coroutines.CoroutineContext
 import java.io.File
 
 object ProcessCompute : ComputeResources {
+    internal val trialBoard = app.plamotranslate.pipeline.compute.ThreadTrialBoard()
+    val trialProgress = trialBoard.progress
+
     private val scheduler = ComputeScheduler { Logs.i(it) }
 
     private val windows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
@@ -67,7 +70,7 @@ object ProcessCompute : ComputeResources {
             val candidates = topology.candidates(requested).map { minOf(it, capacity) }.distinct()
             if (requested > 0 || candidates.last() == 1) return candidates.last()
             try {
-                return benchmark.select(topology.key, candidates, { availableTopology().key == topology.key }) { trials, n ->
+                return benchmark.select(trialBoard, topology.key, candidates, { availableTopology().key == topology.key }) { trials, n ->
                     borrow(gpu, n, ComputeWork(name = "${benchmark.component} 試走", exclusiveCpu = true)) { available, _ ->
                         if (n > available || topology().key != topology.key) throw TopologyChanged()
                         trials.measure(n, { benchmark.sample(n) }) { Logs.i("${benchmark.component} CPU=${topology.key} $it") }

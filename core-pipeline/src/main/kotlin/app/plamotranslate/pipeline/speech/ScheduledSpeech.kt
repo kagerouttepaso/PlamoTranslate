@@ -23,11 +23,11 @@ private class SpeechSession<T : AutoCloseable>(private val compute: ComputeResou
 
 // ONNX セッションは貸出中に中断せず作り、広げた CPU 指定を作業スレッドに引き継ぐ。
 object ScheduledSpeech {
-    private suspend fun <T : AutoCloseable> prepare(compute: ComputeResources, name: String, version: String,
+    private suspend fun <T : AutoCloseable> prepare(compute: ComputeResources, purpose: ThreadBenchmark.Purpose, name: String, version: String,
         directory: java.io.File?, threads: Int, create: (Int) -> T, sample: (T) -> Unit): SpeechSession<T> {
         var trial: T? = null
         var trialCount = 0
-        val benchmark = ThreadBenchmark(name, "$version/${SpeechTrialAudio.version}", directory) { n ->
+        val benchmark = ThreadBenchmark(purpose, name, "$version/${SpeechTrialAudio.version}", directory) { n ->
             if (trialCount != n) {
                 trial?.close()
                 trial = null
@@ -48,7 +48,7 @@ object ScheduledSpeech {
     }
 
     suspend fun senseVoice(compute: ComputeResources, threads: Int, directory: java.io.File? = null, create: (Int) -> SpeechRecognizer): SpeechRecognizer {
-        val session = prepare(compute, "SenseVoice", "small-int8-2024-07-17/sherpa-2.0.1", directory, threads, create) { it.recognize(SpeechTrialAudio.samples) }
+        val session = prepare(compute, ThreadBenchmark.Purpose.Transcription, "SenseVoice", "small-int8-2024-07-17/sherpa-2.0.1", directory, threads, create) { it.recognize(SpeechTrialAudio.samples) }
         return object : SpeechRecognizer by session.model {
             override fun recognize(samples: FloatArray) = recognizeAs(samples, null)
             override fun recognizeAs(samples: FloatArray, language: String?) = runBlocking {
@@ -61,7 +61,7 @@ object ScheduledSpeech {
     }
 
     suspend fun identifier(compute: ComputeResources, threads: Int, directory: java.io.File? = null, create: (Int) -> LanguageIdentifier): LanguageIdentifier {
-        val session = prepare(compute, "Whisper", "tiny-65176e2d", directory, threads, create) { it.scores(SpeechTrialAudio.samples, null) }
+        val session = prepare(compute, ThreadBenchmark.Purpose.LanguageIdentification, "Whisper", "tiny-65176e2d", directory, threads, create) { it.scores(SpeechTrialAudio.samples, null) }
         return object : LanguageIdentifier {
             override fun scores(samples: FloatArray, candidates: Set<String>?) = runBlocking {
                 scores(samples, candidates, RecognitionPriority.LANGUAGE)
