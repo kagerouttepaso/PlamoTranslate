@@ -38,6 +38,14 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.WindowManager
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.Alignment
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import app.plamotranslate.AdvancedPreferences
+import app.plamotranslate.ComputeMonitor
 import app.plamotranslate.AppTheme
 import app.plamotranslate.ReadAloud
 import app.plamotranslate.llm.Language
@@ -71,6 +79,14 @@ class ConversationActivity : ComponentActivity() {
                 app.plamotranslate.ThreadTrialDialog()
                 val state by vm.state.collectAsStateWithLifecycle()
                 val model by vm.model.collectAsStateWithLifecycle()
+                // 詳細設定の「会話中に CPU の使われ方を出す」。設定から戻ったときに読み直す
+                val owner = LocalLifecycleOwner.current
+                val monitor by produceState(false, owner) {
+                    owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                        value = AdvancedPreferences(this@ConversationActivity).computeMonitor
+                    }
+                }
+                Box {
                 ConversationScreen(
                     state = state,
                     model = model,
@@ -88,6 +104,9 @@ class ConversationActivity : ComponentActivity() {
                         saveLog = logExport::save,
                     ),
                 )
+                if (monitor) ComputeMonitor(
+                    Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(horizontal = 8.dp))
+                }
                 LaunchedEffect(state.awaitingInput) {
                     if (!state.awaitingInput) return@LaunchedEffect
                     val wav = intent.getStringExtra(EXTRA_WAV)

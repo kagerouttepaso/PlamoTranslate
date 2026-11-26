@@ -4,6 +4,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.job
 
 enum class ComputePriority { Critical, Interactive, Normal, Speculative }
@@ -24,6 +27,19 @@ data class ComputeWork(
     }
 }
 
+/**
+ * 1回の貸出（待っている依頼なら、頼んだ数と並んだ時刻）。時刻は [System.nanoTime] のミリ秒。
+ * 終わっていなければ [end] は null。[preempted] は、優先度の高い依頼に止められて返したか。
+ */
+data class ComputeLease(
+    val id: Long, val name: String, val priority: ComputePriority, val gpu: Boolean, val threads: Int,
+    val start: Long, val end: Long? = null, val preempted: Boolean = false,
+)
+
+/** 貸出の様子。詳細設定で選ぶと、会話の画面に図で出す。[recent] は直近 [ComputeScheduler.HISTORY_MILLIS] に終わった貸出。 */
+data class ComputeActivity(val budget: Int = 0, val running: List<ComputeLease> = emptyList(),
+    val waiting: List<ComputeLease> = emptyList(), val recent: List<ComputeLease> = emptyList())
+
 class ComputeScheduler(private val log: (String) -> Unit = {}) {
     private class Ticket(val id: Long, val gpu: Boolean, val work: ComputeWork, val requested: Int, val job: Job) {
         var ready = CompletableDeferred<Unit>()
@@ -32,6 +48,7 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
         var stoppedBy: Ticket? = null
         var stopTime = 0L
         var yielded = false
+        var since = now()
         val exclusive get() = work.exclusiveCpu || requested == Int.MAX_VALUE
         val label get() = "${work.name}#$id"
     }
@@ -40,6 +57,18 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
     private val active = mutableSetOf<Ticket>()
     private var sequence = 0L
     private lateinit var latest: CpuTopology
+    private val history = ArrayDeque<ComputeLease>()
+    private val activityState = MutableStateFlow(ComputeActivity())
+    val activity: StateFlow<ComputeActivity> = activityState.asStateFlow()
+
+    private fun Ticket.lease(end: Long? = null, preempted: Boolean = false) =
+        ComputeLease(id, work.name, work.priority, gpu, if (this in active) granted else requested, since, end, preempted)
+
+    private fun publish() {
+        val horizon = now() - HISTORY_MILLIS
+        while (history.firstOrNull()?.let { it.end!! < horizon } == true) history.removeFirst()
+        activityState.value = ComputeActivity(latest.budget, active.map { it.lease() }, waiting.map { it.lease() }, history.toList())
+    }
 
     // 状態だけをロック内で更新する。コルーチンの再開と JNI の取消はロック外で行う。
     private fun schedule(): List<() -> Unit> = buildList {
@@ -75,6 +104,7 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
                     break
                 }
                 waiting.remove(next)
+                next.since = now()
                 next.granted = count
                 next.topology = latest
                 active.add(next)
@@ -82,6 +112,7 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
                 add { ready.complete(Unit) }
             }
         }
+        publish()
     }
 
     private fun requestStop(victim: Ticket, next: Ticket) {
@@ -132,6 +163,7 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
                     release(ticket)
                     ticket.yielded = false
                     ticket.ready = CompletableDeferred()
+                    ticket.since = now()
                     waiting.add(ticket)
                     start = System.nanoTime()
                 }
@@ -147,10 +179,20 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
     }
 
     private fun release(ticket: Ticket) {
+        if (ticket in active) {
+            history.addLast(ticket.lease(now(), ticket.stoppedBy != null))
+            if (history.size > HISTORY_LIMIT) history.removeFirst()
+        }
         active.remove(ticket)
         ticket.stoppedBy?.let {
             log("計算資源 横取り ${it.label} → ${ticket.label} 返却まで=${(System.nanoTime() - ticket.stopTime) / 1_000_000}ms")
             ticket.stoppedBy = null
         }
+    }
+
+    companion object {
+        const val HISTORY_MILLIS = 15_000L
+        private const val HISTORY_LIMIT = 500
+        private fun now() = System.nanoTime() / 1_000_000
     }
 }

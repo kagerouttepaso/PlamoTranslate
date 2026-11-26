@@ -96,6 +96,10 @@ class ComputeSchedulerTest {
         low.join()
         assertTrue(low.isCancelled)
         assertEquals(listOf("返却", "貸出"), order)
+        // 貸出の様子には、止められて返した貸出と、終わった貸出が残る
+        val recent = scheduler.activity.value.recent
+        assertEquals(listOf(ComputePriority.Speculative to true, ComputePriority.Normal to false), recent.map { it.priority to it.preempted })
+        assertTrue(scheduler.activity.value.running.isEmpty())
     }
 
     @Test fun 区切りで譲った依頼は後続より先に戻る() = runTest {
