@@ -24,7 +24,7 @@ private class SpeechSession<T : AutoCloseable>(private val compute: ComputeResou
 // ONNX セッションは貸出中に中断せず作り、広げた CPU 指定を作業スレッドに引き継ぐ。
 object ScheduledSpeech {
     private suspend fun <T : AutoCloseable> prepare(compute: ComputeResources, purpose: ThreadBenchmark.Purpose, name: String, version: String,
-        directory: java.io.File?, threads: Int, create: (Int) -> T, sample: (T) -> Unit): SpeechSession<T> {
+        directory: java.io.File?, threads: Int, create: (Int) -> T, reserved: Int = 0, sample: (T) -> Unit): SpeechSession<T> {
         var trial: T? = null
         var trialCount = 0
         val benchmark = ThreadBenchmark(purpose, name, "$version/${SpeechTrialAudio.version}", directory) { n ->
@@ -37,7 +37,7 @@ object ScheduledSpeech {
             kotlin.system.measureNanoTime { sample(checkNotNull(trial)) }
         }
         try {
-            val selected = compute.selectThreads(benchmark, threads)
+            val selected = compute.selectThreads(benchmark, threads, reserved = reserved)
             return compute.borrow(false, if (threads > 0) threads else selected) { n, _ ->
                 val model = trial?.takeIf { n == trialCount }?.also { trial = null } ?: create(n)
                 SpeechSession(compute, if (threads > 0) threads else selected, n, model, create)
@@ -50,6 +50,7 @@ object ScheduledSpeech {
     suspend fun senseVoice(compute: ComputeResources, threads: Int, directory: java.io.File? = null, create: (Int) -> SpeechRecognizer): SpeechRecognizer {
         val session = prepare(compute, ThreadBenchmark.Purpose.Transcription, "SenseVoice", "small-int8-2024-07-17/sherpa-2.0.1", directory, threads, create) { it.recognize(SpeechTrialAudio.samples) }
         return object : SpeechRecognizer by session.model {
+            override val cpuThreads get() = session.requested
             override fun recognize(samples: FloatArray) = recognizeAs(samples, null)
             override fun recognizeAs(samples: FloatArray, language: String?) = runBlocking {
                 transcribe(samples, language, RecognitionPriority.PARTIAL)
@@ -60,8 +61,11 @@ object ScheduledSpeech {
         }
     }
 
-    suspend fun identifier(compute: ComputeResources, threads: Int, directory: java.io.File? = null, create: (Int) -> LanguageIdentifier): LanguageIdentifier {
-        val session = prepare(compute, ThreadBenchmark.Purpose.LanguageIdentification, "Whisper", "tiny-65176e2d", directory, threads, create) { it.scores(SpeechTrialAudio.samples, null) }
+    /** 話し中の言語の識別は途中の書き起こしと同時に走るので、書き起こしが借りる [transcriberThreads] を残して数を選ぶ。 */
+    suspend fun identifier(compute: ComputeResources, threads: Int, directory: java.io.File? = null, transcriberThreads: Int = 0,
+        create: (Int) -> LanguageIdentifier): LanguageIdentifier {
+        val session = prepare(compute, ThreadBenchmark.Purpose.LanguageIdentification, "Whisper", "tiny-65176e2d", directory, threads, create,
+            transcriberThreads) { it.scores(SpeechTrialAudio.samples, null) }
         return object : LanguageIdentifier {
             override fun scores(samples: FloatArray, candidates: Set<String>?) = runBlocking {
                 scores(samples, candidates, RecognitionPriority.LANGUAGE)

@@ -13,6 +13,8 @@ internal class QwenAudioSession(
     private val load: (Int) -> Long,
     private val free: (Long) -> Unit,
 ) : AutoCloseable {
+    val cpuThreads get() = if (gpu) 0 else requested
+
     suspend fun <T> use(work: ComputeWork, action: suspend (Long) -> T): T =
         compute.borrow(gpu, requested, work) { count, _ ->
             if (handle == 0L || loadedThreads != count) {

@@ -55,8 +55,8 @@ object SpeechEngines {
         var identifier: LanguageIdentifier? = null
         var vad: SileroVoiceActivity? = null
         try {
-            identifier = if (model == SpeechModel.QWEN3_ASR) ScheduledSpeech.identifier(compute, tuning.identifyThreads, asrDir.resolve("thread-profiles")) { WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR), it) } else null
-            Logs.i("音声認識の組み立て: $model 書き起こし${tuning.transcribeThreads}（0は既定） 識別${tuning.identifyThreads} $profile VAD ${tuning.vadThreshold}/${tuning.vadMinSpeechSeconds}秒")
+            identifier = if (model == SpeechModel.QWEN3_ASR) ScheduledSpeech.identifier(compute, tuning.identifyThreads, asrDir.resolve("thread-profiles"), recognizer.cpuThreads) { WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR), it) } else null
+            Logs.i("音声認識の組み立て: $model 書き起こし${tuning.transcribeThreads}（0は既定） 識別${tuning.identifyThreads}（書き起こしの CPU ${recognizer.cpuThreads}本を残して選ぶ） $profile VAD ${tuning.vadThreshold}/${tuning.vadMinSpeechSeconds}秒")
             vad = SileroVoiceActivity.load(File(asrDir, VAD), profile.phraseSilenceSeconds, tuning.vadThreshold, tuning.vadMinSpeechSeconds)
             return SpeechPipeline(
                 vad,

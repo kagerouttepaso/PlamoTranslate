@@ -169,6 +169,10 @@ data class SpeechBreak(val at: Int, val sentence: Boolean)
 /** 音声を文字にし、言語を判定する。sherpa-onnx と llama.cpp の実装がある。 */
 interface SpeechRecognizer : AutoCloseable {
     val judgesFinalTranscript: Boolean get() = false
+
+    /** 書き起こし1回が借りる CPU の数（GPU で動くなら0）。同時に走る言語の識別は、予算からこの数を引いた中で数を選ぶ。 */
+    val cpuThreads: Int get() = 0
+
     fun recognize(samples: FloatArray): Recognition
 
     /**

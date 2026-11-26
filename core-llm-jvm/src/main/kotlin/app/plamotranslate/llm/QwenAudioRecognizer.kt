@@ -27,6 +27,7 @@ import java.io.File
 
 class QwenAudioRecognizer private constructor(private val session: QwenAudioSession) : SpeechRecognizer {
     override val judgesFinalTranscript = true
+    override val cpuThreads get() = session.cpuThreads
     override fun recognize(samples: FloatArray): Recognition = recognizeAs(samples, null)
 
     private val execution = Mutex()

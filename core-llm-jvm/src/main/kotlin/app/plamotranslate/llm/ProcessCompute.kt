@@ -60,10 +60,11 @@ object ProcessCompute : ComputeResources {
 
     private class TopologyChanged : Exception()
 
-    override suspend fun selectThreads(benchmark: ThreadBenchmark, requested: Int, gpu: Boolean, capacity: Int): Int {
+    override suspend fun selectThreads(benchmark: ThreadBenchmark, requested: Int, gpu: Boolean, capacity: Int, reserved: Int): Int {
         while (true) {
             val topology = availableTopology()
-            val candidates = topology.candidates(requested).map { minOf(it, capacity) }.distinct()
+            val limit = minOf(capacity, maxOf(1, topology.budget - reserved))
+            val candidates = topology.candidates(requested).map { minOf(it, limit) }.distinct()
             if (requested > 0 || candidates.last() == 1) return candidates.last()
             try {
                 return benchmark.select(trialBoard, topology.key, candidates, { availableTopology().key == topology.key }) { trials, n ->
