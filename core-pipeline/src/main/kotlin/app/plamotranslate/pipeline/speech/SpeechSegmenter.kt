@@ -217,6 +217,7 @@ class SpeechSegmenter(
                 quietFrom = buffer.size - SPLIT_SEARCH_SAMPLES,
                 to = buffer.size - MIN_TAIL_SAMPLES,
                 breaks = cutBreaks(card),
+                kept = stitchedEnd(card),
             )
             cutAt(at, "長い発話", lang = card.lang, sure = card.track.sure)
         } else {

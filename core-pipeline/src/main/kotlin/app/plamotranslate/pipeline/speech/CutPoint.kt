@@ -17,12 +17,17 @@ object CutPoint {
      * 切れ目の時刻は直前の文字の後なので、その前後（[BREAK_BEFORE]〜[BREAK_AFTER]）の一番静かな0.1秒にそろえる。
      * 切れ目が無ければ、[quietFrom]〜[to] で0.1秒ごとの音量が一番小さい区間の中央（息継ぎや語の切れ目は音が小さい）。
      * 切れ目が見えるまで切らずに待つ形は、作者の会話の録音で文の途中の区切りが減らなかったので入れない。
+     * [kept] は書き起こしを頼んだ文の終わりで、これより前では区切らない。前で区切ると、その文はカードから外れ、
+     * 同じ音声を区切った残りとして初めから書き起こし直す（0.14.1-beta.3 の REDMAGIC 11 Pro で、確定の残り15回のうち7回）。
      */
-    fun longUtterance(buffer: SpeechBuffer, breakFrom: Int, quietFrom: Int, to: Int, breaks: List<SpeechBreak>): Int {
+    fun longUtterance(buffer: SpeechBuffer, breakFrom: Int, quietFrom: Int, to: Int, breaks: List<SpeechBreak>, kept: Int = 0): Int {
+        if (kept >= to) return kept.coerceAtMost(buffer.size)
         val inRange = breaks.filter { it.at in breakFrom..to }
         val pick = inRange.filter { it.sentence }.maxByOrNull { it.at } ?: inRange.maxByOrNull { it.at }
-        if (pick != null) return quietest(buffer, (pick.at - BREAK_BEFORE).coerceAtLeast(breakFrom), (pick.at + BREAK_AFTER).coerceAtMost(to))
-        return quietest(buffer, quietFrom, to)
+        if (pick != null) {
+            return quietest(buffer, maxOf(pick.at - BREAK_BEFORE, breakFrom, kept), (pick.at + BREAK_AFTER).coerceAtMost(to))
+        }
+        return quietest(buffer, maxOf(quietFrom, kept), to)
     }
 
     /** 話し手の交代の区切り：言語の境界の前後 [from]〜[to] で、0.1秒ごとの音量が一番小さい区間の中央。 */
