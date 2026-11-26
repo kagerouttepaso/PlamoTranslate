@@ -1,7 +1,10 @@
 package app.plamotranslate
 
 import app.plamotranslate.llm.ProcessCompute
+import app.plamotranslate.llm.QwenAudioRecognizer
+import app.plamotranslate.pipeline.models.SharedModelCatalog
 import app.plamotranslate.pipeline.speech.ScheduledSpeech
+import app.plamotranslate.pipeline.speech.SpeechTrialAudio
 import android.app.Activity
 import android.os.Bundle
 import android.os.Debug
@@ -37,7 +40,8 @@ class AsrBenchActivity : Activity() {
         val view = TextView(this).apply { textSize = 12f; setPadding(32, 32, 32, 32) }
         setContentView(ScrollView(this).apply { addView(view) })
         scope.launch {
-            val report = runCatching { withContext(Dispatchers.Default) { run() } }.getOrElse { "失敗: $it" }
+            val sweep = intent.getBooleanExtra("sweep", false)
+            val report = runCatching { withContext(Dispatchers.Default) { if (sweep) sweep() else run() } }.getOrElse { "失敗: $it" }
             view.text = report
             log("終わり")
         }
@@ -88,6 +92,45 @@ class AsrBenchActivity : Activity() {
         sv.close()
         lid.close()
         File(getExternalFilesDir(null), "bench/asr-result.tsv").writeText(out.toString())
+        return out.toString()
+    }
+
+    /**
+     * スレッド数ごとの速さ（--ez sweep true）。Qwen3-ASR（CPU）と Whisper tiny の言語の識別を、1本から許された CPU の数まで
+     * 1本ずつ変え、試走の見本の音声と `bench/asr/` の WAV をそれぞれ3回処理した中央値を `bench/asr-sweep.tsv` に書く。
+     * 試走の候補の規則（どの本数を試すか）をデータで決めるために使う。
+     */
+    private suspend fun sweep(): String {
+        val out = StringBuilder()
+        fun line(s: String) {
+            out.appendLine(s)
+            log(s)
+        }
+        val asrDir = ModelCatalog.asrDir(this)
+        val wavs = File(getExternalFilesDir(null), "bench/asr").listFiles { f -> f.extension == "wav" }.orEmpty().sortedBy { it.name }
+        val audio = listOf("試走の見本" to SpeechTrialAudio.samples) + wavs.map { it.nameWithoutExtension to WavFile.read(it) }
+        val topology = ProcessCompute.topology()
+        line("CPU=${topology.key} 予算=${topology.budget}")
+        line("部品\tスレッド\t" + audio.joinToString("\t") { (name, samples) -> "$name(${"%.1f".format(samples.size / 16_000f)}秒) ms" })
+        fun median(action: () -> Unit) = List(3) { timed { action() }.second }.sorted()[1]
+        val translation = TranslationPreferences(this)
+        val target = androidInferenceTarget(this, translation).copy(requestGpu = false)
+        val models = ModelCatalog.modelsDir(this)
+        for (n in 1..topology.budget) {
+            val qwen = QwenAudioRecognizer.load(File(models, SharedModelCatalog.qwenWeights.path),
+                File(models, SharedModelCatalog.qwenProjector.path), applicationInfo.nativeLibraryDir,
+                translation.cpuOptions.variant, target, n)
+            qwen.recognize(SpeechTrialAudio.samples)
+            line("Qwen3-ASR\t$n\t" + audio.joinToString("\t") { (_, samples) -> "${median { qwen.recognize(samples) }}" })
+            qwen.close()
+        }
+        for (n in 1..topology.budget) {
+            val lid = WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR), n)
+            lid.scores(SpeechTrialAudio.samples, null)
+            line("Whisper\t$n\t" + audio.joinToString("\t") { (_, samples) -> "${median { lid.scores(samples, null) }}" })
+            lid.close()
+        }
+        File(getExternalFilesDir(null), "bench/asr-sweep.tsv").writeText(out.toString())
         return out.toString()
     }
 

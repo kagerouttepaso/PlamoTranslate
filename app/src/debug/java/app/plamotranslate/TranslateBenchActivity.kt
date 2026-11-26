@@ -5,6 +5,8 @@ import android.os.Bundle
 import android.widget.TextView
 import app.plamotranslate.llm.JapaneseForm
 import app.plamotranslate.llm.Language
+import app.plamotranslate.llm.ProcessCompute
+import app.plamotranslate.llm.TranslationEngine
 import app.plamotranslate.llm.TranslationRequest
 import app.plamotranslate.log.Logs
 import app.plamotranslate.models.TranslationModel
@@ -56,6 +58,7 @@ class TranslateBenchActivity : Activity() {
         val loadMs = (System.nanoTime() - loadStart) / 1_000_000
         val out = StringBuilder("model\tsrc\ttgt\tms\ttokens\ttok_per_s\tsource\ttranslation\n")
         log("${model.label}: 読込・初回準備 ${loadMs}ms（${if (engine.usesGpu) "GPU" else "CPU"}）")
+        if (intent.getBooleanExtra("sweep", false)) return sweep(engine, rows, dir, context)
         var totalMs = 0L
         var totalTokens = 0
         for (row in rows) {
@@ -82,6 +85,37 @@ class TranslateBenchActivity : Activity() {
         log(summary)
         File(dir, "$set-${model.name}${if (context != null) "-ctx" else ""}.tsv").writeText(out.toString(), Charsets.UTF_8)
         return summary
+    }
+
+    /**
+     * スレッド数ごとの生成速度（--ez sweep true）。1本から許された CPU の数まで1本ずつ変え、全部の文を1回ならしてから
+     * 3回訳した合計のトークン/秒の中央値を `translate-sweep.tsv` に書く。試走の候補の規則をデータで決めるために使う。
+     */
+    private suspend fun sweep(engine: TranslationEngine, rows: List<List<String>>, dir: File, context: String?): String {
+        val topology = ProcessCompute.topology()
+        val out = StringBuilder("CPU=${topology.key} 予算=${topology.budget} GPU=${engine.usesGpu}\nスレッド\tトークン/秒（3回）\n")
+        suspend fun pass(): Pair<Int, Long> {
+            var tokens = 0
+            val start = System.nanoTime()
+            for (row in rows) {
+                val src = Language.entries.first { it.code.startsWith(row[0]) }
+                val tgt = Language.entries.first { it.code.startsWith(row[1]) }
+                val one = SingleRequest(TranslationRequest(row[2].replace("\\n", "\n"), src, tgt, JapaneseForm.POLITE, context = context))
+                tokens += engine.run(1, one, TranslationStream.DEFAULT_MAX_TOKENS)
+            }
+            return tokens to (System.nanoTime() - start) / 1_000_000
+        }
+        for (n in 1..topology.budget) {
+            engine.configure(boost = true, threads = n)
+            pass()
+            val rates = List(3) { pass().let { (tokens, ms) -> tokens * 1000.0 / ms.coerceAtLeast(1) } }.sorted()
+            val line = "$n\t${"%.1f".format(rates[1])}（${rates.joinToString(", ") { "%.1f".format(it) }}）"
+            Logs.i("翻訳のスレッド数ごとの速さ: $line")
+            out.append(line).append('\n')
+        }
+        engine.close()
+        File(dir, "translate-sweep.tsv").writeText(out.toString(), Charsets.UTF_8)
+        return out.toString()
     }
 
     override fun onDestroy() {
