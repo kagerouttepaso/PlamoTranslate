@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.plamotranslate.llm.ProcessCompute
 import app.plamotranslate.pipeline.compute.ComputeLease
+import app.plamotranslate.pipeline.compute.ComputeWork
 import app.plamotranslate.pipeline.speech.RecognitionPriority
 import kotlinx.coroutines.delay
 
@@ -31,12 +32,12 @@ private val kinds = mapOf(
     RecognitionPriority.PARTIAL.name to Kind("途中の書き起こし", Color(0xFF42A5F5)),
     RecognitionPriority.PHRASE_LANGUAGE.name to Kind("文の言語の識別", Color(0xFFAB47BC)),
     RecognitionPriority.LANGUAGE.name to Kind("話し中の言語の識別", Color(0xFFE1A6F0)),
-    "翻訳" to Kind("翻訳", Color(0xFF66BB6A)),
+    ComputeWork.Translation.name to Kind("翻訳", Color(0xFF66BB6A)),
 )
-private val trial = Kind("試走", Color(0xFFBDBDBD))
+private val trialKind = Kind("試走", Color(0xFFBDBDBD))
 private val other = Kind("そのほか", Color(0xFF78909C))
 
-private fun ComputeLease.kind() = kinds[name] ?: if (name.endsWith("試走")) trial else other
+private fun ComputeLease.kind() = if (trial) trialKind else kinds[name] ?: other
 
 /**
  * 計算資源の貸出の様子（詳細設定の「会話中に CPU の使われ方を出す」）。直近12秒の CPU の貸出を処理ごとの色で積み上げ、

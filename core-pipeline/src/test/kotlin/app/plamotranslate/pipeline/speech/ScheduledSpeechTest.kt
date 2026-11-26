@@ -40,4 +40,23 @@ class ScheduledSpeechTest {
         assertEquals(loads, closed)
         assertEquals(listOf(ComputeWork.Regular) + List(3) { app.plamotranslate.pipeline.speech.RecognitionPriority.FINAL.work }, observedWork)
     }
+
+    @Test fun 言語の識別は書き起こしの分を残して数を選ぶ() = runTest {
+        var reservedSeen = -1
+        val compute = object : ComputeResources {
+            override suspend fun selectThreads(benchmark: ThreadBenchmark, requested: Int, gpu: Boolean, capacity: Int, reserved: Int): Int {
+                reservedSeen = reserved
+                return 2
+            }
+            override suspend fun <T> borrow(gpu: Boolean, threads: Int, work: ComputeWork,
+                action: suspend (Int, () -> Boolean) -> T): T = action(threads) { false }
+        }
+        ScheduledSpeech.identifier(compute, 0, null, transcriberThreads = 6) {
+            object : LanguageIdentifier {
+                override fun scores(samples: FloatArray, candidates: Set<String>?) = emptyMap<String, Float>()
+                override fun close() {}
+            }
+        }.close()
+        assertEquals(6, reservedSeen)
+    }
 }

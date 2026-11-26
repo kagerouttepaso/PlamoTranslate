@@ -19,8 +19,13 @@ class CpuTopology(cores: Map<Int, Core?>) {
 
     val key = tiers.joinToString("/", prefix = "v2:") { it.joinToString(",") }
 
-    fun candidates(requested: Int = 0): List<Int> {
+    /**
+     * 試す数の候補。[requested] が1以上なら、その数だけ（明示設定）。0なら、速い段から順に足した数。
+     * [capacity] は部品が使える数の上限、[reserved] は同時に走る別の部品が借りる数で、候補は予算からそれを引いた数（最低1）までにする。
+     */
+    fun candidates(requested: Int = 0, capacity: Int = Int.MAX_VALUE, reserved: Int = 0): List<Int> {
         if (requested > 0) return listOf(requested.coerceAtMost(budget))
-        return tiers.map { it.size }.runningFold(0, Int::plus).drop(1)
+        val limit = minOf(capacity, maxOf(1, budget - reserved))
+        return tiers.map { it.size }.runningFold(0, Int::plus).drop(1).map { minOf(it, limit) }.distinct()
     }
 }

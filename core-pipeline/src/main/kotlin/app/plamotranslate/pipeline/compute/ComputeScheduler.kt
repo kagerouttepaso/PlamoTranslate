@@ -33,7 +33,7 @@ data class ComputeWork(
  */
 data class ComputeLease(
     val id: Long, val name: String, val priority: ComputePriority, val gpu: Boolean, val threads: Int,
-    val start: Long, val end: Long? = null, val preempted: Boolean = false,
+    val start: Long, val end: Long? = null, val preempted: Boolean = false, val trial: Boolean = false,
 )
 
 /** 貸出の様子。詳細設定で選ぶと、会話の画面に図で出す。[recent] は直近 [ComputeScheduler.HISTORY_MILLIS] に終わった貸出。 */
@@ -62,9 +62,11 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
     val activity: StateFlow<ComputeActivity> = activityState.asStateFlow()
 
     private fun Ticket.lease(end: Long? = null, preempted: Boolean = false) =
-        ComputeLease(id, work.name, work.priority, gpu, if (this in active) granted else requested, since, end, preempted)
+        ComputeLease(id, work.name, work.priority, gpu, if (this in active) granted else requested, since, end, preempted, work.exclusiveCpu)
 
+    // 図を出していない間（購読が無い間）は、貸出のたびに一覧を作り直さない。履歴だけは持つ。
     private fun publish() {
+        if (activityState.subscriptionCount.value == 0) return
         val horizon = now() - HISTORY_MILLIS
         while (history.firstOrNull()?.let { it.end!! < horizon } == true) history.removeFirst()
         activityState.value = ComputeActivity(latest.budget, active.map { it.lease() }, waiting.map { it.lease() }, history.toList())

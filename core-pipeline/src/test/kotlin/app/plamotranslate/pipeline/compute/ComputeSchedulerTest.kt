@@ -19,6 +19,15 @@ class ComputeSchedulerTest {
         assertNotEquals(topology.key, CpuTopology(mapOf(2 to core(0, 10), 5 to core(4, 20))).key)
     }
 
+    @Test fun 同時に走る部品の分を残して候補を作る() {
+        val three = CpuTopology(mapOf(2 to core(0, 10), 5 to core(4, 20), 7 to core(7, 20)))
+        assertEquals(listOf(1, 2), three.candidates(reserved = 1))
+        assertEquals(listOf(1), three.candidates(reserved = 3))
+        assertEquals(listOf(1), three.candidates(capacity = 2, reserved = 2))
+        assertEquals(listOf(1, 2), three.candidates(capacity = 2))
+        assertEquals(listOf(3), three.candidates(requested = 3, reserved = 3))
+    }
+
     @Test fun 同じ所属で性能値が揺れても段と保存鍵を保つ() {
         val changed = CpuTopology(mapOf(7 to core(4, 19), 5 to core(4, 21), 2 to core(0, 9)))
         assertEquals(topology.tiers, changed.tiers)
@@ -86,6 +95,7 @@ class ComputeSchedulerTest {
 
     @Test fun 高い組が取り消してよい依頼を止めてから借りる() = runTest {
         val scheduler = ComputeScheduler()
+        val watching = launch(start = CoroutineStart.UNDISPATCHED) { scheduler.activity.collect {} }
         val order = mutableListOf<String>()
         val low = launch(start = CoroutineStart.UNDISPATCHED) {
             scheduler.borrow(topology, false, topology.budget, ComputeWork(ComputePriority.Speculative, StopMode.Cancel)) { _, _ ->
@@ -100,6 +110,7 @@ class ComputeSchedulerTest {
         val recent = scheduler.activity.value.recent
         assertEquals(listOf(ComputePriority.Speculative to true, ComputePriority.Normal to false), recent.map { it.priority to it.preempted })
         assertTrue(scheduler.activity.value.running.isEmpty())
+        watching.cancel()
     }
 
     @Test fun 区切りで譲った依頼は後続より先に戻る() = runTest {
