@@ -32,16 +32,19 @@ internal fun ThreadTrialDialog() {
             }
         }
     }
-    var closedId by rememberSaveable { mutableStateOf<String?>(null) }
+    // 「閉じる」は、この画面にいる間の試走をまとめて隠す。部品（翻訳・書き起こし・言語の識別）ごとの試走は続けて始まるので、
+    // 試走ごとに隠すと、閉じたそばから次の部品の試走で出直す。
+    var closed by rememberSaveable { mutableStateOf(false) }
     val trial = progress ?: return
-    if (closedId == trial.id) return
+    if (closed) return
     val longest = trial.rows.filterIsInstance<ThreadTrialRow.Measured>().maxOfOrNull { it.nanos } ?: 0L
     val accent = MaterialTheme.colorScheme.primary
     AlertDialog(
-        onDismissRequest = { closedId = trial.id },
-        title = { Text("この端末に合わせて速さを測っています（初回だけ）") },
+        onDismissRequest = { closed = true },
+        title = { Text("この端末に合わせて速さを測っています") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("モデルを初めて使うときだけ測ります。閉じても測定は続きます。", style = MaterialTheme.typography.bodySmall)
                 Text(trial.purpose.label, style = MaterialTheme.typography.titleMedium)
                 trial.rows.forEachIndexed { index, row ->
                     val selected = trial.selected == index + 1
@@ -65,6 +68,6 @@ internal fun ThreadTrialDialog() {
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { closedId = trial.id }) { Text("閉じる") } },
+        confirmButton = { TextButton(onClick = { closed = true }) { Text("閉じる") } },
     )
 }
