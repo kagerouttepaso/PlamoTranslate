@@ -47,6 +47,7 @@ class ThreadTrials {
     }
 
     suspend fun search(boundaries: List<Int>, range: IntRange, measure: suspend (Int) -> Unit) {
+        require(range.first == 1) { "スレッド数の探索範囲は1から始めます" }
         require(boundaries.isNotEmpty() && boundaries.all { it in range })
         val visited = mutableSetOf<Int>()
         suspend fun visit(count: Int) {

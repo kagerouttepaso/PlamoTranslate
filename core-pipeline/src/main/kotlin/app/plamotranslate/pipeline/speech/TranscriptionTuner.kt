@@ -92,7 +92,17 @@ object TranscriptionTuner {
             return prepared.second
         }
 
-        suspend fun fastestCpu(reason: String = cpuReason): TranscriptionChoice {
+        suspend fun fastestCpu(reason: String = cpuReason, compareGpu: Boolean = false): TranscriptionChoice {
+            if (range.first == range.last) {
+                val candidate = cpu(range.first)
+                // GPU の自動選択で速度を比べる場合だけ、固定した本数で基準時間を測る。
+                if (compareGpu) {
+                    val (engine, choice) = measure(candidate, reason)
+                    return select(engine to checkNotNull(choice))
+                }
+                val (engine, choice) = ready(candidate)
+                return select(engine to choice.copy(reason = reason))
+            }
             var current: T? = null
             var retained: TranscriptionCandidate? = null
             val benchmark = ThreadBenchmark(ThreadBenchmark.Purpose.Transcription, "Qwen3-ASR", key, directory) {
@@ -163,7 +173,7 @@ object TranscriptionTuner {
                 if (isCpu(cached.candidate)) return select(ready(cached.candidate, cached))
                 if (cached.candidate == gpu) return tryGpu { ready(gpu, cached) }?.let(::select) ?: fastestCpu()
             }
-            val cpu = fastestCpu()
+            val cpu = fastestCpu(compareGpu = true)
             val fastestCpuTime = trials.fastestMedian
             val (engine, choice) = tryGpu { measure(gpu, "GPU の試走結果を採用") } ?: return cpu
             if (choice != null && choice.medianNanos <= fastestCpuTime * GPU_RATIO) return save(select(engine to choice))

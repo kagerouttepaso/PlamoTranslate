@@ -15,6 +15,7 @@ class TranscriptionTunerTest {
         return topology.candidates(threads).map { TranscriptionCandidate(false, it, it) }
     }
     private var cpus = candidates(1)
+    private val board = app.plamotranslate.pipeline.compute.ThreadTrialBoard()
     private val reference = TranscriptionTuner.Reference("Hello!", "en")
     private var environment = TranscriptionTuner.Environment("a", "b", "c", "d", "e", "f", "g")
     private val choices = mutableMapOf<String, TranscriptionChoice>()
@@ -42,8 +43,9 @@ class TranscriptionTunerTest {
     private var gpuEntries = 0
     private var gpuEnds = 0
     private suspend fun prepare(duration: Long, valid: Boolean = true,
-        preference: TranscriptionPreference = TranscriptionPreference.AUTO, allowedGpu: Boolean = true): TranscriptionChoice {
-        val (engine, choice) = TranscriptionTuner.prepare(cpus, allowedGpu && fallback == null, preference, environment, app.plamotranslate.pipeline.compute.ThreadTrialBoard(), reference, store,
+        preference: TranscriptionPreference = TranscriptionPreference.AUTO, allowedGpu: Boolean = true,
+        range: IntRange = 1..cpus.maxOf { it.batch }): TranscriptionChoice {
+        val (engine, choice) = TranscriptionTuner.prepare(cpus, allowedGpu && fallback == null, preference, environment, board, reference, store,
             { action -> gpuPreparation.withLock { gpuEntries++; action() } },
             { assertTrue(gpuPreparation.isLocked); true },
             { assertTrue(gpuPreparation.isLocked); fallback = it; gpuEnds++; onGpuEnd() }, { candidate ->
@@ -58,7 +60,7 @@ class TranscriptionTunerTest {
                 val gpu = engine.candidate.gpu
                 TranscriptionTuner.Sample(Recognition("hello", if (gpu && !valid) "ja" else "en"),
                     if (gpu) duration else cpuTimes.getOrDefault(engine.candidate, 100L))
-            })
+            }, range = range)
         engine.use {
             assertEquals(listOf(engine), engines.filter { !it.closed })
             assertEquals(engine.candidate, choice.candidate)
@@ -98,7 +100,7 @@ class TranscriptionTunerTest {
         assertFalse(prepare(1, false, TranscriptionPreference.GPU).candidate.gpu)
         assertFalse(gpuPreparation.isLocked)
         assertNotNull(fallback)
-        assertEquals(listOf(1, 4), engines.map { it.trials })
+        assertEquals(listOf(1, 1), engines.map { it.trials })
         assertFalse(prepare(1, true, TranscriptionPreference.GPU).candidate.gpu)
         assertEquals(1, gpuEnds)
         assertTrue(choices.isEmpty())
@@ -150,7 +152,14 @@ class TranscriptionTunerTest {
             environment = environment.copy(cpu = CpuTopology(mapOf(first to null, first + 1 to null)).key)
             prepare(100, preference = TranscriptionPreference.CPU)
         }
-        assertEquals(listOf(4, 4, 1), engines.map { it.trials })
+        assertEquals(listOf(1, 1, 1), engines.map { it.trials })
+    }
+
+    @Test fun `スレッド数の明示時は指定した数で一度だけならす`() = runTest {
+        cpus = candidates(8, threads = 5)
+        val choice = prepare(100, preference = TranscriptionPreference.CPU, range = 5..5)
+        assertEquals(5, choice.candidate.batch)
+        assertEquals(1, engines.single().trials)
     }
 
     @Test fun `各段を端末の上限に収め同じ候補を一度だけ試す`() {

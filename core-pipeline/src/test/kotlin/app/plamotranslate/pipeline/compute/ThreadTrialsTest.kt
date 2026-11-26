@@ -31,6 +31,29 @@ class ThreadTrialsTest {
             search(listOf(1, 4, 8), listOf(300, 240, 180, 104, 102, 100, 140, 800), 5))
     }
 
+    @Test fun 少ない側で最速が更新されても境目から多い側へ進む() = runTest {
+        assertEquals(listOf(3, 7, 2, 1, 4, 5) to 4,
+            search(listOf(3, 7), listOf(160, 90, 100, 80, 130, 60, 180)))
+    }
+
+    @Test fun 多い側で計測を打ち切ったら次の本数に進まない() = runTest {
+        assertEquals(listOf(2, 6, 1, 3) to 2,
+            search(listOf(2, 6), listOf(120, 90, 150, 70, 80, 160)))
+    }
+
+    @Test fun 同時に始まった試走は先の試走が終了すると表示される() {
+        fun state(id: String) = ThreadTrialProgress(id, ThreadBenchmark.Purpose.Translation, listOf(ThreadTrialRow.Measuring))
+        val first = state("先")
+        val second = state("後")
+        board.publish(first.id, first)
+        board.publish(second.id, second)
+        assertEquals(first, board.progress.replayCache.single())
+        board.publish(first.id, null)
+        assertEquals(second, board.progress.replayCache.single())
+        board.publish(second.id, null)
+        assertEquals(null, board.progress.replayCache.single())
+    }
+
     @Test fun 予算が一つなら一度だけ測る() = runTest {
         assertEquals(listOf(1) to 1, search(listOf(1), listOf(90)))
     }
