@@ -32,13 +32,13 @@ internal fun ThreadTrialDialog() {
             }
         }
     }
+    var closedId by rememberSaveable { mutableStateOf<String?>(null) }
     val trial = progress ?: return
-    var closed by rememberSaveable(trial.id) { mutableStateOf(false) }
-    if (closed) return
+    if (closedId == trial.id) return
     val longest = trial.rows.filterIsInstance<ThreadTrialRow.Measured>().maxOfOrNull { it.nanos } ?: 0L
     val accent = MaterialTheme.colorScheme.primary
     AlertDialog(
-        onDismissRequest = { closed = true },
+        onDismissRequest = { closedId = trial.id },
         title = { Text("この端末に合わせて速さを測っています（初回だけ）") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -65,6 +65,6 @@ internal fun ThreadTrialDialog() {
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { closed = true }) { Text("閉じる") } },
+        confirmButton = { TextButton(onClick = { closedId = trial.id }) { Text("閉じる") } },
     )
 }
