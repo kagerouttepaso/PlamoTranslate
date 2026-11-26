@@ -21,6 +21,7 @@ import app.plamotranslate.pipeline.speech.TranscriptionPreference
 import app.plamotranslate.pipeline.speech.TranscriptionTuner
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -81,7 +82,10 @@ internal suspend fun loadSpeechEngine(
             }.also { loaded = it }
         }
     } catch (error: Throwable) {
-        loaded?.close()
+        loaded?.let { engine ->
+            engine.close()
+            withContext(NonCancellable) { engine.awaitClosed() }
+        }
         throw error
     }
 }

@@ -104,9 +104,12 @@ class ConversationSession(
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     sealed interface Event {
-        /** 音声認識の出来事。 */
-        /** 利用者が発話者の言語を指定した場合は、その言語で翻訳方向を決める。 */
-        data class Speech(val event: SpeechEvent, val specifiedLanguage: Language? = null) : Event
+        /** 認識器の世代を添える。利用者が発話者の言語を指定した場合は、その言語で翻訳方向を決める。 */
+        data class Speech(
+            val event: SpeechEvent,
+            val specifiedLanguage: Language? = null,
+            val generation: Long = 0,
+        ) : Event
 
         /** 確定訳の途中（トークンごと）。 */
         data class FinalProgress(val turnId: Long, val text: String) : Event
@@ -134,6 +137,9 @@ class ConversationSession(
 
         /** 聞くのを止める（停止ボタン、音声ファイルの終わり、入力の失敗）。話していた分を確定し終えてから止まる。 */
         data object StopRequested : Event
+
+        data object ScreenShown : Event
+        data object ScreenHidden : Event
 
         /** 画面を閉じた。聞いていれば、確定を待たずに聞き終える（音声認識も一緒に閉じる）。 */
         data object Closed : Event
@@ -184,6 +190,11 @@ class ConversationSession(
 
         /** 聞き終えた。音声の入力が残っていれば止め、聞いている間だけの設定を戻す（[Begin] と対）。 */
         data object Finish : Effect
+
+        data object PrepareRecognition : Effect
+
+        /** 準備を取り消すか認識器を閉じ、解放が済んだら [Event.RecognitionReleased] を返す。 */
+        data object ReleaseRecognition : Effect
     }
 
     private val router = LanguageRouter(mode, self, heard)
@@ -211,6 +222,16 @@ class ConversationSession(
 
     private var phase = Phase.IDLE
     private var modelsReady = false
+
+    private enum class RecognitionPhase { RELEASED, REQUESTED, RELEASING }
+
+    private var recognition = RecognitionPhase.RELEASED
+    var screenVisible = false
+        private set
+
+    /** 発話番号は認識器ごとに振り直すため、購読時の世代と合わせて結果を受け取る。 */
+    var recognitionGeneration = 0L
+        private set
 
     val canStart: Boolean get() = phase == Phase.IDLE && modelsReady
 
@@ -263,7 +284,9 @@ class ConversationSession(
     fun handle(event: Event): List<Effect> {
         val effects = mutableListOf<Effect>()
         when (event) {
-            is Event.Speech -> onSpeech(event.event, event.specifiedLanguage, effects)
+            is Event.Speech -> if (event.generation == recognitionGeneration) {
+                onSpeech(event.event, event.specifiedLanguage, effects)
+            }
             is Event.FinalProgress -> if (!isStaleFinal(event.turnId)) {
                 updateTurn(event.turnId) { it.withFinalProgress(event.text) }
             }
@@ -306,13 +329,24 @@ class ConversationSession(
             }
             Event.InputAvailable -> if (awaitingInput) begin(effects)
             Event.Started -> if (phase == Phase.IDLE) begin(effects)
+            Event.ScreenShown -> {
+                screenVisible = true
+                prepareRecognition(effects)
+            }
+            Event.ScreenHidden -> {
+                screenVisible = false
+                releaseRecognitionIfHidden(effects)
+            }
             Event.Closed -> {
                 if (listening) finish(effects)
                 phase = Phase.CLOSED
             }
-            Event.RecognitionReleased -> {
+            Event.RecognitionReleased -> if (recognition == RecognitionPhase.RELEASING) {
                 turns = turns.map { if (it.retained) it.copy(retained = false) else it }
                 turns.forEach(::restoreBeforeSwap)
+                recognitionBusy = false
+                recognition = if (listening) RecognitionPhase.REQUESTED else RecognitionPhase.RELEASED
+                prepareRecognition(effects)
             }
             Event.StopRequested -> when (phase) {
                 Phase.WAITING_FOR_MODELS, Phase.WAITING_FOR_INPUT -> phase = Phase.IDLE
@@ -353,7 +387,10 @@ class ConversationSession(
                 }
             }
             // 止めて、話していた分を確定し終えた
-            SpeechEvent.Flushed -> if (phase == Phase.STOPPING) finish(effects)
+            SpeechEvent.Flushed -> if (phase == Phase.STOPPING) {
+                finish(effects)
+                releaseRecognitionIfHidden(effects)
+            }
             is SpeechEvent.Retranscribed -> onRetranscribed(event)
             is SpeechEvent.RetranscribeFailed -> onRetranscribeFailed(event.id)
             is SpeechEvent.Released -> updateUtterance(event.id) { it.copy(retained = false) }
@@ -388,6 +425,21 @@ class ConversationSession(
         listeningCards = emptyList()
         partialPending = null
         effects += Effect.Finish
+    }
+
+    private fun prepareRecognition(effects: MutableList<Effect>) {
+        if (screenVisible && phase != Phase.CLOSED && recognition == RecognitionPhase.RELEASED) {
+            recognition = RecognitionPhase.REQUESTED
+            effects += Effect.PrepareRecognition
+        }
+    }
+
+    private fun releaseRecognitionIfHidden(effects: MutableList<Effect>) {
+        if (!screenVisible && !listening && phase != Phase.CLOSED && recognition == RecognitionPhase.REQUESTED) {
+            recognition = RecognitionPhase.RELEASING
+            recognitionGeneration++
+            effects += Effect.ReleaseRecognition
+        }
     }
 
     private fun updateCard(card: Long, change: (LiveSpeech) -> LiveSpeech) {
@@ -443,7 +495,7 @@ class ConversationSession(
      */
     private fun swapState(turn: Turn): SwapState = when {
         turn.swappedFrom != null -> SwapState.REWRITING
-        turn.utteranceId != null && !turn.retained -> SwapState.EXPIRED
+        turn.utteranceId != null && (!turn.retained || recognition == RecognitionPhase.RELEASING) -> SwapState.EXPIRED
         turn.retained && swappedLanguage(turn) != null -> SwapState.AVAILABLE
         else -> SwapState.UNAVAILABLE
     }
@@ -476,7 +528,6 @@ class ConversationSession(
      * 相手の言語を選び直していれば、前の訳は使わず訳し直す。その間に訳が止まっていても訳し直す）。
      */
     private fun onRetranscribeFailed(id: Long) {
-        // 認識器を作り直すと同じ発話番号が使われる。書き起こし直しを待っている発話だけを戻す。
         val turn = turns.firstOrNull { it.utteranceId == id && it.swappedFrom != null } ?: return
         restoreBeforeSwap(turn)
     }

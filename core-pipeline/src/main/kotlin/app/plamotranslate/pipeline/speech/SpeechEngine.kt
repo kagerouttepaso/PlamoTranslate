@@ -119,6 +119,9 @@ interface SpeechEngine : AutoCloseable {
      */
     fun retranscribe(utterance: Long, language: Language)
 
+    /** [close] を呼んだ後、認識器の解放が終わるまで待つ。同期的に閉じる実装はそのまま戻る。 */
+    suspend fun awaitClosed() = Unit
+
     companion object {
         const val SAMPLE_RATE = 16_000
     }

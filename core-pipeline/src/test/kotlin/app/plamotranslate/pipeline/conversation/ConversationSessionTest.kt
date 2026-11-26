@@ -66,6 +66,29 @@ class ConversationSessionTest {
         assertFalse(session.awaitingInput)
     }
 
+    @Test
+    fun 聞いていないときに画面を離れると解放し戻ると読み直す() {
+        val s = ConversationSession()
+        assertEquals(listOf(Effect.PrepareRecognition), s.handle(Event.ScreenShown))
+        assertEquals(listOf(Effect.ReleaseRecognition), s.handle(Event.ScreenHidden))
+        assertTrue(s.handle(Event.ScreenHidden).isEmpty())
+        assertTrue(s.handle(Event.RecognitionReleased).isEmpty())
+        assertEquals(listOf(Effect.PrepareRecognition), s.handle(Event.ScreenShown))
+        assertTrue(s.handle(Event.ScreenShown).isEmpty())
+    }
+
+    @Test
+    fun 画面を離れても聞いている間は保ち停止後の解放が済んでから読み直す() {
+        val s = ConversationSession()
+        s.handle(Event.ScreenShown)
+        s.handle(Event.Started)
+        assertTrue(s.handle(Event.ScreenHidden).isEmpty())
+        assertEquals(listOf(Effect.Flush), s.handle(Event.StopRequested))
+        assertEquals(listOf(Effect.Finish, Effect.ReleaseRecognition), s.handle(Event.Speech(SpeechEvent.Flushed)))
+        assertTrue(s.handle(Event.ScreenShown).isEmpty())
+        assertEquals(listOf(Effect.PrepareRecognition), s.handle(Event.RecognitionReleased))
+    }
+
     /** 音声認識のカードの番号の採番と、話し中のカード。 */
     private var nextCard = 100L
     private var card = -1L
@@ -487,6 +510,33 @@ class ConversationSessionTest {
         s.handle(Event.LanguageSwapped(turn.id))
         s.handle(Event.Speech(SpeechEvent.RetranscribeFailed(3, RetranscribeFailure.NOTHING_HEARD)))
         assertEquals(turn, s.turns.single())
+    }
+
+    @Test
+    fun 解放した認識器の書き起こし失敗では同じ発話番号の新しいカードを戻さない() {
+        val s = ConversationSession(PartnerMode(Language.KO))
+        s.handle(Event.ScreenShown)
+        val old = s.handle(final("前の発話", id = 7)).filterIsInstance<Effect.TranslateFinal>().single().turn
+        s.handle(Event.FinalDone(old.id, "이전 발화", 100))
+        s.handle(Event.LanguageSwapped(old.id))
+        val failed = Event.Speech(SpeechEvent.RetranscribeFailed(7, RetranscribeFailure.NOTHING_HEARD),
+            generation = s.recognitionGeneration)
+        s.handle(Event.ScreenHidden)
+        s.handle(Event.RecognitionReleased)
+        assertEquals(SwapState.EXPIRED, s.turns.single().swap)
+        assertEquals(old.direction, s.turns.single().direction)
+
+        s.handle(Event.ScreenShown)
+        val new = s.handle(final("次の発話", id = 7).copy(generation = s.recognitionGeneration))
+            .filterIsInstance<Effect.TranslateFinal>().single().turn
+        s.handle(Event.FinalDone(new.id, "다음 발화", 100))
+        s.handle(Event.LanguageSwapped(new.id))
+        val rewriting = s.turns.last()
+        assertEquals(SwapState.REWRITING, rewriting.swap)
+        assertTrue(s.handle(failed).isEmpty())
+        assertEquals(rewriting, s.turns.last())
+        s.handle(failed.copy(generation = s.recognitionGeneration))
+        assertEquals(new.direction, s.turns.last().direction)
     }
 
     @Test

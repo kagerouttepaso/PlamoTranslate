@@ -108,6 +108,8 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     private val session = ConversationSession(self = preferences.self(speechModel.languages) ?: Language.JA, heard = speechModel.languages)
 
     private var asr: SpeechEngine? = null
+    private var preparing: Job? = null
+    private var subscription: Job? = null
 
     /** 音声を音声認識へ渡している作業（マイクか音声ファイル）。止めるときは、これを止めてから確定させる。 */
     private var inputJob: Job? = null
@@ -125,25 +127,57 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         requestStart()
         viewModelScope.launch { model.collect { updateModels() } }
         EngineHolder.ensureLoaded(app)
-        loadAsr()
     }
 
-    fun loadAsr() {
+    fun screenShown() = handle(Event.ScreenShown)
+
+    fun screenHidden() = handle(Event.ScreenHidden)
+
+    fun retryAsr() {
+        if (session.screenVisible && _state.value.asr is AsrState.Failed) loadAsr()
+    }
+
+    private fun loadAsr() {
         _state.update { it.copy(asr = AsrState.Loading) }
         updateModels()
-        viewModelScope.launch {
+        preparing = viewModelScope.launch {
             val begin = System.nanoTime()
             val result = runCatching {
                 loadSpeechEngine(app, speechModel, recognition.profile(PROFILE), recognition.asrTuning, UtteranceRetention.KEEP_UTTERANCES)
             }
+            result.onFailure { if (it is CancellationException) throw it }
             result.onSuccess {
                 log("音声認識を読み込みました: $speechModel ${(System.nanoTime() - begin) / 1_000_000}ms")
-                asr = it.also(::attach)
+                asr = it
+                attach(it)
             }
             _state.update {
                 it.copy(asr = result.fold({ AsrState.Ready }, { e -> AsrState.Failed(e.message ?: e.toString()) }))
             }
             updateModels()
+        }
+    }
+
+    private fun detachRecognition(): SpeechEngine? {
+        preparing?.cancel()
+        preparing = null
+        subscription?.cancel()
+        subscription = null
+        val previous = asr
+        asr = null
+        previous?.close()
+        return previous
+    }
+
+    private fun releaseRecognition() {
+        val pending = preparing
+        val previous = detachRecognition()
+        _state.update { it.copy(asr = AsrState.Loading) }
+        updateModels()
+        viewModelScope.launch {
+            pending?.join()
+            previous?.awaitClosed()
+            handle(Event.RecognitionReleased)
         }
     }
 
@@ -169,13 +203,15 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
      * 認識が確定に要るジョブ（書き起こしと文の話し手の判定）を抱えている間は、途中訳を待たせる（CPU を確定の書き起こしに回す）。
      */
     private fun attach(engine: SpeechEngine) {
-        engine.languages = session.speechLanguages
-        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) { engine.events.collect { onEvent(Event.Speech(it)) } }
-        viewModelScope.launch {
-            engine.load.collect { load ->
-                if (load.behindSeconds != _state.value.lagSeconds) _state.update { it.copy(lagSeconds = load.behindSeconds) }
-                handle(Event.RecognitionBusy(load.urgent))
+        val generation = session.recognitionGeneration
+        subscription = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            launch {
+                engine.load.collect { load ->
+                    if (load.behindSeconds != _state.value.lagSeconds) _state.update { it.copy(lagSeconds = load.behindSeconds) }
+                    handle(Event.RecognitionBusy(load.urgent))
+                }
             }
+            engine.events.collect { onEvent(Event.Speech(it, generation = generation)) }
         }
     }
 
@@ -310,15 +346,6 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
         _state.update { it.copy(level = 0f, lagSeconds = 0f) }
     }
 
-    /** 音声認識のスレッドから、出来事を画面のスレッドの制御へ順に渡す（画面のスレッドは届いた順に処理する）。 */
-    @JvmName("postSpeech")
-    private fun post(events: List<SpeechEvent>) = post(events.map(Event::Speech))
-
-    private fun post(events: List<Event>) {
-        if (events.isEmpty()) return
-        viewModelScope.launch { events.forEach { onEvent(it) } }
-    }
-
     private fun onEvent(event: Event) {
         when (val speech = (event as? Event.Speech)?.event) {
             is SpeechEvent.CardText -> logText { "途中 [${speech.lang}] ${speech.text}" }
@@ -347,17 +374,20 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
             is Effect.CancelPartial -> partialJobs[effect.requestId]?.cancel()
             // 音声認識が無ければ書き起こし直せない（カードはそのまま）
             is Effect.Retranscribe -> asr?.retranscribe(effect.utterance, effect.language)
-                ?: post(listOf(SpeechEvent.RetranscribeFailed(effect.utterance, RetranscribeFailure.UNAVAILABLE)))
+                ?: handle(Event.Speech(SpeechEvent.RetranscribeFailed(effect.utterance, RetranscribeFailure.UNAVAILABLE),
+                    generation = session.recognitionGeneration))
             // 音声の入力を止めてから確定させる（後に渡した音声は次のカードになる）。音声認識が無ければ止め終わりをその場で返す
             Effect.Flush -> {
                 val input = inputJob
                 viewModelScope.launch {
                     input?.cancelAndJoin()
-                    asr?.flush() ?: post(listOf(SpeechEvent.Flushed))
+                    asr?.flush() ?: handle(Event.Speech(SpeechEvent.Flushed, generation = session.recognitionGeneration))
                 }
             }
             Effect.Begin -> begin()
             Effect.Finish -> finish()
+            Effect.PrepareRecognition -> loadAsr()
+            Effect.ReleaseRecognition -> releaseRecognition()
         }
     }
 
@@ -429,9 +459,7 @@ class ConversationViewModel(private val app: Application) : AndroidViewModel(app
     override fun onCleared() {
         // 聞いていれば確定を待たずに聞き終える（音声の入力を止める）
         handle(Event.Closed)
-        // 認識中のジョブが終わってから解放される（呼んだスレッドは待たない）
-        asr?.close()
-        asr = null
+        detachRecognition()
     }
 
     private fun log(message: String) = Logs.i("会話: $message")

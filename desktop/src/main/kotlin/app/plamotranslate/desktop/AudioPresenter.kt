@@ -23,6 +23,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
@@ -139,7 +140,7 @@ internal class AudioPresenter(
     private var engine: SpeechEngine? = null
     private val loading = Mutex()
     private var preparing: Job? = null
-    private var visible = false
+    private var releasing: Job? = null
     private var closed = false
     private var active: CaptureRun? = null
     private var partialJob: Pair<Long, Job>? = null
@@ -188,8 +189,7 @@ internal class AudioPresenter(
     }
 
     fun setVisible(visible: Boolean) {
-        this.visible = visible
-        releaseIfHidden()
+        handle(session, if (visible) Event.ScreenShown else Event.ScreenHidden)
     }
 
     fun isUsingQwen(): Boolean = active?.selection?.recognition?.model == SpeechModel.QWEN3_ASR
@@ -215,12 +215,14 @@ internal class AudioPresenter(
     /** 音の出どころ・認識の設定・再生音の言語。止めているときだけ変え、認識器とセッションを作り直す。 */
     private fun configure(updated: AudioSelection, reload: Boolean = false) {
         if (!state.value.canConfigure || closed || (!reload && updated == selection)) return
+        val visible = session.screenVisible
         releaseEngine()
         session = updated.session()
         partialJob = null
         translations.coroutineContext.cancelChildren()
         mutableState.value = AudioState(updated, automaticAvailable = supportsAutomatic(updated.recognition.model))
         saveSelection(updated)
+        if (visible) handle(session, Event.ScreenShown)
     }
 
     fun showSubtitle(visible: Boolean) {
@@ -282,29 +284,33 @@ internal class AudioPresenter(
 
     /** 画面の表示中に準備を始める。入力開始後は画面を離れても同じ読み込みを続ける。 */
     fun prepare() {
-        if (!visible || !state.value.canStart || closed || engine != null || preparing?.isActive == true) return
+        if (!session.screenVisible || !state.value.canStart || closed || engine != null || preparing?.isActive == true) return
         val current = session
         preparing = scope.launch {
             try {
+                releasing?.join()
                 obtainEngine()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                if (visible && !closed && current === session) {
+                if (current.screenVisible && !closed && current === session) {
                     mutableState.value = state.value.copy(error = error.message ?: "音声認識を準備できません。")
                 }
             }
         }
     }
 
-    private fun releaseIfHidden() {
-        if (closed || visible || active != null) return
-        val hadEngine = engine != null
-        releaseEngine()
-        if (hadEngine) handle(session, Event.RecognitionReleased)
+    private fun releaseRecognition(current: ConversationSession) {
+        val pending = preparing
+        val previous = releaseEngine()
+        releasing = scope.launch {
+            pending?.join()
+            previous?.awaitClosed()
+            handle(current, Event.RecognitionReleased)
+        }
     }
 
-    private fun releaseEngine() {
+    private fun releaseEngine(): SpeechEngine? {
         preparing?.cancel()
         preparing = null
         subscription?.cancel()
@@ -312,11 +318,13 @@ internal class AudioPresenter(
         val previous = engine
         engine = null
         previous?.close()
+        return previous
     }
 
     private suspend fun obtainEngine(): SpeechEngine = loading.withLock {
         engine?.let { return@withLock it }
         val current = session
+        val generation = current.recognitionGeneration
         val requested = selection
         var loaded: SpeechEngine? = null
         try {
@@ -334,7 +342,9 @@ internal class AudioPresenter(
                 }
                 asr.events.collect { event ->
                     val retained = event is SpeechEvent.Retranscribed || event is SpeechEvent.RetranscribeFailed || event is SpeechEvent.Released
-                    if (session === current && (active != null || retained)) handle(current, Event.Speech(event, active?.selection?.spoken ?: selection.spoken))
+                    if (session === current && (active != null || retained)) {
+                        handle(current, Event.Speech(event, active?.selection?.spoken ?: selection.spoken, generation))
+                    }
                 }
             }
             asr
@@ -343,7 +353,10 @@ internal class AudioPresenter(
             throw IllegalStateException("音声ライブラリを読み込めません。DLL の配置を確認して再起動してください。", error)
         } finally {
             // JNI の読み込み中に画面を離れた場合も、作成済みの認識器を解放する。
-            loaded?.takeUnless { it === engine }?.close()
+            loaded?.takeUnless { it === engine }?.let {
+                it.close()
+                withContext(NonCancellable) { it.awaitClosed() }
+            }
         }
     }
 
@@ -352,6 +365,7 @@ internal class AudioPresenter(
         active = run
         run.input = scope.launch {
             try {
+                releasing?.join()
                 val asr = obtainEngine()
                 run.engine = asr
                 val current = session
@@ -390,7 +404,7 @@ internal class AudioPresenter(
         scope.launch {
             run.input?.cancelAndJoin()
             if (active !== run) return@launch
-            run.engine?.flush() ?: handle(session, Event.Speech(SpeechEvent.Flushed))
+            run.engine?.flush() ?: handle(session, Event.Speech(SpeechEvent.Flushed, generation = session.recognitionGeneration))
         }
     }
 
@@ -406,8 +420,9 @@ internal class AudioPresenter(
                 active = null
                 mutableLevel.value = 0f
                 mutableState.value = state.value.copy(phase = AudioPhase.IDLE, lagSeconds = 0f)
-                releaseIfHidden()
             }
+            Effect.PrepareRecognition -> prepare()
+            Effect.ReleaseRecognition -> releaseRecognition(current)
             is Effect.TranslateFinal -> translations.launch { translateFinal(current, effect) }
             is Effect.TranslatePartial -> translatePartial(current, effect)
             is Effect.CancelPartial -> cancelPartial(current, effect.requestId)

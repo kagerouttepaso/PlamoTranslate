@@ -5,6 +5,7 @@ import app.plamotranslate.llm.Language
 
 import java.util.concurrent.LinkedBlockingQueue
 import kotlin.concurrent.thread
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -74,6 +75,7 @@ class SpeechPipeline(
     /** [closed] と、受け取り口へ入れる順番を守る（止めるより後に閉じたら、止める命令は必ず閉じる命令より前に入る）。 */
     private val gate = Object()
     @Volatile private var closed = false
+    private val closedSignal = CompletableDeferred<Unit>()
 
     /** 止める命令を受け取り、まだ [SpeechEvent.Flushed] を出していない（セグメンターのスレッドだけが読み書きする）。 */
     private var flushPending = false
@@ -152,11 +154,17 @@ class SpeechPipeline(
             inbox.put(Input.Close)
         }
         thread(name = "PlamoAsrClose") {
-            control.join()
-            workers.values.forEach { it.close() }
-            try { recognizer.close() } finally { identifier?.close() }
+            try {
+                control.join()
+                workers.values.forEach { it.close() }
+                try { recognizer.close() } finally { identifier?.close() }
+            } finally {
+                closedSignal.complete(Unit)
+            }
         }
     }
+
+    override suspend fun awaitClosed() = closedSignal.await()
 
     private fun controlLoop() {
         while (true) {

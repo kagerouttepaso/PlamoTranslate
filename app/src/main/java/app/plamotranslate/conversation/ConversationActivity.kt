@@ -99,7 +99,7 @@ class ConversationActivity : ComponentActivity() {
                         viewMode = vm::setViewMode,
                         clear = vm::clear,
                         swapLanguage = vm::swapLanguage,
-                        retry = vm::loadAsr,
+                        retry = vm::retryAsr,
                         shareLog = logExport::share,
                         saveLog = logExport::save,
                     ),
@@ -127,10 +127,16 @@ class ConversationActivity : ComponentActivity() {
         outState.putBoolean(REQUESTING_MIC, requestingMic)
     }
 
+    override fun onStart() {
+        super.onStart()
+        vm.screenShown()
+    }
+
     override fun onStop() {
         super.onStop()
         // 画面を離れたらマイクを止める（フォアグラウンドサービスはまだ無い。読み上げは ReadAloud.attach が止める）
         if (!requestingMic || isFinishing) vm.stop()
+        vm.screenHidden()
     }
 
     private fun startListening() {
