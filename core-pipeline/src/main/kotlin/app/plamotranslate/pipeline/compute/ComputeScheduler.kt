@@ -50,9 +50,13 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
                 val running = active.filter { it.gpu == gpu }
                 val free = if (gpu || running.any { it.exclusive }) 0 else latest.budget - running.sumOf { it.granted }
                 val target = minOf(next.requested, latest.budget)
+                // 低い組が止められる形で持っている CPU は、軽い依頼の空きにも数える（優先度の順を、本数の決め方でも守る）。
+                val reclaimable = if (gpu) 0 else running
+                    .filter { it.work.priority > next.work.priority && it.work.stop != StopMode.Finish }
+                    .sumOf { it.granted }
                 val count = when {
                     gpu -> next.requested
-                    next.work.resize == ResizeCost.Cheap -> minOf(target, free)
+                    next.work.resize == ResizeCost.Cheap -> minOf(target, free + reclaimable)
                     else -> target
                 }
                 val blocked = if (gpu) running.isNotEmpty() else
@@ -61,7 +65,7 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
                     if (!gpu) {
                         val minimum = when {
                             next.exclusive -> latest.budget
-                            next.work.resize == ResizeCost.Cheap -> 1
+                            next.work.resize == ResizeCost.Cheap -> maxOf(1, count)
                             else -> target
                         }
                         addAll(preempt(next, running, minimum - free))

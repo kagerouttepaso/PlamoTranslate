@@ -117,6 +117,19 @@ class ComputeSchedulerTest {
         assertEquals(listOf("区切り", "確定", "再開", "後続"), order)
     }
 
+    @Test fun 軽い処理は低い組が止められる分を取り返してから借りる() = runTest {
+        val scheduler = ComputeScheduler()
+        val partial = launch(start = CoroutineStart.UNDISPATCHED) {
+            scheduler.borrow(topology, false, topology.budget - 1, ComputeWork(ComputePriority.Speculative, StopMode.Cancel)) { _, _ ->
+                awaitCancellation()
+            }
+        }
+        var granted = 0
+        scheduler.borrow(topology, false, topology.budget, ComputeWork.Translation) { n, _ -> granted = n }
+        assertTrue(partial.isCancelled)
+        assertEquals(topology.budget, granted)
+    }
+
     @Test fun 軽い処理は空きだけ借り重い処理は全数を待つ() = runTest {
         val scheduler = ComputeScheduler()
         val counts = mutableListOf<Int>()
