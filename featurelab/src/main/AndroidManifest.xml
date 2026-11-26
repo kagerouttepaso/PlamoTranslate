@@ -7,7 +7,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <application
+    <application android:name=".LabApplication"
         android:allowBackup="false"
         android:label="機能テスト"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">

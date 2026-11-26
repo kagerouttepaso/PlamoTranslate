@@ -9,7 +9,13 @@ android {
     namespace = "app.plamotranslate.featurelab"
     compileSdk = 36
 
+    ndkVersion = "29.0.14206865"
+    externalNativeBuild.cmake {
+        path("src/main/cpp/CMakeLists.txt")
+        version = "3.31.6"
+    }
     defaultConfig {
+        ndk.abiFilters += "arm64-v8a"
         applicationId = "app.plamotranslate.featurelab"
         minSdk = 34  // ユーザー補助のウィンドウ単位の撮影（takeScreenshotOfWindow）がAPI 34から
         targetSdk = 36

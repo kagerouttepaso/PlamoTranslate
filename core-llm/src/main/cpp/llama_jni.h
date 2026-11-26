@@ -1,5 +1,7 @@
 #pragma once
 
+void reset_cpu_affinity();
+
 #include <jni.h>
 #include <string>
 #include "ggml-backend.h"

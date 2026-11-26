@@ -17,6 +17,7 @@ import java.io.File
  * プロセスの CPU の予算を全部借りる。中の認識器はその間だけ並列に動かす。
  */
 interface OcrCompute {
+    fun prepareThread() {}
     suspend fun <T> exclusive(action: suspend () -> T): T
 }
 
@@ -30,7 +31,7 @@ interface OcrCompute {
  * 返すのは1行ずつの読み取り（[OcrLine]）。吹き出し・段落にまとめるのは呼ぶ側（中核の `LineGrouper`）。
  */
 class MultiScriptOcr(private val paddleDir: File? = null, private val compute: OcrCompute) : OcrEngine {
-    private val paddle: PaddleReader? = paddleDir?.let { runCatching { PaddleReader.load(it) }.getOrNull() }
+    private val paddle: PaddleReader? = paddleDir?.let { runCatching { compute.prepareThread(); PaddleReader.load(it) }.getOrNull() }
 
     private val readers: List<LineReader> = listOfNotNull(
         paddle,
@@ -68,7 +69,12 @@ class MultiScriptOcr(private val paddleDir: File? = null, private val compute: O
     /** [light] なら重い認識器（[LineReader.heavy]）を使わない。 */
     private suspend fun read(bitmap: Bitmap, use: Set<Source>, light: Boolean = false): List<OcrLine> = coroutineScope {
         val readings = readers.filter { r -> r.sources.any { it in use } && !(light && r.heavy) }
-            .map { r -> async(Dispatchers.Default) { r.read(bitmap, use) } }
+            .map { reader ->
+                async(Dispatchers.Default) {
+                    compute.prepareThread()
+                    reader.read(bitmap, use)
+                }
+            }
             .awaitAll()
         BlockMerger.merge(
             read = readings.fold(mapOf()) { acc, r -> acc + r.lines },

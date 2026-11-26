@@ -69,6 +69,7 @@ class LabA11yService : AccessibilityService() {
     fun run(cmd: String) {
         Lab.log("命令 $cmd")
         when {
+            cmd == "cpu" -> CpuLab.run()
             cmd == "overlay_on" -> showOverlay(true)
             cmd == "overlay_off" -> showOverlay(false)
             cmd == "shot" -> shotDisplay(1, 0)

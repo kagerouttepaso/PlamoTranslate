@@ -5,6 +5,8 @@ import app.plamotranslate.log.Logs
 
 /** llama.cppのJNI入口。登録と実行の排他は [LlamaRuntime] が管理する。 */
 internal object LlamaNative {
+    external fun nativeResetCpuAffinity()
+
     init {
         System.loadLibrary("plamo-llm")
     }

@@ -11,6 +11,10 @@ import java.io.File
 object ProcessCompute : ComputeResources {
     private val scheduler = ComputeScheduler { Logs.i(it) }
 
+    fun resetCpuAffinity() {
+        if (System.getProperty("java.vm.name") == "Dalvik") LlamaNative.nativeResetCpuAffinity()
+    }
+
     fun topology(): CpuTopology {
         if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
             val pairs = LlamaNative.nativeWindowsCoreClasses()?.asList()?.chunked(2)?.associate { (cpu, efficiency) ->
@@ -18,6 +22,7 @@ object ProcessCompute : ComputeResources {
             }.orEmpty()
             return CpuTopology(pairs.ifEmpty { mapOf(0 to null) })
         }
+        resetCpuAffinity()
         val allowed = runCatching {
             File("/proc/thread-self/status").useLines { lines -> lines.first { it.startsWith("Cpus_allowed_list:") }.substringAfter(':').trim() }
                 .split(',').flatMap { range ->
@@ -59,5 +64,8 @@ object ProcessCompute : ComputeResources {
 
     override suspend fun <T> borrow(gpu: Boolean, threads: Int, work: ComputeWork,
         action: suspend (Int, () -> Boolean) -> T): T =
-        scheduler.borrow(topology(), gpu, work.benchmark?.let { selectThreads(it, threads, gpu) } ?: threads, work, action)
+        scheduler.borrow(topology(), gpu, work.benchmark?.let { selectThreads(it, threads, gpu) } ?: threads, work) { count, waiting ->
+            resetCpuAffinity()
+            action(count, waiting)
+        }
 }

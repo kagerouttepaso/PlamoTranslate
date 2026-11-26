@@ -13,6 +13,8 @@
 #include <filesystem>
 #endif
 #include <jni.h>
+#include <cerrno>
+#include "cpu_affinity.h"
 
 #include <algorithm>
 #include <cstdarg>
@@ -356,6 +358,31 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
     return JNI_VERSION_1_6;
 }
 
+void reset_cpu_affinity() {
+#ifdef __ANDROID__
+    auto allowed = [] {
+        std::ifstream status("/proc/thread-self/status");
+        std::string line;
+        while (std::getline(status, line)) {
+            if (line.find("Cpus_allowed_list:") == 0) return line.substr(line.find(':') + 1);
+        }
+        return std::string("?");
+    };
+    const auto before = allowed();
+    if (allow_all_cpus() != 0) {
+        LOGW("sched_setaffinity: %s", strerror(errno));
+        return;
+    }
+    const auto after = allowed();
+    if (before != after) LOGI("Cpus_allowed_list:%s →%s", before.c_str(), after.c_str());
+#endif
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_app_plamotranslate_llm_LlamaNative_nativeResetCpuAffinity(JNIEnv *, jobject) {
+    reset_cpu_affinity();
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_app_plamotranslate_llm_LlamaNative_nativeInitCpu(JNIEnv *env, jobject, jstring jlib_dir, jstring jcpu_variant) {
     const std::string lib_dir = to_std_string(env, jlib_dir);
@@ -477,6 +504,7 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
     // use_pool が false なら作らず、llama.cppが推論のたびにスレッドを用意する既定の動きにする。
     // poll は処理を待つ間のスピン待機の度合い（0は眠って待つ、既定50）
     tp_params.poll = (uint32_t) poll;
+    reset_cpu_affinity();
     engine->threadpool = use_pool && g_threadpool_new ? g_threadpool_new(&tp_params) : nullptr;
     if (engine->threadpool) {
         llama_attach_threadpool(ctx, engine->threadpool, engine->threadpool);
@@ -576,6 +604,7 @@ extern "C" JNIEXPORT jint JNICALL
 Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject, jlong handle, jint jslots,
                                                             jint max_tokens, jobject callback) {
     auto *engine = reinterpret_cast<Engine *>(handle);
+    reset_cpu_affinity();
     const bool trace_startup = engine->first_run;
     engine->first_run = false;
     if (trace_startup) startup_stage("初回推論 開始");
