@@ -440,6 +440,24 @@ class SpeechSegmenterTest {
     }
 
     @Test
+    fun 長い発話の区切りは書き起こしを頼んだ文の終わりより前に来ない() {
+        // 文の終わりの直後の無音が、文の切れ目の前後で一番静かな所になる。そこで区切ると文がカードから外れ、
+        // 区切った残りとして同じ音声を初めから書き起こし直す
+        val s = segmenter()
+        val cards = finals(s.feed(Sound.JA to 9.5, Sound.SILENCE to 0.7, Sound.JA to 10.0, Sound.SILENCE to 4.0))
+        assertTrue(cards.size >= 2)
+        val first = cards[0]
+        val jobs = s.submitted.filter { it.card == first.id }
+        // 文の言語の識別の書き起こしは、文の書き起こしに使い回す
+        val phrase = jobs.filter { it.priority == RecognitionPriority.PHRASE || it.priority == RecognitionPriority.PHRASE_LANGUAGE }
+            .maxOfOrNull { it.samples.size } ?: 0
+        val rest = jobs.filter { it.priority == RecognitionPriority.FINAL }.sumOf { it.samples.size }
+        assertTrue("文 $phrase", phrase > SAMPLE_RATE * 9)
+        // 文と区切った残りを合わせても、カードの音声を2度は書き起こさない
+        assertTrue("文 $phrase 残り $rest カード ${first.durationMs}ms", phrase + rest <= first.durationMs * SAMPLE_RATE / 1000 + FRAME)
+    }
+
+    @Test
     fun 話し始めの前の音声を頭に足し始まりの時刻は足した分を含めて数える() {
         val cards = finals(segmenter().feed(Sound.SILENCE to 2.0, Sound.JA to 1.5, Sound.SILENCE to 3.0))
         val preroll = (profile.prerollSeconds * 1000).toLong()
