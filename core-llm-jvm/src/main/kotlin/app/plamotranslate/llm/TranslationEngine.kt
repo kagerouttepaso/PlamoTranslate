@@ -203,7 +203,7 @@ class TranslationEngine private constructor(
             try {
                 return withContext(dispatcher) {
                     var poolCapacity = 1
-                    val requested = ProcessCompute.topology().candidates(cpu.threads).last()
+                    val requested = ProcessCompute.availableTopology().candidates(cpu.threads).last()
                     var gpu = runtime.initialize(nativeLibDir, cpu.variant, target)
                     suspend fun loadHandle(gpu: Boolean) = ProcessCompute.borrow(gpu, requested) { n, _ ->
                         poolCapacity = n
@@ -218,7 +218,7 @@ class TranslationEngine private constructor(
                     if (handle == 0L) throw TranslationException("モデルの読み込みに失敗しました: ${model.name}")
                     val engine = TranslationEngine(handle, dispatcher, gpu, poolCapacity, cpu.boost)
                     loaded = engine
-                    val topology = ProcessCompute.topology()
+                    val topology = ProcessCompute.availableTopology()
                     val version = listOf(model.absolutePath, model.length(), model.lastModified(), gpu, cpu, nCtx).joinToString("|")
                     engine.selectedThreads = ProcessCompute.selectThreads(
                         ThreadBenchmark("PLaMo", version, cacheDir, engine::trial), cpu.threads, gpu, poolCapacity)

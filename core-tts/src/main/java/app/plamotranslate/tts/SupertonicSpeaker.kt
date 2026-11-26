@@ -146,6 +146,7 @@ class SupertonicSpeaker(
     }
 
     /** 推論のスレッドで呼ぶ。 */
+    // ONNX セッションは貸出中に中断せず作り、広げた CPU 指定を作業スレッドに引き継ぐ。
     private fun engine(threads: Int): OfflineTts {
         tts?.takeIf { loadedThreads == threads }?.let { return it }
         close()

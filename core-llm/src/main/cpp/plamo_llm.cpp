@@ -358,7 +358,7 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
     return JNI_VERSION_1_6;
 }
 
-void reset_cpu_affinity() {
+static void reset_cpu_affinity() {
 #ifdef __ANDROID__
     auto allowed = [] {
         std::ifstream status("/proc/thread-self/status");
@@ -504,7 +504,8 @@ Java_app_plamotranslate_llm_LlamaNative_nativeLoad(JNIEnv *env, jobject, jstring
     // use_pool が false なら作らず、llama.cppが推論のたびにスレッドを用意する既定の動きにする。
     // poll は処理を待つ間のスピン待機の度合い（0は眠って待つ、既定50）
     tp_params.poll = (uint32_t) poll;
-    reset_cpu_affinity();
+    // プールのスレッドは作成時に呼び出し元の CPU 指定を引き継ぐ。
+    if (use_pool && g_threadpool_new) reset_cpu_affinity();
     engine->threadpool = use_pool && g_threadpool_new ? g_threadpool_new(&tp_params) : nullptr;
     if (engine->threadpool) {
         llama_attach_threadpool(ctx, engine->threadpool, engine->threadpool);
@@ -604,7 +605,6 @@ extern "C" JNIEXPORT jint JNICALL
 Java_app_plamotranslate_llm_LlamaNative_nativeTranslateJobs(JNIEnv *env, jobject, jlong handle, jint jslots,
                                                             jint max_tokens, jobject callback) {
     auto *engine = reinterpret_cast<Engine *>(handle);
-    reset_cpu_affinity();
     const bool trace_startup = engine->first_run;
     engine->first_run = false;
     if (trace_startup) startup_stage("初回推論 開始");

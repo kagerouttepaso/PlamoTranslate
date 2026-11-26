@@ -21,6 +21,7 @@ private class SpeechSession<T : AutoCloseable>(private val compute: ComputeResou
         compute.borrow(false, requested, work) { count, _ -> run(count, action) }
 }
 
+// ONNX セッションは貸出中に中断せず作り、広げた CPU 指定を作業スレッドに引き継ぐ。
 object ScheduledSpeech {
     private suspend fun <T : AutoCloseable> prepare(compute: ComputeResources, name: String, version: String,
         directory: java.io.File?, threads: Int, create: (Int) -> T, sample: (T) -> Unit): SpeechSession<T> {

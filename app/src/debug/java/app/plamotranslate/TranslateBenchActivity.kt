@@ -92,7 +92,7 @@ class TranslateBenchActivity : Activity() {
      * 3回訳した合計のトークン/秒の中央値を `translate-sweep.tsv` に書く。試走の候補の規則をデータで決めるために使う。
      */
     private suspend fun sweep(engine: TranslationEngine, rows: List<List<String>>, dir: File, context: String?): String {
-        val topology = ProcessCompute.topology()
+        val topology = ProcessCompute.availableTopology()
         val out = StringBuilder("CPU=${topology.key} 予算=${topology.budget} GPU=${engine.usesGpu}\nスレッド\tトークン/秒（3回）\n")
         suspend fun pass(): Pair<Int, Long> {
             var tokens = 0

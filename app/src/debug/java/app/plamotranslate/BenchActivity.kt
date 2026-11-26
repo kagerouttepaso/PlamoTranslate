@@ -90,7 +90,7 @@ class BenchActivity : ComponentActivity() {
         val language = source.recognizers
         say("ベンチ: 原文の言語 ${source?.code ?: "auto"}（認識器の組 $language）")
         val ocr = MultiScriptOcr(ModelCatalog.ocrDir(this), AndroidCpuCompute)
-        say("ベンチ: PP-OCR ${ocr.paddleSources.ifEmpty { setOf("なし（ML Kitだけ）") }.joinToString("・")}")
+        say("ベンチ: PP-OCR ${ocr.paddleSources().ifEmpty { setOf("なし（ML Kitだけ）") }.joinToString("・")}")
         val statusBar = statusBarHeight()
         val results = File(output, "results.jsonl")
         results.writeText("")

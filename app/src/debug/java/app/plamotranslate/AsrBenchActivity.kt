@@ -109,7 +109,7 @@ class AsrBenchActivity : Activity() {
         val asrDir = ModelCatalog.asrDir(this)
         val wavs = File(getExternalFilesDir(null), "bench/asr").listFiles { f -> f.extension == "wav" }.orEmpty().sortedBy { it.name }
         val audio = listOf("試走の見本" to SpeechTrialAudio.samples) + wavs.map { it.nameWithoutExtension to WavFile.read(it) }
-        val topology = ProcessCompute.topology()
+        val topology = ProcessCompute.availableTopology()
         line("CPU=${topology.key} 予算=${topology.budget}")
         line("部品\tスレッド\t" + audio.joinToString("\t") { (name, samples) -> "$name(${"%.1f".format(samples.size / 16_000f)}秒) ms" })
         fun median(action: () -> Unit) = List(3) { timed { action() }.second }.sorted()[1]
@@ -117,6 +117,7 @@ class AsrBenchActivity : Activity() {
         val target = androidInferenceTarget(this, translation).copy(requestGpu = false)
         val models = ModelCatalog.modelsDir(this)
         for (n in 1..topology.budget) {
+            // QwenAudioRecognizer は読み込みと認識の各呼び出しで CPU を借りる。
             val qwen = QwenAudioRecognizer.load(File(models, SharedModelCatalog.qwenWeights.path),
                 File(models, SharedModelCatalog.qwenProjector.path), applicationInfo.nativeLibraryDir,
                 translation.cpuOptions.variant, target, n)
@@ -125,10 +126,12 @@ class AsrBenchActivity : Activity() {
             qwen.close()
         }
         for (n in 1..topology.budget) {
-            val lid = WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR), n)
-            lid.scores(SpeechTrialAudio.samples, null)
-            line("Whisper\t$n\t" + audio.joinToString("\t") { (_, samples) -> "${median { lid.scores(samples, null) }}" })
-            lid.close()
+            ProcessCompute.borrow(false, n) { count, _ ->
+                WhisperLanguageIdentifier.load(File(asrDir, WhisperLanguageIdentifier.DIR), count).use { lid ->
+                    lid.scores(SpeechTrialAudio.samples, null)
+                    line("Whisper\t$count\t" + audio.joinToString("\t") { (_, samples) -> "${median { lid.scores(samples, null) }}" })
+                }
+            }
         }
         File(getExternalFilesDir(null), "bench/asr-sweep.tsv").writeText(out.toString())
         return out.toString()

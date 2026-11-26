@@ -131,7 +131,6 @@ std::string transcribe(AudioModel &audio, AudioRequest &request, const std::vect
 
 extern "C" JNIEXPORT jlong JNICALL Java_app_plamotranslate_llm_LlamaNative_nativeLoadAudio(
     JNIEnv *env, jobject, jstring model_path, jstring projector_path, jboolean gpu, jint encoder_threads, jint batch_threads, jint generation_threads) {
-    reset_cpu_affinity();
     try {
         auto audio = std::make_unique<AudioModel>();
         auto model_params = llama_model_default_params();
@@ -185,7 +184,6 @@ extern "C" JNIEXPORT void JNICALL Java_app_plamotranslate_llm_LlamaNative_native
 
 extern "C" JNIEXPORT jbyteArray JNICALL Java_app_plamotranslate_llm_LlamaNative_nativeTranscribe(
     JNIEnv *env, jobject, jlong handle, jobject token, jfloatArray pcm, jstring language) {
-    reset_cpu_affinity();
     try {
         std::vector<float> samples(env->GetArrayLength(pcm));
         env->GetFloatArrayRegion(pcm, 0, samples.size(), samples.data());

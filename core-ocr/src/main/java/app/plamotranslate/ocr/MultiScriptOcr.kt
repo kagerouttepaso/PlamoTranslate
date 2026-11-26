@@ -6,7 +6,7 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -17,8 +17,7 @@ import java.io.File
  * プロセスの CPU の予算を全部借りる。中の認識器はその間だけ並列に動かす。
  */
 interface OcrCompute {
-    fun prepareThread() {}
-    suspend fun <T> exclusive(action: suspend () -> T): T
+    suspend fun <T> exclusive(action: suspend (CoroutineDispatcher) -> T): T
 }
 
 /**
@@ -31,34 +30,36 @@ interface OcrCompute {
  * 返すのは1行ずつの読み取り（[OcrLine]）。吹き出し・段落にまとめるのは呼ぶ側（中核の `LineGrouper`）。
  */
 class MultiScriptOcr(private val paddleDir: File? = null, private val compute: OcrCompute) : OcrEngine {
-    private val paddle: PaddleReader? = paddleDir?.let { runCatching { compute.prepareThread(); PaddleReader.load(it) }.getOrNull() }
+    private val paddleModel = lazy { paddleDir?.let { runCatching { PaddleReader.load(it) }.getOrNull() } }
 
-    private val readers: List<LineReader> = listOfNotNull(
+    private val paddle get() = paddleModel.value
+
+    private val readers = lazy { listOfNotNull(
         paddle,
         MlKitReader(Source.MLKIT_ZH, TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build()), keepGlyphs = true),
         MlKitReader(Source.MLKIT_JA, TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())),
         MlKitReader(Source.MLKIT_KO, TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())),
         MlKitReader(Source.MLKIT_LATIN, TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)),
-    )
+    ) }
 
     /** PP-OCR で読める認識器の一覧（評価・ログ用）。 */
-    val paddleSources: Set<String> get() = paddle?.sources.orEmpty().map { it.name }.toSet()
+    suspend fun paddleSources(): Set<String> = compute.exclusive { paddle?.sources.orEmpty().map { it.name }.toSet() }
 
     override suspend fun recognize(bitmap: Bitmap, language: OcrLanguage): List<OcrLine> =
-        compute.exclusive { read(bitmap, Recognizers.of(language)) }
+        compute.exclusive { dispatcher -> read(dispatcher, bitmap, Recognizers.of(language)) }
 
     /**
      * 白縁取り・白抜きの文字にも強く読む（画面翻訳の動く画面のモード。[OutlinedText]）。元の画像と、RGBの最小値を取った画像を
      * 並べて読み、行ごとに崩れの少ない方を採る。文字認識が1回分多くかかる。最小値の画像には重い認識器（PP-OCR）を使わない。
      */
-    suspend fun recognizeOutlined(bitmap: Bitmap, language: OcrLanguage): List<OcrLine> = compute.exclusive { coroutineScope {
+    suspend fun recognizeOutlined(bitmap: Bitmap, language: OcrLanguage): List<OcrLine> = compute.exclusive { dispatcher -> coroutineScope {
         val use = Recognizers.of(language)
         // 束ねた後のブロックで比べると、言語の違う行が一緒に束ねられて比べられなかった（2026-11-12）ので、行ごとに比べる
-        val primary = async { read(bitmap, use) }
-        val variant = async(Dispatchers.Default) {
+        val primary = async { read(dispatcher, bitmap, use) }
+        val variant = async(dispatcher) {
             val white = OutlinedText.whiteness(bitmap)
             try {
-                read(white, use, light = true)
+                read(dispatcher, white, use, light = true)
             } finally {
                 white.recycle()
             }
@@ -67,11 +68,10 @@ class MultiScriptOcr(private val paddleDir: File? = null, private val compute: O
     } }
 
     /** [light] なら重い認識器（[LineReader.heavy]）を使わない。 */
-    private suspend fun read(bitmap: Bitmap, use: Set<Source>, light: Boolean = false): List<OcrLine> = coroutineScope {
-        val readings = readers.filter { r -> r.sources.any { it in use } && !(light && r.heavy) }
+    private suspend fun read(dispatcher: CoroutineDispatcher, bitmap: Bitmap, use: Set<Source>, light: Boolean = false): List<OcrLine> = coroutineScope {
+        val readings = readers.value.filter { r -> r.sources.any { it in use } && !(light && r.heavy) }
             .map { reader ->
-                async(Dispatchers.Default) {
-                    compute.prepareThread()
+                async(dispatcher) {
                     reader.read(bitmap, use)
                 }
             }
@@ -82,7 +82,10 @@ class MultiScriptOcr(private val paddleDir: File? = null, private val compute: O
         )
     }
 
-    override fun close() = readers.forEach { it.close() }
+    override fun close() {
+        if (readers.isInitialized()) readers.value.forEach { it.close() }
+        else if (paddleModel.isInitialized()) paddle?.close()
+    }
 }
 
 /**
