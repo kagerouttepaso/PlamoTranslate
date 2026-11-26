@@ -7,6 +7,9 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.os.Bundle
+import android.os.SystemClock
+import app.plamotranslate.AdvancedPreferences
+import app.plamotranslate.ComputeMonitor
 import android.util.Size
 import android.view.OrientationEventListener
 import android.widget.Toast
@@ -85,6 +88,7 @@ class CameraTranslateActivity : ComponentActivity() {
     private lateinit var analysisExecutor: ExecutorService
     private val busy = AtomicBoolean(false)
     private val preferences by lazy { CameraPreferences(this) }
+    private var showComputeMonitor by mutableStateOf(false)
     private var camera: Camera? = null
 
     /**
@@ -172,15 +176,17 @@ class CameraTranslateActivity : ComponentActivity() {
             image.close()
             return
         }
+        val startedAt = SystemClock.uptimeMillis()
         val bitmap = try {
             image.toUprightBitmap()
         } finally {
             image.close()
         }
+        val captureMillis = SystemClock.uptimeMillis() - startedAt
         lifecycleScope.launch {
             try {
                 // 一時停止中に読み終えたコマを採るかは、中核の制御が決める
-                translator.process(bitmap, deviceRotation)
+                translator.process(bitmap, deviceRotation, captureMillis)
             } finally {
                 busy.set(false)
             }
@@ -215,6 +221,8 @@ class CameraTranslateActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        showComputeMonitor = AdvancedPreferences(this).computeMonitor
+        translator.logFrames = showComputeMonitor
         if (orientationListener.canDetectOrientation()) orientationListener.enable()
     }
 
@@ -267,6 +275,7 @@ class CameraTranslateActivity : ComponentActivity() {
                     }
                 }
                 ModelBanner(model)
+                if (showComputeMonitor) ComputeMonitor(Modifier.padding(horizontal = 8.dp))
                 Box(Modifier.weight(1f))
                 Column(
                     Modifier.fillMaxWidth().background(Color(0x99000000)).padding(8.dp),

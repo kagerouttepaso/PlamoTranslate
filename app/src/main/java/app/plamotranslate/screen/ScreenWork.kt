@@ -69,6 +69,7 @@ internal class PageLayout(
     val units: Int,
     val targets: List<TranslationTarget>,
     val ocrMillis: Long,
+    val ocrWaitMillis: Long,
     val error: String?,
 ) {
     companion object {
@@ -76,11 +77,11 @@ internal class PageLayout(
          * 読んだ行から、まとめる・選ぶ・枠を決める工程を続けて行う。前提 [frame] と撮影画像 [image] は読むだけ。
          * 判断は中核（まとめ方・占めてよい範囲）と overlay（選ぶ・枠を決める）にあり、ここは順番だけを持つ。
          */
-        fun of(frame: ScreenFrame, image: Bitmap, lines: List<OcrLine>, ocrMillis: Long, error: String?): PageLayout {
+        fun of(frame: ScreenFrame, image: Bitmap, lines: List<OcrLine>, ocrMillis: Long, ocrWaitMillis: Long, error: String?): PageLayout {
             val choice = frame.choice
             val units = groupLines(lines, choice.grouping, frame.width, frame.height)
             val targets = selectTargets(units, image, frame.statusBar, SCREEN_TARGET, fitBubbles = choice.fitBubbles)
-            return PageLayout(lines.size, units.size, targets, ocrMillis, error)
+            return PageLayout(lines.size, units.size, targets, ocrMillis, ocrWaitMillis, error)
         }
     }
 }

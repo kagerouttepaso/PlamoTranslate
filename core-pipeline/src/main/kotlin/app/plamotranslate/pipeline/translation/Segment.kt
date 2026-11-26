@@ -12,7 +12,7 @@ sealed interface SegmentUpdate {
 
     /**
      * 確定した訳。[cached] はキャッシュから返したか。[millis] は頼んでから確定までの時間、[tokens] はおおよその生成トークン数
-     * （キャッシュから返したときは0）。
+     * （キャッシュから返したときは0）。[computeWaitMillis] は依頼が未確定の間に、このストリームが貸出を待った時間。
      */
     data class Final(
         override val id: Long,
@@ -20,6 +20,7 @@ sealed interface SegmentUpdate {
         val cached: Boolean = false,
         val millis: Long = 0,
         val tokens: Int = 0,
+        val computeWaitMillis: Long = 0,
     ) : SegmentUpdate
 
     /** 訳せなかった（翻訳モデルが読めない・推論の失敗など）。 */

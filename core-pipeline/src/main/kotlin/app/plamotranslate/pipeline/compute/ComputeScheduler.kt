@@ -36,7 +36,7 @@ data class ComputeLease(
     val start: Long, val end: Long? = null, val preempted: Boolean = false, val trial: Boolean = false,
 )
 
-/** 貸出の様子。詳細設定で選ぶと、会話の画面に図で出す。[recent] は直近 [ComputeScheduler.HISTORY_MILLIS] に終わった貸出。 */
+/** 貸出の様子。詳細設定で選ぶと翻訳中に図で出す。[recent] は直近 [ComputeScheduler.HISTORY_MILLIS] に終わった貸出。 */
 data class ComputeActivity(val budget: Int = 0, val running: List<ComputeLease> = emptyList(),
     val waiting: List<ComputeLease> = emptyList(), val recent: List<ComputeLease> = emptyList())
 
@@ -138,6 +138,7 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
         action: suspend (Int, () -> Boolean) -> T): T = coroutineScope {
         require(requested > 0)
         val job = coroutineContext.job
+        val observer = coroutineContext[ComputeWaitObserver]
         var start = System.nanoTime()
         val ticket = synchronized(waiting) {
             latest = topology
@@ -148,7 +149,9 @@ class ComputeScheduler(private val log: (String) -> Unit = {}) {
                 synchronized(waiting) { schedule() }.forEach { it() }
                 ticket.ready.await()
                 ensureActive()
-                log("計算資源 ${ticket.label} 組=${work.priority} 停止=${work.stop} GPU=$gpu CPU単独=${!gpu && ticket.exclusive} CPU段=${ticket.topology.tiers} 予算=${ticket.topology.budget} 貸出=${ticket.granted} 待ち=${(System.nanoTime() - start) / 1_000_000}ms")
+                val grantedAt = System.nanoTime()
+                observer?.onGranted?.invoke(start, grantedAt)
+                log("計算資源 ${ticket.label} 組=${work.priority} 停止=${work.stop} GPU=$gpu CPU単独=${!gpu && ticket.exclusive} CPU段=${ticket.topology.tiers} 予算=${ticket.topology.budget} 貸出=${ticket.granted} 待ち=${(grantedAt - start) / 1_000_000}ms")
                 val result = action(ticket.granted) {
                     synchronized(waiting) {
                         if (work.stop == StopMode.Boundary) {

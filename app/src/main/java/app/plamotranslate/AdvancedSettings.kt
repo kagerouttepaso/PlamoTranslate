@@ -50,7 +50,7 @@ class AdvancedPreferences(context: Context) {
         get() = prefs.getBoolean("detailedRecords", debuggable)
         set(value) = prefs.edit().putBoolean("detailedRecords", value).apply()
 
-    /** 会話翻訳の画面に、計算資源（CPU と GPU）の貸出の様子を重ねて出すか。遅さを調べるための表示で、既定はオフ。 */
+    /** 会話・カメラ・画面翻訳に、CPU と GPU の貸出の様子を重ねて出すか。既定はオフ。 */
     var computeMonitor: Boolean
         get() = prefs.getBoolean("computeMonitor", false)
         set(value) = prefs.edit().putBoolean("computeMonitor", value).apply()
@@ -72,7 +72,7 @@ fun AdvancedPage() {
     RecognitionTuningCard()
 }
 
-/** 会話中の計算資源の様子を出すかの選択。次に会話翻訳を開いたとき（画面に戻ったとき）に効く。 */
+/** 翻訳中に計算資源の貸出の図を出すかの選択。 */
 @Composable
 private fun ComputeMonitorCard() {
     val context = LocalContext.current
@@ -81,14 +81,14 @@ private fun ComputeMonitorCard() {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("会話中に CPU の使われ方を出す", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text("翻訳中に CPU の使われ方を出す", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 Switch(checked = shown, onCheckedChange = {
                     shown = it
                     preferences.computeMonitor = it
                 })
             }
             Text(
-                "会話翻訳の画面の上に、書き起こし・言語の識別・翻訳がそれぞれ CPU を何本使っているかを、直近12秒の帯グラフで出します。" +
+                "会話翻訳・カメラ翻訳・画面翻訳で、文字認識や翻訳などが直近12秒に借りた CPU と GPU を帯グラフで出します。" +
                     "白い線は、優先する処理に止められた所です。遅さを調べるときに使ってください。",
                 style = MaterialTheme.typography.bodySmall,
             )

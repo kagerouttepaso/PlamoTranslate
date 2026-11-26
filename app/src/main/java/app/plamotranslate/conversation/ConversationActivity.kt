@@ -79,7 +79,7 @@ class ConversationActivity : ComponentActivity() {
                 app.plamotranslate.ThreadTrialDialog()
                 val state by vm.state.collectAsStateWithLifecycle()
                 val model by vm.model.collectAsStateWithLifecycle()
-                // 詳細設定の「会話中に CPU の使われ方を出す」。設定から戻ったときに読み直す
+                // 詳細設定の「翻訳中に CPU の使われ方を出す」。設定から戻ったときに読み直す
                 val owner = LocalLifecycleOwner.current
                 val monitor by produceState(false, owner) {
                     owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {

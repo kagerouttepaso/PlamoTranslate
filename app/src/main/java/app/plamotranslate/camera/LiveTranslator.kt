@@ -25,6 +25,7 @@ import app.plamotranslate.pipeline.camera.CameraSession.Event
 import app.plamotranslate.pipeline.camera.CameraSession.Settings
 import app.plamotranslate.pipeline.camera.Reading
 import app.plamotranslate.pipeline.camera.Sharpness
+import app.plamotranslate.pipeline.compute.ComputeWaitObserver
 import app.plamotranslate.pipeline.screen.Box
 import app.plamotranslate.pipeline.translation.SegmentUpdate
 import app.plamotranslate.pipeline.translation.TranslationStream
@@ -94,7 +95,22 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
     private val session = CameraSession<BoxColors>(lineOf = { text, box -> textLine(text, box.toRect()) })
 
     /** 今読んで制御へ渡しているコマ（[Effect.ShowFrame] で画面に出す）。init より前に置く。 */
-    private var reading: LiveFrame? = null
+    private var reading: Pair<LiveFrame, ReadTiming>? = null
+    private var nextReadId = 0L
+    private var lastReadTiming: ReadTiming? = null
+    private val submittedRead = mutableMapOf<Long, ReadTiming>()
+    internal var logFrames = false
+
+    private data class ReadTiming(val id: Long, val captureMillis: Long, val ocrMillis: Long, val ocrWaitMillis: Long) {
+        fun logFields() = "コマ#$id、撮影 ${captureMillis}ms、文字認識 ${ocrMillis}ms（貸出待ち ${ocrWaitMillis}ms）"
+    }
+
+    private data class ReadResult(
+        val readings: List<Reading<BoxColors>>,
+        val ocrMillis: Long,
+        val waitMillis: Long,
+        val totalMillis: Long,
+    )
 
     /** 中核の制御の入口（作業の中で出た出来事は、今の作業を終えてから渡す。[EventLoop]）。init より前に置く。 */
     private val loop = EventLoop<Event<BoxColors>, Effect>(session::handle, ::perform)
@@ -168,35 +184,45 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
      * 1コマを読む。終わるまで次のコマは渡さないこと（呼ぶ側で間引く）。
      * [bitmap] は縦持ちの向きの画像、[rotation] は端末の傾き（時計回り、0・90・180・270）。
      */
-    suspend fun process(bitmap: Bitmap, rotation: Int = 0) {
-        val (readings, ocrMillis) = read(bitmap, rotation) ?: return
+    suspend fun process(bitmap: Bitmap, rotation: Int = 0, captureMillis: Long = 0) {
+        val result = read(bitmap, rotation) ?: return
+        val timing = recordRead(result, captureMillis)
         val screen = CameraGeometry.visibleRect(bitmap.width, bitmap.height, rotation, viewWidth.toFloat(), viewHeight.toFloat())
             ?.let { Box(floor(it.left).toInt(), floor(it.top).toInt(), ceil(it.right).toInt(), ceil(it.bottom).toInt()) }
         // このコマを画面に出すかは中核の制御が決める（読んでいる間に一時停止したら採らない。採ったら ShowFrame）
-        reading = LiveFrame(bitmap, emptyList(), ocrMillis, rotation, table = settings.table)
+        reading = LiveFrame(bitmap, emptyList(), result.totalMillis, rotation, table = settings.table) to timing
         try {
-            dispatch(Event.Read(readings, screen, rotation = rotation))
+            dispatch(Event.Read(result.readings, screen, rotation = rotation))
         } finally {
             reading = null
         }
     }
 
+    private fun recordRead(result: ReadResult, captureMillis: Long): ReadTiming =
+        ReadTiming(++nextReadId, captureMillis, result.ocrMillis, result.waitMillis).also {
+            if (logFrames) Logs.i("カメラ翻訳: ${it.logFields()}、翻訳は段落ごとに記録")
+        }
 
     /** 縦持ちの画像を正立させて読み、訳す行の読み取りと、かかった時間を返す。読めなければ null。 */
-    private suspend fun read(bitmap: Bitmap, rotation: Int): Pair<List<Reading<BoxColors>>, Long>? {
+    private suspend fun read(bitmap: Bitmap, rotation: Int): ReadResult? {
         val upright = if (rotation == 0) bitmap else Bitmap.createBitmap(
             bitmap, 0, 0, bitmap.width, bitmap.height, CameraGeometry.portraitToUpright(bitmap.width, bitmap.height, rotation), false,
         )
         val t0 = SystemClock.uptimeMillis()
+        var waitMillis = 0L
         return try {
             // カメラでは1文字だけの読み取りを捨てる（韓国語のラベルを中国語の認識器が読み違えた「太」「我」などの雑音が多い）
-            val targets = selectTargets(ocr.recognize(upright, recognizers).map(TextBlock::of), upright, statusBarHeight = 0, target = settings.target)
+            val lines = withContext(ComputeWaitObserver { queuedAt, grantedAt -> waitMillis = (grantedAt - queuedAt) / 1_000_000 }) {
+                ocr.recognize(upright, recognizers)
+            }
+            val ocrMillis = SystemClock.uptimeMillis() - t0
+            val targets = selectTargets(lines.map(TextBlock::of), upright, statusBarHeight = 0, target = settings.target)
                 .filter { t -> t.sourceText.count { it.isLetter() } >= 2 }
             // 鋭さは行の数だけ画素を回るので、画面のスレッドを塞がない
             val readings = withContext(Dispatchers.Default) {
                 targets.map { Reading(it.block.bounds.toBox(), it.sourceText, it.slot.colors, sharpness(upright, it.block.bounds)) }
             }
-            readings to SystemClock.uptimeMillis() - t0
+            ReadResult(readings, ocrMillis, waitMillis, SystemClock.uptimeMillis() - t0)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Logs.w("カメラ翻訳: 文字認識に失敗", e)
@@ -218,8 +244,9 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
     /** 止めた画像を読み直す（一時停止中に原文の言語を変えたとき）。 */
     private suspend fun readStill() {
         val f = _frame.value ?: return
-        val (readings, _) = read(f.bitmap, f.rotation) ?: return
-        dispatch(Event.Read(readings, screen = null, still = true))
+        val result = read(f.bitmap, f.rotation) ?: return
+        lastReadTiming = recordRead(result, captureMillis = 0)
+        dispatch(Event.Read(result.readings, screen = null, still = true))
     }
 
     fun close() {
@@ -249,14 +276,21 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
     private fun perform(e: Effect) {
         when (e) {
             is Effect.OpenStream -> openStream(e.options)
-            is Effect.Submit -> stream?.submit(e.segments)
+            is Effect.Submit -> {
+                lastReadTiming?.let { timing -> e.segments.forEach { submittedRead[it.id] = timing } }
+                stream?.submit(e.segments)
+            }
             Effect.ReadStill -> scope.launch { readStill() }
             Effect.VisibleComplete -> pausedAt?.let {
                 Logs.i("カメラ翻訳: 一時停止から見えている訳がそろうまで ${SystemClock.uptimeMillis() - it}ms")
                 pausedAt = null
             }
             // Read はその場で処理する（process から直接渡す）ので、読んでいるコマが必ずある
-            Effect.ShowFrame -> _frame.value = checkNotNull(reading) { "読んでいるコマが無いのにコマを出す作業が来た" }
+            Effect.ShowFrame -> {
+                val (frame, timing) = checkNotNull(reading) { "読んでいるコマが無いのにコマを出す作業が来た" }
+                _frame.value = frame
+                lastReadTiming = timing
+            }
         }
     }
 
@@ -264,6 +298,7 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
     private fun openStream(options: TranslationStream.Options) {
         stream?.close()
         streamCollector?.cancel()
+        submittedRead.clear()
         val s = Translations.open(scope, context, options)
         stream = s
         streamCollector = scope.launch { s.updates.collect(::onUpdate) }
@@ -274,10 +309,12 @@ class LiveTranslator(private val context: Context, private val scope: CoroutineS
         val event = when (u) {
             is SegmentUpdate.Partial -> Event.Partial(u.id, u.text)
             is SegmentUpdate.Final -> {
-                Logs.i("カメラ翻訳: 1件を${u.millis}ms${if (u.cached) "（キャッシュ）" else ""}")
+                val read = submittedRead.remove(u.id)?.let { "${it.logFields()}、" }.orEmpty()
+                Logs.i("カメラ翻訳: ${read}段落#${u.id}、翻訳 ${u.millis}ms（貸出待ち ${u.computeWaitMillis}ms）${if (u.cached) "、キャッシュ" else ""}")
                 Event.Final(u.id, u.text)
             }
             is SegmentUpdate.Failed -> {
+                submittedRead.remove(u.id)
                 Logs.w("カメラ翻訳: 翻訳に失敗 ${u.message}")
                 Event.Failed(u.id)
             }

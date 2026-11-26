@@ -61,20 +61,21 @@ class ScreenCapturer(context: Context, projection: MediaProjection) {
 
     /**
      * [since]（uptimeMillis）より後に届いた画面を1枚返す。自分の表示を消してから呼ぶと、消えた後の画面が取れる。
-     * 画面が止まっていて新しい1枚が来ない場合は、待ち時間の上限で手元の最新を使う。
+     * 画面が止まっていて新しい1枚が来ない場合は、待ち時間の上限で手元の最新を使う。[requireFresh] が true なら待ち切っても古い画像を使わない。
      * 画面を回した後は、大きさを合わせてから届いた1枚を待つ。
      */
-    suspend fun capture(since: Long, timeoutMillis: Long = 500): Bitmap? {
+    suspend fun capture(since: Long, timeoutMillis: Long = 500, requireFresh: Boolean = false): Bitmap? {
         val resizedAt = matchScreenSize()
         val after = maxOf(since, resizedAt ?: 0L)
         val deadline = SystemClock.uptimeMillis() + if (resizedAt != null) maxOf(timeoutMillis, RESIZE_TIMEOUT_MS) else timeoutMillis
         while (true) {
+            val expired = SystemClock.uptimeMillis() >= deadline
             val bitmap = onHandler {
                 val image = latest ?: return@onHandler null
-                if (latestAt <= after && SystemClock.uptimeMillis() < deadline) null else image.toBitmap()
+                if (latestAt > after || (expired && !requireFresh)) image.toBitmap() else null
             }
             if (bitmap != null) return bitmap
-            if (SystemClock.uptimeMillis() >= deadline && onHandler { latest == null }) return null
+            if (expired) return null
             delay(16)
         }
     }
@@ -84,8 +85,8 @@ class ScreenCapturer(context: Context, projection: MediaProjection) {
      * （動く画面のモード。[FrameStack]）。間隔の間に新しい画面が届かなければ、画面が止まっているので、そこで打ち切る
      * （止まった画面を何枚撮っても同じで、待つだけ遅くなる）。撮れなければ空。
      */
-    suspend fun captureFrames(since: Long, count: Int, intervalMillis: Long): List<Bitmap> {
-        val first = capture(since) ?: return emptyList()
+    suspend fun captureFrames(since: Long, count: Int, intervalMillis: Long, requireFresh: Boolean = false): List<Bitmap> {
+        val first = capture(since, requireFresh = requireFresh) ?: return emptyList()
         val frames = mutableListOf(first)
         var takenAt = onHandler { latestAt }
         while (frames.size < count) {

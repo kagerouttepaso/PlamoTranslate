@@ -188,6 +188,8 @@ class TranslationOverlay(private val context: Context, private val windowManager
     /** 訳の枠を並べるウィンドウを置けなかった（重ね表示の許可を途中で外したときなど）。枠は1つも出ていない。 */
     var onBoxesUnplaced: (() -> Unit)? = null
 
+    var onStatusLayout: (() -> Unit)? = null
+
     /** 訳の枠の範囲（画面の座標）。 */
     val boxBounds: List<Rect> get() = boxRects.toList()
 
@@ -267,10 +269,18 @@ class TranslationOverlay(private val context: Context, private val windowManager
     /** 自分が画面に出している範囲（訳の枠とステータス表示）。画面が変わったかを見るとき、ここは比べない。 */
     fun occupiedRects(): List<Rect> = buildList {
         addAll(boxRects)
-        statusView?.takeIf { it.isAttachedToWindow }?.let { v ->
-            val xy = IntArray(2).also(v::getLocationOnScreen)
-            add(Rect(xy[0], xy[1], xy[0] + v.width, xy[1] + v.height))
-        }
+        statusBounds()?.let(::add)
+    }
+
+    /** 訳のウィンドウ全体とステータス表示。別の重ね表示を置くときに使う。 */
+    fun windowBounds(): List<Rect> = buildList {
+        boxRects.firstOrNull()?.let { first -> add(Rect(first).apply { boxRects.forEach { union(it) } }) }
+        statusBounds()?.let(::add)
+    }
+
+    private fun statusBounds(): Rect? = statusView?.takeIf { it.isLaidOut }?.let { view ->
+        val xy = IntArray(2).also(view::getLocationOnScreen)
+        Rect(xy[0], xy[1], xy[0] + view.width, xy[1] + view.height)
     }
 
     // 文字が変わるたびに、枠に収まる大きさを選び直す（HorizontalTextView・VerticalTextView）
@@ -307,6 +317,7 @@ class TranslationOverlay(private val context: Context, private val windowManager
                 if (e.actionMasked == MotionEvent.ACTION_UP) onStatusTap?.invoke() ?: clear()
                 true
             }
+            addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> onStatusLayout?.invoke() }
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,

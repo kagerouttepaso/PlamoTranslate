@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -33,6 +34,7 @@ private val kinds = mapOf(
     RecognitionPriority.PHRASE_LANGUAGE.name to Kind("文の言語の識別", Color(0xFFAB47BC)),
     RecognitionPriority.LANGUAGE.name to Kind("話し中の言語の識別", Color(0xFFE1A6F0)),
     ComputeWork.Translation.name to Kind("翻訳", Color(0xFF66BB6A)),
+    OCR_NAME to Kind(OCR_NAME, Color(0xFF26C6DA)),
 )
 private val trialKind = Kind("試走", Color(0xFFBDBDBD))
 private val other = Kind("そのほか", Color(0xFF78909C))
@@ -40,12 +42,12 @@ private val other = Kind("そのほか", Color(0xFF78909C))
 private fun ComputeLease.kind() = if (trial) trialKind else kinds[name] ?: other
 
 /**
- * 計算資源の貸出の様子（詳細設定の「会話中に CPU の使われ方を出す」）。直近12秒の CPU の貸出を処理ごとの色で積み上げ、
+ * 計算資源の貸出の様子（詳細設定の「翻訳中に CPU の使われ方を出す」）。直近12秒の CPU の貸出を処理ごとの色で積み上げ、
  * 上の細い帯に GPU の貸出を描く。白い縦線は、優先する処理に止められて返した所。触れても下の画面の操作を妨げない。
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun ComputeMonitor(modifier: Modifier = Modifier) {
+internal fun ComputeMonitor(modifier: Modifier = Modifier, compact: Boolean = false) {
     val activity by ProcessCompute.activity.collectAsStateWithLifecycle()
     var now by remember { mutableLongStateOf(System.nanoTime() / 1_000_000) }
     LaunchedEffect(Unit) {
@@ -60,12 +62,18 @@ internal fun ComputeMonitor(modifier: Modifier = Modifier) {
     val used = activity.running.filter { !it.gpu }.sumOf { it.threads }
     val stopped = leases.count { it.preempted }
     Column(
-        modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(8.dp)).padding(8.dp),
+        modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(8.dp))
+            .padding(if (compact) 5.dp else 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        val waiting = activity.waiting.joinToString("、") { "${it.kind().label} ${it.threads}本" }.ifEmpty { "なし" }
-        Text("CPU ${used}/${budget}本　止めた回数（12秒）${stopped}　待ち：$waiting", color = Color.White, fontSize = 11.sp)
-        Canvas(Modifier.fillMaxWidth().height((10 + budget * 6).dp)) {
+        if (compact) {
+            Text("CPU $used/$budget 本　待ち ${activity.waiting.size}件", color = Color.White, fontSize = 11.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        } else {
+            val waiting = activity.waiting.joinToString("、") { "${it.kind().label} ${it.threads}本" }.ifEmpty { "なし" }
+            Text("CPU ${used}/${budget}本　止めた回数（12秒）${stopped}　待ち：$waiting", color = Color.White, fontSize = 11.sp)
+        }
+        Canvas(Modifier.fillMaxWidth().height(if (compact) 32.dp else (10 + budget * 6).dp)) {
             val width = size.width
             val gpuHeight = 8.dp.toPx()
             val cpuTop = gpuHeight + 2.dp.toPx()
@@ -98,7 +106,8 @@ internal fun ComputeMonitor(modifier: Modifier = Modifier) {
                 drawLine(Color.White, Offset(at, cpuTop), Offset(at, size.height), strokeWidth = 1.5.dp.toPx())
             }
         }
-        val shown = (leases + activity.waiting).map { it.kind() }.distinct()
+        val shown = if (compact) listOf(kinds.getValue(OCR_NAME), kinds.getValue(ComputeWork.Translation.name))
+            else (leases + activity.waiting).map { it.kind() }.distinct()
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (kind in shown) {
                 Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {

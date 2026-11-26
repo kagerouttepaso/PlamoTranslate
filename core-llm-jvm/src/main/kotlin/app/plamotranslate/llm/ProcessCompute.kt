@@ -19,7 +19,7 @@ object ProcessCompute : ComputeResources {
 
     private val scheduler = ComputeScheduler { Logs.i(it) }
 
-    /** 貸出の様子（詳細設定で選ぶと、会話の画面に図で出す）。 */
+    /** 貸出の様子（詳細設定で選ぶと、翻訳中に図で出す）。 */
     val activity get() = scheduler.activity
 
     private val windows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)

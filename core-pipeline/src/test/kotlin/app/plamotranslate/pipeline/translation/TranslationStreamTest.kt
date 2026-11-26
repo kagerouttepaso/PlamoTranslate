@@ -3,11 +3,13 @@ package app.plamotranslate.pipeline.translation
 import app.plamotranslate.llm.JapaneseForm
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.TranslationRequest
+import app.plamotranslate.pipeline.compute.ComputeWaitObserver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.flow.transformWhile
@@ -123,6 +125,25 @@ class TranslationStreamTest {
 
     private fun finals(updates: List<SegmentUpdate>) =
         updates.filterIsInstance<SegmentUpdate.Final>().associate { it.id to it.text }
+
+    @Test
+    fun 並列の文は貸出待ちを共有しストリーム全体では一度だけ数える() {
+        val fake = FakeEngine(4)
+        val engine = object : JobEngine by fake {
+            override suspend fun run(slots: Int, source: JobSource, maxTokens: Int): Int {
+                val now = System.nanoTime()
+                val observer = checkNotNull(currentCoroutineContext()[ComputeWaitObserver])
+                observer.onGranted(now, now + 7_000_000)
+                observer.onGranted(now + 10_000_000, now + 15_000_000)
+                return fake.run(slots, source, maxTokens)
+            }
+        }
+        val stream = stream(engine)
+        stream.submit(listOf(Segment(1, "Input"), Segment(2, "Output")))
+        val results = stream.collectUntilDone(setOf(1, 2)).filterIsInstance<SegmentUpdate.Final>()
+        assertEquals(listOf(12L, 12L), results.map { it.computeWaitMillis })
+        assertEquals(12L, stream.stats.computeWaitMillis)
+    }
 
     @Test
     fun 計画済みのバッチは並列時にも一緒に訳し隣のバッチとは混ぜない() {

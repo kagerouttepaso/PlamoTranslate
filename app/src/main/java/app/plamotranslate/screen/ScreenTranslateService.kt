@@ -23,6 +23,7 @@ import android.os.SystemClock
 import android.view.WindowManager
 import android.widget.Toast
 import app.plamotranslate.EngineHolder
+import app.plamotranslate.AdvancedPreferences
 import app.plamotranslate.R
 import app.plamotranslate.log.Logs
 import app.plamotranslate.models.ModelCatalog
@@ -31,6 +32,7 @@ import app.plamotranslate.pipeline.translation.ModelState
 import app.plamotranslate.AndroidCpuCompute
 import app.plamotranslate.ocr.MultiScriptOcr
 import app.plamotranslate.overlay.toBox
+import app.plamotranslate.pipeline.compute.ComputeWaitObserver
 import app.plamotranslate.pipeline.screen.SceneProfile
 import app.plamotranslate.pipeline.screen.ScreenChange
 import app.plamotranslate.pipeline.screen.ScreenSession
@@ -60,6 +62,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 画面翻訳のフォアグラウンドサービス（docs/設計/画面翻訳.md）。
@@ -79,6 +82,7 @@ class ScreenTranslateService : Service() {
     private var capturer: ScreenCapturer? = null
     private var button: FloatingButton? = null
     private var overlay: TranslationOverlay? = null
+    private var computeOverlay: ScreenComputeOverlay? = null
     private var menu: ScreenMenu? = null
     private var touchWatcher: TouchWatcher? = null
     private val preferences by lazy { ScreenPreferences(this) }
@@ -103,6 +107,10 @@ class ScreenTranslateService : Service() {
 
     /** 撮る・のぞくために自分の表示を隠している間。監視はこの間の画面を判定器へ渡さない。 */
     private var hiding = false
+        set(value) {
+            field = value
+            placeComputeOverlay()
+        }
     private var modelJob: Job? = null
 
     /** メニューを出している間だけ、翻訳モデルの状態を購読する。 */
@@ -150,7 +158,9 @@ class ScreenTranslateService : Service() {
         orientation = resources.configuration.orientation
 
         val wm = getSystemService(WindowManager::class.java)
+        if (AdvancedPreferences(this).computeMonitor) computeOverlay = ScreenComputeOverlay(this, wm)
         overlay = TranslationOverlay(this, wm).also {
+            it.onStatusLayout = ::placeComputeOverlay
             it.onStatusTap = { dispatch(SessionEvent.StatusTapped) }
             it.onBoxesUnplaced = { work?.let { w -> dispatch(SessionEvent.BoxesUnplaced(w.session)) } }
             it.opaqueWithAccessibility = { preferences.opaqueOverlay }
@@ -166,6 +176,7 @@ class ScreenTranslateService : Service() {
             }
         }
         button = FloatingButton(this, wm, onTap = ::onButtonTap, onLongPress = ::showMenu).also {
+            it.onMoved = ::placeComputeOverlay
             it.setMode(preferences.source.buttonBadge(), preferences.trigger == ScreenTrigger.AUTO)
             it.setActive(true)
             it.show()
@@ -173,6 +184,7 @@ class ScreenTranslateService : Service() {
         EngineHolder.ensureLoaded(this)
         applyProfile()
         loop.start(preferences.trigger.toTrigger())
+        placeComputeOverlay()
         scope.launch { watch() }
         scope.launch { watchAccessibility() }
         registerDebugReceiver()
@@ -182,15 +194,26 @@ class ScreenTranslateService : Service() {
 
     // ---- 制御：出来事を状態遷移へ渡し、返った作業を行う ----
 
-    private fun dispatch(event: SessionEvent) = loop.dispatch(event)
+    private fun dispatch(event: SessionEvent) {
+        loop.dispatch(event)
+        placeComputeOverlay()
+    }
+
+    private fun placeComputeOverlay() {
+        computeOverlay?.place(overlay?.windowBounds().orEmpty() + listOfNotNull(button?.bounds), hiding || state.menuOpen)
+    }
 
     private fun perform(effect: Effect) {
         when (effect) {
             is Effect.Capture -> capture(effect.session)
             is Effect.BeginValidity -> workOf(effect.session)?.frame?.reference?.let(validity::begin)
             is Effect.Recognize -> recognize(effect.session)
-            is Effect.NothingToTranslate -> workOf(effect.session)?.page?.let { page ->
-                overlay?.showStatus(page.error ?: "訳す文字が見つかりませんでした（文字認識 ${page.ocrMillis}ms）")
+            is Effect.NothingToTranslate -> workOf(effect.session)?.let { w ->
+                w.page?.let { page ->
+                    overlay?.showStatus(page.error ?: "訳す文字が見つかりませんでした（文字認識 ${page.ocrMillis}ms）")
+                    val outcome = if (page.error == null) "、訳す文字なし" else "、文字認識に失敗"
+                    logTiming(w, translateMillis = 0, outcome = outcome)
+                }
             }
             is Effect.Translate -> translate(effect.session)
             is Effect.Finished -> workOf(effect.session)?.let {
@@ -205,7 +228,10 @@ class ScreenTranslateService : Service() {
             }
             is Effect.Failed -> {
                 overlay?.showStatus("翻訳に失敗しました: ${effect.message}")
-                workOf(effect.session)?.run?.close()
+                workOf(effect.session)?.let { w ->
+                    w.run?.close()
+                    logTiming(w, w.run?.let { SystemClock.uptimeMillis() - it.startedAt } ?: 0, "、翻訳に失敗")
+                }
             }
             is Effect.Peek -> peek(effect.session)
             is Effect.ShowBoxes -> overlay?.setBoxesVisible(true)
@@ -252,11 +278,14 @@ class ScreenTranslateService : Service() {
                 overlay?.clear()
                 delay(HIDE_SETTLE_MS)
                 // 消した後に描かれた画面（1フレーム＝約16ms後以降に届いたもの）を使う
-                captureScreen(capturer, since = hiddenAt + 16, profile)
+                captureScreen(capturer, since = hiddenAt + 16, profile, requireFresh = computeOverlay != null)
             } finally {
-                button?.setVisible(true)
-                hiding = false
+                if (work === w) {
+                    button?.setVisible(true)
+                    hiding = false
+                }
             }
+            val captureMillis = SystemClock.uptimeMillis() - hiddenAt
             if (captured != null) {
                 val (image, frames) = captured
                 w.captured(
@@ -264,21 +293,21 @@ class ScreenTranslateService : Service() {
                     ScreenFrame(
                         reference = image.toThumb(),
                         frames = frames,
-                        captureMillis = SystemClock.uptimeMillis() - hiddenAt,
+                        captureMillis = captureMillis,
                         width = image.width,
                         height = image.height,
                         statusBar = statusBarHeight(),
                         choice = choice,
                     ),
                 )
-            }
+            } else Logs.i("画面翻訳: 撮影#$session、撮影 ${captureMillis}ms、撮影に失敗")
             dispatch(SessionEvent.Captured(session, ok = captured != null))
         }
     }
 
-    private suspend fun captureScreen(capturer: ScreenCapturer, since: Long, profile: SceneProfile): Pair<Bitmap, Int>? {
-        if (profile.stackFrames <= 1) return capturer.capture(since)?.let { it to 1 }
-        val frames = capturer.captureFrames(since, profile.stackFrames, profile.stackIntervalMs)
+    private suspend fun captureScreen(capturer: ScreenCapturer, since: Long, profile: SceneProfile, requireFresh: Boolean): Pair<Bitmap, Int>? {
+        if (profile.stackFrames <= 1) return capturer.capture(since, requireFresh = requireFresh)?.let { it to 1 }
+        val frames = capturer.captureFrames(since, profile.stackFrames, profile.stackIntervalMs, requireFresh = requireFresh)
         if (frames.isEmpty()) return null
         if (frames.size == 1) return frames[0] to 1
         val stacked = try {
@@ -304,16 +333,19 @@ class ScreenTranslateService : Service() {
             overlay?.showStatus("文字を読んでいます…")
             val t0 = SystemClock.uptimeMillis()
             var error: String? = null
+            var waitMillis = 0L
             val lines = try {
                 // 白縁取り・白抜きの文字にも強い読み方（OutlinedText）は、場面の設定で選ぶ
-                if (choice.outlined) ocr.recognizeOutlined(image, choice.ocrLanguage) else ocr.recognize(image, choice.ocrLanguage)
+                withContext(ComputeWaitObserver { queuedAt, grantedAt -> waitMillis = (grantedAt - queuedAt) / 1_000_000 }) {
+                    if (choice.outlined) ocr.recognizeOutlined(image, choice.ocrLanguage) else ocr.recognize(image, choice.ocrLanguage)
+                }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 error = "文字を読めませんでした: ${e.message}"
                 emptyList()
             }
             // 枠の色も撮影画像から読むので、解放はその後
-            val page = PageLayout.of(frame, image, lines, SystemClock.uptimeMillis() - t0, error)
+            val page = PageLayout.of(frame, image, lines, SystemClock.uptimeMillis() - t0, waitMillis, error)
             w.laidOut(page)
             dispatch(SessionEvent.Recognized(session, page.targets.size))
         }.invokeOnCompletion { image.recycle() }
@@ -373,10 +405,21 @@ class ScreenTranslateService : Service() {
         val total = page.ocrMillis + translateMillis + if (frame.frames > 1) frame.captureMillis else 0
         val stacked = if (frame.frames > 1) "・${frame.frames}枚重ね" else ""
         overlay?.showStatus("${page.targets.size}件・${"%.1f".format(total / 1000.0)}秒・${run.model}$stacked")
-        val st = run.stats
-        Logs.i("画面翻訳: ${page.lines}行・${page.units}単位中${page.targets.size}件（${frame.choice.grouping}）、撮影 ${frame.captureMillis}ms（${frame.frames}枚）、" +
-                "文字認識 ${page.ocrMillis}ms、翻訳 ${translateMillis}ms、モデル ${run.model}、重要度 ${importance()}、画面 ${frame.size}、ステータスバー ${frame.statusBar}px" +
-                (st?.let { "、キャッシュ メモリ${it.memoryHits}・データベース${it.storedHits}、訳した${it.pieces}チャンク（訳し直し${it.retried}、打ち切り${it.stopped}）" } ?: ""),
+        logTiming(w, translateMillis)
+    }
+
+    private fun logTiming(w: Work, translateMillis: Long, outcome: String = "") {
+        val frame = w.frame ?: return
+        val page = w.page ?: return
+        val run = w.run
+        val stats = run?.stats
+        val translated = stats?.let {
+            "、モデル ${run.model}、キャッシュ メモリ${it.memoryHits}・データベース${it.storedHits}、訳した${it.pieces}チャンク（訳し直し${it.retried}、打ち切り${it.stopped}）"
+        }.orEmpty()
+        Logs.i("画面翻訳: 撮影#${w.session}、${page.lines}行・${page.units}単位中${page.targets.size}件（${frame.choice.grouping}）、" +
+            "撮影 ${frame.captureMillis}ms（${frame.frames}枚）、文字認識 ${page.ocrMillis}ms（貸出待ち ${page.ocrWaitMillis}ms）、" +
+            "翻訳 ${translateMillis}ms（貸出待ち ${stats?.computeWaitMillis ?: 0}ms）、重要度 ${importance()}、画面 ${frame.size}、" +
+            "ステータスバー ${frame.statusBar}px$translated$outcome",
         )
     }
 
@@ -395,7 +438,7 @@ class ScreenTranslateService : Service() {
         scope.launch(w.job) {
             val invalid = try {
                 delay(PEEK_DELAY_MS)
-                peekUnderBoxes(frames, interval)
+                peekUnderBoxes(w, frames, interval)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 Logs.w("自動翻訳: 訳の枠の下をのぞけませんでした", e)
@@ -406,7 +449,7 @@ class ScreenTranslateService : Service() {
     }
 
     /** 訳の枠を隠して枠の下を撮り、判定Bで原文が変わったかを見る。変わっていれば理由、変わっていないか見られなければ null。 */
-    private suspend fun peekUnderBoxes(frames: Int, interval: Long): String? {
+    private suspend fun peekUnderBoxes(w: Work, frames: Int, interval: Long): String? {
         val capturer = capturer ?: return null
         val overlay = overlay ?: return null
         val boxes = overlay.boxBounds.takeIf { it.isNotEmpty() } ?: return null
@@ -427,7 +470,7 @@ class ScreenTranslateService : Service() {
                 delay(16)
             }
         } finally {
-            hiding = false
+            if (work === w) hiding = false
         }
         val verdict = if (thumbs.isEmpty()) Validity.Valid else {
             validity.peek(if (thumbs.size >= 3) ScreenChange.median(thumbs) else thumbs.last(), boxes.map { it.toBox() })
@@ -449,18 +492,21 @@ class ScreenTranslateService : Service() {
             val capturer = capturer ?: return
             // 撮る・のぞくために自分の表示を隠している間は判定しない（隠した画面は、比べる基準と違う）
             if (hiding) continue
+            val monitorBeforeSample = computeOverlay?.bounds
             val sample = capturer.latestThumb(lastAt)
             val now = SystemClock.uptimeMillis()
             if (sample != null) lastAt = sample.second
+            if (hiding) continue
             val thumb = sample?.first
+            val ownControls = listOfNotNull(button?.bounds, monitorBeforeSample, computeOverlay?.bounds).distinct().map { it.toBox() }
             // 判定Aは状態遷移の作業（ResetStart・EndStart）の間だけ、判定Bは BeginValidity・EndValidity の間だけ動く。
             // どちらへ渡すかはそれぞれが動いているかで決め、互いに排他にしない（片方が残っても、もう片方を黙らせない）
             if (startJudge.active) {
-                val own = thumb?.let { t -> ScreenChange.mask(t, listOfNotNull(button?.bounds?.toBox())) }
+                val own = thumb?.let { t -> ScreenChange.mask(t, ownControls) }
                 if (startJudge.feed(thumb, now, own)) dispatch(SessionEvent.Settled)
             }
             if (validity.active && thumb != null) {
-                val own = overlay?.occupiedRects().orEmpty().map { it.toBox() } + listOfNotNull(button?.bounds?.toBox())
+                val own = overlay?.occupiedRects().orEmpty().map { it.toBox() } + ownControls
                 val boxes = overlay?.boxBounds.orEmpty().map { it.toBox() }
                 val verdict = validity.feed(thumb, boxes, own, watchOutside = state.watchOutside)
                 if (verdict is Validity.Invalid) dispatch(SessionEvent.Invalidated(verdict.label))
@@ -604,6 +650,8 @@ class ScreenTranslateService : Service() {
         OverlayAccessibilityService.onScrolled = null
         work?.let { cancel(it.session) }
         scope.cancel()
+        computeOverlay?.remove()
+        computeOverlay = null
         button?.remove()
         touchWatcher?.remove()
         overlay?.clear()

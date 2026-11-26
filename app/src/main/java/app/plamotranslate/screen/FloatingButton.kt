@@ -156,6 +156,7 @@ class FloatingButton(
                         params.x = (startX + dx.toInt()).coerceIn(0, (screen.width() - size).coerceAtLeast(0))
                         params.y = (startY + dy.toInt()).coerceIn(0, (screen.height() - size).coerceAtLeast(0))
                         windowManager.updateViewLayout(view, params)
+                        onMoved?.invoke()
                     }
                 }
                 MotionEvent.ACTION_UP -> {
@@ -198,6 +199,8 @@ class FloatingButton(
 
     /** ボタンが画面に占める範囲（画面が変わったかを見るとき、ここは比べない）。 */
     val bounds: Rect get() = Rect(params.x, params.y, params.x + size, params.y + size)
+
+    var onMoved: (() -> Unit)? = null
 
     /** メニューを出す位置の目安（ボタンの左上）。 */
     val position: Pair<Int, Int> get() = params.x to params.y

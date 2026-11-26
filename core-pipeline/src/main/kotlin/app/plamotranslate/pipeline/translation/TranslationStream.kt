@@ -3,6 +3,7 @@ package app.plamotranslate.pipeline.translation
 import app.plamotranslate.llm.JapaneseForm
 import app.plamotranslate.llm.Language
 import app.plamotranslate.llm.TranslationRequest
+import app.plamotranslate.pipeline.compute.ComputeWaitObserver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -50,7 +51,8 @@ class TranslationStream(
     class Backend(val engine: JobEngine, val origin: ModelOrigin, val persistent: PersistentCache? = null)
 
     /** 訳した結果の数（ログ用）。[model] は訳し始めたときのモデル（まだ訳し始めていなければ null）。 */
-    data class Stats(val pieces: Int, val memoryHits: Int, val storedHits: Int, val retried: Int, val stopped: Int, val model: ModelOrigin?)
+    data class Stats(val pieces: Int, val memoryHits: Int, val storedHits: Int, val retried: Int, val stopped: Int, val model: ModelOrigin?,
+        val computeWaitMillis: Long)
 
     private val out = Channel<SegmentUpdate>(Channel.UNLIMITED)
 
@@ -63,13 +65,13 @@ class TranslationStream(
     /** [clear] のたびに増やす。古い番号の依頼の結果は捨てる。 */
     private var generation = 0
 
-    private class Pending(val segment: Segment, val at: Long, val batch: Long? = null)
+    private class Pending(val segment: Segment, val at: Long, val batch: Long? = null, var computeWaitNanos: Long = 0)
 
     /**
      * 頼まれた文。[lines] は元の行ごとのチャンク（空の行はチャンクが0個）。チャンクは改行を含まない。
      * 依頼の行と訳の行を対応させる（逐次のコアのつなぎ方、打ち切りの行数、途中の訳の行送り）ので、改行はチャンクの中に入れず、ここで行に分けて持つ。
      */
-    private class Seg(val lines: List<List<String>>, val at: Long, val batched: Boolean) {
+    private class Seg(val lines: List<List<String>>, val at: Long, val batched: Boolean, var computeWaitNanos: Long) {
         val pieces = lines.flatten()
         var fromEngine = false
     }
@@ -117,6 +119,16 @@ class TranslationStream(
     private var storedHits = 0
     private var retried = 0
     private var stopped = 0
+    private var computeWaitNanos = 0L
+    private val computeWait = ComputeWaitObserver { queuedAt, grantedAt ->
+        synchronized(lock) {
+            computeWaitNanos += grantedAt - queuedAt
+            // 並列の文で共有する貸出の待ちは、文ごとに、その文を頼んだ後の分だけ含める。
+            fun since(at: Long) = (grantedAt - maxOf(at, queuedAt)).coerceAtLeast(0L)
+            inbox.forEach { it.computeWaitNanos += since(it.at) }
+            segments.values.forEach { it.computeWaitNanos += since(it.at) }
+        }
+    }
 
     private val worker = scope.launch { work() }
 
@@ -181,7 +193,9 @@ class TranslationStream(
         out.close()
     }
 
-    val stats: Stats get() = synchronized(lock) { Stats(piecesTranslated, memoryHits, storedHits, retried, stopped, translatedWith) }
+    val stats: Stats get() = synchronized(lock) {
+        Stats(piecesTranslated, memoryHits, storedHits, retried, stopped, translatedWith, computeWaitNanos / 1_000_000)
+    }
 
     private fun emit(update: SegmentUpdate) {
         out.trySend(update)
@@ -228,9 +242,11 @@ class TranslationStream(
                 val c = synchronized(lock) { core.takeIf { queue.isNotEmpty() } }
                 if (c != null) {
                     try {
-                        b.engine.run(c.slots, source, options.maxTokens)
+                        withContext(computeWait) { b.engine.run(c.slots, source, options.maxTokens) }
                         // 同時に訳すとシーケンス1本分のコンテキストに入らなかったチャンクは、1本でコンテキストを全部使って訳す
-                        if (c.slots > 1 && synchronized(lock) { requeueTooLong() }) b.engine.run(1, source, options.maxTokens)
+                        if (c.slots > 1 && synchronized(lock) { requeueTooLong() }) {
+                            withContext(computeWait) { b.engine.run(1, source, options.maxTokens) }
+                        }
                         synchronized(lock) { giveUpTooLong() }
                     } catch (e: CancellationException) {
                         throw e
@@ -253,14 +269,14 @@ class TranslationStream(
             val pending = inbox.removeFirst()
             val id = pending.segment.id
             if (pending.segment.text.isBlank()) {
-                emit(SegmentUpdate.Final(id, "", cached = true))
+                emit(SegmentUpdate.Final(id, "", cached = true, computeWaitMillis = pending.computeWaitNanos / 1_000_000))
                 continue
             }
             // 行に分けてからチャンクにする（チャンクは改行を含まない。テキスト翻訳は複数行の入力を1つの文として頼む）
             val batched = pending.batch != null
             val splitAt = if (batched) TranslationChecks.LONG_TEXT else core.splitAt
             val lines = pending.segment.text.lines().map { if (it.isBlank()) emptyList() else TranslationChecks.splitLong(it, splitAt) }
-            val seg = Seg(lines, pending.at, batched)
+            val seg = Seg(lines, pending.at, batched, pending.computeWaitNanos)
             segments[id] = seg
             for (p in seg.pieces.distinct()) {
                 waiting.getOrPut(p) { LinkedHashSet() }.add(id)
@@ -331,6 +347,7 @@ class TranslationStream(
                 cached = !seg.fromEngine,
                 millis = (System.nanoTime() - seg.at) / 1_000_000,
                 tokens = seg.pieces.distinct().sumOf { pieceTokens[it] ?: 0 },
+                computeWaitMillis = seg.computeWaitNanos / 1_000_000,
             ),
         )
         segments.remove(id)
