@@ -15,5 +15,5 @@ internal object AndroidCpuCompute : OcrCompute, TtsCompute {
     }
 
     override suspend fun <T> exclusive(action: suspend () -> T): T =
-        ProcessCompute.borrow(false, Int.MAX_VALUE, ComputeWork(name = "ML Kit")) { _, _ -> action() }
+        ProcessCompute.borrow(false, Int.MAX_VALUE, ComputeWork(name = "文字認識")) { _, _ -> action() }
 }
