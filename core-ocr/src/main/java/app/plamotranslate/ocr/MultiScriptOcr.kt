@@ -30,20 +30,21 @@ interface OcrCompute {
  * 返すのは1行ずつの読み取り（[OcrLine]）。吹き出し・段落にまとめるのは呼ぶ側（中核の `LineGrouper`）。
  */
 class MultiScriptOcr(private val paddleDir: File? = null, private val compute: OcrCompute) : OcrEngine {
-    private val paddleModel = lazy { paddleDir?.let { runCatching { PaddleReader.load(it) }.getOrNull() } }
-
-    private val paddle get() = paddleModel.value
-
-    private val readers = lazy { listOfNotNull(
-        paddle,
-        MlKitReader(Source.MLKIT_ZH, TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build()), keepGlyphs = true),
-        MlKitReader(Source.MLKIT_JA, TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())),
-        MlKitReader(Source.MLKIT_KO, TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())),
-        MlKitReader(Source.MLKIT_LATIN, TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)),
-    ) }
+    private val readers = lazy {
+        val paddle = paddleDir?.let { runCatching { PaddleReader.load(it) }.getOrNull() }
+        listOfNotNull(
+            paddle,
+            MlKitReader(Source.MLKIT_ZH, TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build()), keepGlyphs = true),
+            MlKitReader(Source.MLKIT_JA, TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())),
+            MlKitReader(Source.MLKIT_KO, TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())),
+            MlKitReader(Source.MLKIT_LATIN, TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)),
+        )
+    }
 
     /** PP-OCR で読める認識器の一覧（評価・ログ用）。 */
-    suspend fun paddleSources(): Set<String> = compute.exclusive { paddle?.sources.orEmpty().map { it.name }.toSet() }
+    suspend fun paddleSources(): Set<String> = compute.exclusive {
+        readers.value.filterIsInstance<PaddleReader>().flatMap { it.sources }.map { it.name }.toSet()
+    }
 
     override suspend fun recognize(bitmap: Bitmap, language: OcrLanguage): List<OcrLine> =
         compute.exclusive { dispatcher -> read(dispatcher, bitmap, Recognizers.of(language)) }
@@ -84,7 +85,6 @@ class MultiScriptOcr(private val paddleDir: File? = null, private val compute: O
 
     override fun close() {
         if (readers.isInitialized()) readers.value.forEach { it.close() }
-        else if (paddleModel.isInitialized()) paddle?.close()
     }
 }
 

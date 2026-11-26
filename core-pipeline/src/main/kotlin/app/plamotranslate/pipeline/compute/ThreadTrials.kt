@@ -92,7 +92,7 @@ class ThreadBenchmark(val purpose: Purpose, val component: String, val version: 
         Transcription("音声認識"), LanguageIdentification("言語の判定"), Translation("翻訳"), SpeechSynthesis("読み上げ")
     }
 
-    suspend fun select(board: ThreadTrialBoard, cpuKey: String, candidates: List<Int>, valid: () -> Boolean,
+    suspend fun select(board: ThreadTrialBoard, cpuKey: String, candidates: List<Int>, valid: suspend () -> Boolean,
         range: IntRange = 1..candidates.max(), measure: suspend (ThreadTrials, Int) -> Unit): ThreadTrials {
         val key = listOf(directory?.absolutePath, component, version, cpuKey, candidates, range, SEARCH_VERSION).joinToString("|")
         val file = directory?.resolve(UUID.nameUUIDFromBytes(key.toByteArray()).toString())

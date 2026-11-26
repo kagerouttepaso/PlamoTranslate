@@ -1,5 +1,6 @@
 package app.plamotranslate.pipeline.speech
 
+import app.plamotranslate.pipeline.compute.ThreadTrialBoard
 import app.plamotranslate.pipeline.compute.ThreadBenchmark
 import app.plamotranslate.pipeline.compute.ThreadTrials
 import kotlinx.coroutines.CancellationException
@@ -45,10 +46,10 @@ object TranscriptionTuner {
     }
 
     suspend fun <T : AutoCloseable> prepare(cpus: List<TranscriptionCandidate>, allowedGpu: Boolean, preference: TranscriptionPreference,
-        environment: Environment, board: app.plamotranslate.pipeline.compute.ThreadTrialBoard, reference: Reference, store: Store,
+        environment: Environment, board: ThreadTrialBoard, reference: Reference, store: Store,
         withGpuPreparation: suspend (suspend () -> Unit) -> Unit, beginGpu: () -> Boolean, endGpu: (String?) -> Unit,
         load: suspend (TranscriptionCandidate) -> T, trial: suspend (T) -> Sample, log: (String) -> Unit = {},
-        directory: java.io.File? = null, range: IntRange = 1..cpus.maxOf { it.batch }, valid: () -> Boolean = { true }): Pair<T, TranscriptionChoice> {
+        directory: java.io.File? = null, range: IntRange = 1..cpus.maxOf { it.batch }, valid: suspend () -> Boolean = { true }): Pair<T, TranscriptionChoice> {
         val gpu = cpus.first().copy(gpu = true)
         val key = environment.cacheKey(cpus, allowedGpu && preference != TranscriptionPreference.CPU) + "/$range"
         fun cpu(count: Int) = TranscriptionCandidate(false, count, count)
@@ -134,7 +135,7 @@ object TranscriptionTuner {
             return choice
         }
 
-        fun save(choice: TranscriptionChoice) = choice.also { store.write(key, it) }
+        suspend fun save(choice: TranscriptionChoice) = choice.also { if (valid()) store.write(key, it) }
 
         suspend fun cpuOnly(reason: String): TranscriptionChoice {
             val cached = store.read(key)?.takeIf { isCpu(it.candidate) }

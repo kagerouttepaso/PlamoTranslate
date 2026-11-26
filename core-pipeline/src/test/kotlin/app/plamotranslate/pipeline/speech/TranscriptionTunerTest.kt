@@ -1,5 +1,6 @@
 package app.plamotranslate.pipeline.speech
 
+import app.plamotranslate.pipeline.compute.ThreadTrialBoard
 import app.plamotranslate.pipeline.compute.CpuTopology
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -15,7 +16,7 @@ class TranscriptionTunerTest {
         return topology.candidates(threads).map { TranscriptionCandidate(false, it, it) }
     }
     private var cpus = candidates(1)
-    private val board = app.plamotranslate.pipeline.compute.ThreadTrialBoard()
+    private val board = ThreadTrialBoard()
     private val reference = TranscriptionTuner.Reference("Hello!", "en")
     private var environment = TranscriptionTuner.Environment("a", "b", "c", "d", "e", "f", "g")
     private val choices = mutableMapOf<String, TranscriptionChoice>()

@@ -97,13 +97,8 @@ class QwenAudioRecognizer private constructor(private val session: QwenAudioSess
         ): Pair<QwenAudioRecognizer, TranscriptionChoice> {
             val topology = ProcessCompute.availableTopology()
             val candidates = topology.candidates(threads).map { TranscriptionCandidate(false, it, it) }
-            val stableStore = object : TranscriptionTuner.Store by store {
-                override fun write(key: String, choice: TranscriptionChoice) {
-                    if (ProcessCompute.availableTopology().key == topology.key) store.write(key, choice)
-                }
-            }
             return TranscriptionTuner.prepare(candidates, target.useGpu,
-                preference, environment.copy(cpu = "${environment.cpu}/${topology.key}"), ProcessCompute.trialBoard, SpeechTrialAudio.reference, stableStore,
+                preference, environment.copy(cpu = "${environment.cpu}/${topology.key}"), ProcessCompute.trialBoard, SpeechTrialAudio.reference, store,
                 { action -> LlamaRuntime.process.prepare(true, action) }, beginGpu, endGpu, { candidate ->
                     load(File(models, SharedModelCatalog.qwenWeights.path), File(models, SharedModelCatalog.qwenProjector.path),
                         nativeDir, variant, target.copy(requestGpu = candidate.gpu),
@@ -112,13 +107,14 @@ class QwenAudioRecognizer private constructor(private val session: QwenAudioSess
                 if (threads > 0) candidates.single().batch..candidates.single().batch else 1..topology.budget, { ProcessCompute.availableTopology().key == topology.key })
         }
 
-        suspend fun load(model: File, projector: File, nativeDir: String, cpuVariant: String, target: InferenceTarget, threads: Int = ProcessCompute.availableTopology().budget): QwenAudioRecognizer {
+        suspend fun load(model: File, projector: File, nativeDir: String, cpuVariant: String, target: InferenceTarget, threads: Int? = null): QwenAudioRecognizer {
             val runtime = LlamaRuntime.process
-            return ProcessCompute.borrow(target.useGpu, threads) { count, _ ->
+            val requested = threads ?: ProcessCompute.availableTopology().budget
+            return ProcessCompute.borrow(target.useGpu, requested) { count, _ ->
                 val gpu = runtime.initialize(nativeDir, cpuVariant, target)
                 check(!target.useGpu || gpu) { "GPU を使用できません。CPU 専用で起動した場合は再起動が必要です" }
                 fun loadHandle(n: Int) = runtime.native { LlamaNative.nativeLoadAudio(model.absolutePath, projector.absolutePath, gpu, n, n, n) }
-                val session = QwenAudioSession(ProcessCompute, gpu, threads, count, loadHandle(count), ::loadHandle) { handle ->
+                val session = QwenAudioSession(ProcessCompute, gpu, requested, count, loadHandle(count), ::loadHandle) { handle ->
                     runtime.native { LlamaNative.nativeFreeAudio(handle) }
                 }
                 QwenAudioRecognizer(session)

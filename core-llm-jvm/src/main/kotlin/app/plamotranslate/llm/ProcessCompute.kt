@@ -1,5 +1,6 @@
 package app.plamotranslate.llm
 
+import app.plamotranslate.pipeline.compute.ThreadTrialBoard
 import app.plamotranslate.pipeline.compute.ThreadBenchmark
 import app.plamotranslate.log.Logs
 import app.plamotranslate.pipeline.compute.ComputeResources
@@ -13,28 +14,23 @@ import kotlin.coroutines.CoroutineContext
 import java.io.File
 
 object ProcessCompute : ComputeResources {
-    internal val trialBoard = app.plamotranslate.pipeline.compute.ThreadTrialBoard()
+    internal val trialBoard = ThreadTrialBoard()
     val trialProgress = trialBoard.progress
 
     private val scheduler = ComputeScheduler { Logs.i(it) }
 
     private val windows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
 
-    private fun prepareCpuThread() {
-        if (!windows) LlamaNative.nativeResetCpuAffinity()
-    }
-
     // 貸出中に中断して別のスレッドで再開した場合も、そのスレッドで CPU の指定を広げる。
     private object Affinity : ThreadContextElement<Unit>, AbstractCoroutineContextElement(Key) {
         object Key : CoroutineContext.Key<Affinity>
-        override fun updateThreadContext(context: CoroutineContext) = prepareCpuThread()
+        override fun updateThreadContext(context: CoroutineContext) {
+            if (!windows) LlamaNative.nativeResetCpuAffinity()
+        }
         override fun restoreThreadContext(context: CoroutineContext, oldState: Unit) {}
     }
 
-    fun availableTopology(): CpuTopology {
-        prepareCpuThread()
-        return topology()
-    }
+    suspend fun availableTopology(): CpuTopology = withContext(Affinity) { topology() }
 
     private fun topology(): CpuTopology {
         if (windows) {
