@@ -7,30 +7,34 @@ import java.nio.file.StandardCopyOption
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** 一つの候補でならした後に同じ入力を3回測る。中央値の絶対偏差を通常の揺れ幅とする。 */
+/**
+ * 一つの候補でならした後に同じ入力を3回測る。中央値の絶対偏差を通常の揺れ幅とする。
+ * ならしにはスレッド数ごとに違う初回だけの費用（スレッドや作業領域の用意）が入るので、比べるのは本計測だけにする。
+ * 本計測の2回が計測済みの最速候補の最も遅い回より遅ければ、中央値がその回を超えて負けが決まるので残りを測らない。
+ * 1回だけの遅れ（メモリの回収などほかのプロセスによる一時の止まり）では閉じない。
+ */
 class ThreadTrials {
-    private var bestWarmup = Long.MAX_VALUE
-    private var bestMedian = Long.MAX_VALUE
     private val samples = sortedMapOf<Int, List<Long>>()
+    private val fastest get() = samples.values.minByOrNull { it[1] }
 
     suspend fun measure(count: Int, sample: suspend () -> Long, log: (String) -> Unit): Long? {
         val warmup = sample()
-        if (warmup > bestWarmup) {
-            log("${count}本 ならし=${warmup}ns 打ち切り")
-            return null
+        val slowestOfFastest = fastest?.last()
+        val measured = mutableListOf<Long>()
+        repeat(3) {
+            measured += sample()
+            if (slowestOfFastest != null && measured.count { it > slowestOfFastest } >= 2) {
+                log("${count}本 ならし=${warmup}ns 本計測=${measured}ns 最速の最も遅い回=${slowestOfFastest}ns 打ち切り")
+                return null
+            }
         }
-        val times = List(3) { sample() }.sorted()
+        val times = measured.sorted()
         samples[count] = times
-        val median = times[1]
         log("${count}本 ならし=${warmup}ns 本計測=${times}ns")
-        if (median < bestMedian) {
-            bestWarmup = warmup
-            bestMedian = median
-        }
-        return median
+        return times[1]
     }
 
-    val fastestMedian get() = bestMedian
+    val fastestMedian get() = fastest?.get(1) ?: Long.MAX_VALUE
 
     fun median(count: Int) = samples.getValue(count)[1]
 
@@ -42,16 +46,11 @@ class ThreadTrials {
         }.key
     }
 
-    fun encode() = "$bestWarmup,$bestMedian\n" + samples.entries.joinToString("\n") { (n, times) -> (listOf(n) + times).joinToString(",") }
+    fun encode() = samples.entries.joinToString("\n") { (n, times) -> (listOf(n) + times).joinToString(",") }
 
     companion object {
         fun decode(data: String): ThreadTrials = ThreadTrials().apply {
-            val lines = data.lines()
-            val baseline = lines.first().split(',').map(String::toLong)
-            require(baseline.size == 2)
-            bestWarmup = baseline.first()
-            bestMedian = baseline.last()
-            lines.drop(1).forEach { line ->
+            data.lines().forEach { line ->
                 val values = line.split(',').map(String::toLong)
                 require(values.size == 4 && values.first() in 1..Int.MAX_VALUE.toLong())
                 val times = values.drop(1)
@@ -67,7 +66,7 @@ class ThreadBenchmark(val component: String, val version: String, private val di
     val sample: suspend (Int) -> Long) {
     suspend fun select(cpuKey: String, candidates: List<Int>, valid: () -> Boolean,
         measure: suspend (ThreadTrials, Int) -> Unit): ThreadTrials {
-        val key = listOf(directory?.absolutePath, component, version, cpuKey, candidates, "mad-2").joinToString("|")
+        val key = listOf(directory?.absolutePath, component, version, cpuKey, candidates, "mad-4").joinToString("|")
         val file = directory?.resolve(UUID.nameUUIDFromBytes(key.toByteArray()).toString())
         val lock = synchronized(locks) { locks.getOrPut(key) { Mutex() } }
         return lock.withLock {

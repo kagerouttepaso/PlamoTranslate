@@ -28,7 +28,7 @@ object TranscriptionTuner {
     data class Environment(val weights: String, val projector: String, val runtime: String, val platform: String,
         val cpu: String, val device: String, val fixture: String) {
         fun cacheKey(candidates: List<TranscriptionCandidate>, gpu: Boolean): String =
-            listOf(weights, projector, runtime, platform, cpu, device, fixture, candidates, gpu, "3:$GPU_RATIO")
+            listOf(weights, projector, runtime, platform, cpu, device, fixture, candidates, gpu, "5:$GPU_RATIO")
                 .joinToString { "${it.toString().length}:$it" }
     }
 

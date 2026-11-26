@@ -20,6 +20,35 @@ class ThreadTrialsTest {
         assertEquals(2, ThreadTrials.decode(curve.encode()).preferred())
     }
 
+    @Test fun ならしの初回費用が大きくても本計測が速い候補を測って選ぶ() = runTest {
+        val curve = ThreadTrials()
+        // 15T Pro の Qwen3-ASR：4本はならしに初回の用意が入って1本より遅いが、本計測では速い。
+        for ((n, samples) in listOf(1 to listOf(974L, 929L, 936L, 964L), 4 to listOf(1060L, 730L, 725L, 740L))) {
+            val iterator = samples.iterator()
+            curve.measure(n, { iterator.next() }) {}
+        }
+        assertEquals(4, curve.preferred())
+    }
+
+    @Test fun 本計測の2回が最速の最も遅い回より遅ければ残りを測らない() = runTest {
+        val curve = ThreadTrials()
+        var runs = 0
+        curve.measure(4, { runs++; 100L }) {}
+        assertEquals(null, curve.measure(6, { runs++; 3600L }) {})
+        assertEquals(7, runs)
+        assertEquals(4, curve.preferred())
+    }
+
+    @Test fun 本計測の1回だけの遅れでは閉じずに中央値で比べる() = runTest {
+        val curve = ThreadTrials()
+        // 15T Pro の Qwen3-ASR：4本の本計測の1回目がメモリの回収と重なって遅れた。
+        for ((n, samples) in listOf(1 to listOf(980L, 930L, 945L, 952L), 4 to listOf(727L, 1763L, 730L, 740L))) {
+            val iterator = samples.iterator()
+            curve.measure(n, { iterator.next() }) {}
+        }
+        assertEquals(4, curve.preferred())
+    }
+
     @Test fun 同じ部品と版とCPUの組でだけ保存した関係を使う() = runTest {
         val dir = Files.createTempDirectory("threads").toFile()
         var measurements = 0

@@ -117,7 +117,7 @@ class TranscriptionTunerTest {
         assertEquals(selected, TranscriptionChoice.decode(choices.values.single().encode()))
         assertEquals(selected, prepare(1, preference = preference))
         assertEquals(candidates + fastest, engines.map { it.candidate })
-        assertEquals(listOf(4, 4, 1, 1), engines.map { it.trials })
+        assertEquals(listOf(4, 4, 3, 1), engines.map { it.trials })
 
         environment = environment.copy(runtime = "別")
         assertEquals(selected, prepare(1, preference = preference))
@@ -125,7 +125,7 @@ class TranscriptionTunerTest {
         assertEquals(listOf(TranscriptionCandidate(false, 2, 2)), cpus)
         assertEquals(cpus.single(), prepare(1, preference = preference).candidate)
         assertEquals(candidates + cpus, engines.drop(4).map { it.candidate })
-        assertEquals(listOf(4, 4, 1, 4), engines.drop(4).map { it.trials })
+        assertEquals(listOf(4, 4, 3, 4), engines.drop(4).map { it.trials })
         assertEquals(0, gpuEntries)
         assertEquals(0, gpuEnds)
     }
@@ -158,12 +158,12 @@ class TranscriptionTunerTest {
             candidates(6))
     }
 
-    @Test fun `ならしが首位より遅いCPUとGPUを閉じ首位を保存する`() = runTest {
+    @Test fun `本計測の2回が首位の最も遅い回より遅いCPUとGPUを閉じ首位を保存する`() = runTest {
         cpus = candidates(8)
         cpuTimes[cpus[1]] = 50L
         cpuTimes[cpus[2]] = 201L
         val choice = prepare(201)
-        assertEquals(listOf(4, 4, 1, 1), engines.map { it.trials })
+        assertEquals(listOf(4, 4, 3, 3), engines.map { it.trials })
         assertTrue(engines.all { it.closed })
         assertNull(fallback)
         assertEquals(cpus[1], choice.candidate)
@@ -181,7 +181,7 @@ class TranscriptionTunerTest {
         assertEquals(2, choices.size)
     }
 
-    @Test fun `ならしが首位と同じなら3回計測する`() = runTest {
+    @Test fun `本計測が首位と同じなら3回計測する`() = runTest {
         prepare(100)
         assertEquals(listOf(4, 4), engines.map { it.trials })
     }
